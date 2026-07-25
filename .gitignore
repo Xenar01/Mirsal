@@ -1,0 +1,27 @@
+# dependencies
+node_modules/
+**/node_modules/
+
+# build output
+dist/
+build/
+web/dist/
+
+# runtime data (never commit user files / db / secrets)
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# secrets & env
+.env
+.env.*
+!.env.example
+creds.txt
+
+# logs & tmp
+*.log
+npm-debug.log*
+.DS_Store
+coverage/
+.vite/
