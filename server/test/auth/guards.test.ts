@@ -69,28 +69,28 @@ function makeReply(): FastifyReply & { codes: number[] } {
   return reply as unknown as FastifyReply & { codes: number[] };
 }
 
-test('requireAuth: missing session cookie -> 401, req.user unset', () => {
+test('requireAuth: missing session cookie -> 401, req.user unset', async () => {
   const { requireAuth } = makeGuards({ db: db!, csrfSecret: CSRF_SECRET, now: () => Date.now() });
   const req = makeReq({});
   const reply = makeReply();
 
-  requireAuth(req, reply);
+  await requireAuth(req, reply);
 
   expect(reply.codes).toEqual([401]);
   expect(req.user).toBeUndefined();
 });
 
-test('requireAuth: unknown/invalid session token -> 401', () => {
+test('requireAuth: unknown/invalid session token -> 401', async () => {
   const { requireAuth } = makeGuards({ db: db!, csrfSecret: CSRF_SECRET, now: () => Date.now() });
   const req = makeReq({ cookie: 'not-a-real-token' });
   const reply = makeReply();
 
-  requireAuth(req, reply);
+  await requireAuth(req, reply);
 
   expect(reply.codes).toEqual([401]);
 });
 
-test('requireAuth: valid session + GET (safe method) -> sets req.user, no CSRF required', () => {
+test('requireAuth: valid session + GET (safe method) -> sets req.user, no CSRF required', async () => {
   const uid = seedUser('user');
   const now = Date.now();
   const { token } = createSession(db!, uid, now);
@@ -98,13 +98,13 @@ test('requireAuth: valid session + GET (safe method) -> sets req.user, no CSRF r
   const req = makeReq({ cookie: token, method: 'GET' });
   const reply = makeReply();
 
-  requireAuth(req, reply);
+  await requireAuth(req, reply);
 
   expect(reply.codes).toEqual([]);
   expect(req.user).toEqual({ id: uid, role: 'user', mustChangePassword: false });
 });
 
-test('requireAuth: valid session + POST without CSRF header -> 403', () => {
+test('requireAuth: valid session + POST without CSRF header -> 403', async () => {
   const uid = seedUser('user');
   const now = Date.now();
   const { token } = createSession(db!, uid, now);
@@ -112,12 +112,12 @@ test('requireAuth: valid session + POST without CSRF header -> 403', () => {
   const req = makeReq({ cookie: token, method: 'POST' });
   const reply = makeReply();
 
-  requireAuth(req, reply);
+  await requireAuth(req, reply);
 
   expect(reply.codes).toEqual([403]);
 });
 
-test('requireAuth: valid session + POST with a forged CSRF header -> 403', () => {
+test('requireAuth: valid session + POST with a forged CSRF header -> 403', async () => {
   const uid = seedUser('user');
   const now = Date.now();
   const { token } = createSession(db!, uid, now);
@@ -125,12 +125,12 @@ test('requireAuth: valid session + POST with a forged CSRF header -> 403', () =>
   const req = makeReq({ cookie: token, method: 'POST', csrf: 'forged' });
   const reply = makeReply();
 
-  requireAuth(req, reply);
+  await requireAuth(req, reply);
 
   expect(reply.codes).toEqual([403]);
 });
 
-test('requireAuth: valid session + POST with the matching CSRF header -> passes', () => {
+test('requireAuth: valid session + POST with the matching CSRF header -> passes', async () => {
   const uid = seedUser('user');
   const now = Date.now();
   const { token } = createSession(db!, uid, now);
@@ -138,13 +138,13 @@ test('requireAuth: valid session + POST with the matching CSRF header -> passes'
   const req = makeReq({ cookie: token, method: 'POST', csrf: issueCsrf(token) });
   const reply = makeReply();
 
-  requireAuth(req, reply);
+  await requireAuth(req, reply);
 
   expect(reply.codes).toEqual([]);
   expect(req.user).toEqual({ id: uid, role: 'user', mustChangePassword: false });
 });
 
-test('requireAdmin: valid session with role "user" -> 403', () => {
+test('requireAdmin: valid session with role "user" -> 403', async () => {
   const uid = seedUser('user');
   const now = Date.now();
   const { token } = createSession(db!, uid, now);
@@ -152,12 +152,12 @@ test('requireAdmin: valid session with role "user" -> 403', () => {
   const req = makeReq({ cookie: token, method: 'GET' });
   const reply = makeReply();
 
-  requireAdmin(req, reply);
+  await requireAdmin(req, reply);
 
   expect(reply.codes).toEqual([403]);
 });
 
-test('requireAdmin: valid session with role "admin" -> passes', () => {
+test('requireAdmin: valid session with role "admin" -> passes', async () => {
   const uid = seedUser('admin');
   const now = Date.now();
   const { token } = createSession(db!, uid, now);
@@ -165,18 +165,39 @@ test('requireAdmin: valid session with role "admin" -> passes', () => {
   const req = makeReq({ cookie: token, method: 'GET' });
   const reply = makeReply();
 
-  requireAdmin(req, reply);
+  await requireAdmin(req, reply);
 
   expect(reply.codes).toEqual([]);
   expect(req.user?.role).toBe('admin');
 });
 
-test('requireAdmin: missing session -> 401 (not 403 — requireAuth short-circuits first)', () => {
+test('requireAdmin: missing session -> 401 (not 403 — requireAuth short-circuits first)', async () => {
   const { requireAdmin } = makeGuards({ db: db!, csrfSecret: CSRF_SECRET, now: () => Date.now() });
   const req = makeReq({});
   const reply = makeReply();
 
-  requireAdmin(req, reply);
+  await requireAdmin(req, reply);
 
   expect(reply.codes).toEqual([401]);
+});
+
+test('requireAuth/requireAdmin return real Promises so a real Fastify preHandler chain awaits them instead of hanging forever', async () => {
+  // Regression test for the review finding: a 2-arg Fastify preHandler that
+  // never calls `done` and never returns a Promise is never awaited by
+  // Fastify — the request hangs forever (route handler never runs, no
+  // response is ever sent). Asserting a genuine thenable is returned (and
+  // that it resolves) is what guarantees real wiring in Phase H won't hang.
+  const { requireAuth, requireAdmin } = makeGuards({
+    db: db!,
+    csrfSecret: CSRF_SECRET,
+    now: () => Date.now(),
+  });
+
+  const authResult = requireAuth(makeReq({}), makeReply());
+  expect(authResult).toBeInstanceOf(Promise);
+  await expect(authResult).resolves.toBeUndefined();
+
+  const adminResult = requireAdmin(makeReq({}), makeReply());
+  expect(adminResult).toBeInstanceOf(Promise);
+  await expect(adminResult).resolves.toBeUndefined();
 });

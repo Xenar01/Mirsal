@@ -33,8 +33,8 @@ export interface GuardDeps {
 }
 
 export interface Guards {
-  requireAuth(req: FastifyRequest, reply: FastifyReply): void;
-  requireAdmin(req: FastifyRequest, reply: FastifyReply): void;
+  requireAuth(req: FastifyRequest, reply: FastifyReply): Promise<void>;
+  requireAdmin(req: FastifyRequest, reply: FastifyReply): Promise<void>;
 }
 
 /**
@@ -42,11 +42,19 @@ export interface Guards {
  * dependencies (db, CSRF secret, clock) — mirrors the createCsrf/
  * createPasswordService factory shape so the guards are testable without a
  * running server. Route wiring happens in Phase H.
+ *
+ * Both preHandlers are declared `async` (and therefore always return a real
+ * `Promise<void>`), even though their bodies are fully synchronous. This is
+ * required by Fastify's hook contract: a 2-arg preHandler (no `done`
+ * callback) that returns a non-thenable value is never awaited by Fastify,
+ * so the request hangs forever — the handler never runs and no response is
+ * ever sent. Returning a genuine Promise lets Fastify know exactly when the
+ * preHandler has finished, whether or not it ever calls `reply.send()`.
  */
 export function makeGuards({ db, csrfSecret, now }: GuardDeps): Guards {
   const { verifyCsrf } = createCsrf(csrfSecret);
 
-  function requireAuth(req: FastifyRequest, reply: FastifyReply): void {
+  async function requireAuth(req: FastifyRequest, reply: FastifyReply): Promise<void> {
     const token = req.cookies[SESSION_COOKIE];
     const session = token ? validateSession(db, token, now()) : null;
 
@@ -70,8 +78,8 @@ export function makeGuards({ db, csrfSecret, now }: GuardDeps): Guards {
     }
   }
 
-  function requireAdmin(req: FastifyRequest, reply: FastifyReply): void {
-    requireAuth(req, reply);
+  async function requireAdmin(req: FastifyRequest, reply: FastifyReply): Promise<void> {
+    await requireAuth(req, reply);
     if (reply.sent) return;
 
     if (req.user?.role !== 'admin') {
