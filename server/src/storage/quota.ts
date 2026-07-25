@@ -23,7 +23,11 @@ export function reserve(db: Database.Database, userId: number, bytes: number, no
 /**
  * Adjusts `used_bytes` by the delta between the real byte count (`actual`)
  * and what was reserved up front (`reserved`), once an upload completes.
- * The delta may be negative (upload came in smaller than reserved).
+ * The delta may be negative (upload came in smaller than reserved). Floors
+ * at 0 — used_bytes never goes negative, even if a concurrent release/
+ * subtract on the same user already dropped it below `reserved` by the
+ * time this runs (otherwise the delta could drive the counter negative,
+ * corrupting the quota ledger for that user going forward).
  * Matches the plan's 4-arg signature exactly — does not touch updated_at.
  */
 export function commitActual(
@@ -32,9 +36,9 @@ export function commitActual(
   reserved: number,
   actual: number
 ): void {
-  db.prepare('UPDATE users SET used_bytes = used_bytes + (@actual - @reserved) WHERE id = @userId').run(
-    { userId, reserved, actual }
-  );
+  db.prepare(
+    'UPDATE users SET used_bytes = MAX(0, used_bytes + (@actual - @reserved)) WHERE id = @userId'
+  ).run({ userId, reserved, actual });
 }
 
 /**

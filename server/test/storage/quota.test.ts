@@ -132,3 +132,31 @@ test('subtract floors used_bytes at 0, never negative', () => {
 
   expect(usedBytesOf(uid)).toBe(0);
 });
+
+test('commitActual floors at 0 rather than going negative', () => {
+  const uid = seedUser({ quotaBytes: 1000, usedBytes: 20 });
+
+  // Delta (actual - reserved) = -100, which on its own would drive
+  // used_bytes to -80. Must clamp at 0 instead.
+  commitActual(db!, uid, 100, 0);
+
+  expect(usedBytesOf(uid)).toBe(0);
+});
+
+test('commitActual floors at 0 when interleaved with a concurrent release/subtract', () => {
+  const uid = seedUser({ quotaBytes: 1000, usedBytes: 0 });
+  const now = Date.now();
+  reserve(db!, uid, 100, now); // used_bytes = 100
+
+  // Simulate a concurrent release/subtract on the same user racing ahead
+  // of commitActual (e.g. a separate cleanup path already dropped the
+  // reservation before the real upload size was known).
+  release(db!, uid, 100); // used_bytes = 0
+  subtract(db!, uid, 0); // no-op, still 0
+
+  // commitActual now applies its delta against the already-drained
+  // counter. Without a floor this would go to -20.
+  commitActual(db!, uid, 100, 80);
+
+  expect(usedBytesOf(uid)).toBe(0);
+});
