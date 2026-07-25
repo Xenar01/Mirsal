@@ -19,6 +19,9 @@ data/
 !.env.example
 creds.txt
 
+# SDD orchestration workspace (ledger, briefs, reports — scratch)
+.superpowers/
+
 # logs & tmp
 *.log
 npm-debug.log*
