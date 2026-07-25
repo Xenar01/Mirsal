@@ -28,13 +28,14 @@ The two lifecycle axes are **independent**: deleting the file vs. expiring the s
 - Runs lean on a memory-constrained box (single container, SQLite, ~250 MB runtime RAM).
 - Arabic-first, full RTL; distinctive "sealed dispatch" visual identity.
 
-### Confirmed product decisions (see §13 for the ones awaiting user OK)
+### Confirmed product decisions (user-confirmed 2026-07-25)
+- **Brand name: Mirsal / مِرسال.**
 - **Admin cannot read user file contents.** Admin manages users/quotas/shares and sees metadata
-  (names, sizes, dates, share status) only — never opens/downloads another user's file. *(default; confirm)*
-- **Auto-delete routes through Trash with a grace window**, not an instant irreversible purge: at
+  (names, sizes, dates, share status) only — never opens/downloads another user's file.
+- **Auto-delete routes through Trash with a 7-day grace window**, not an instant irreversible purge: at
   `auto_delete_at` the item is trashed (removed from the user's live view, its shares 410) and its blob
-  is purged after a **7-day grace**. This keeps the "self-destruct" promise recoverable. *(default; confirm)*
-- **Quotas are optional per user** (blank = unlimited) with usage always visible. *(default; confirm)*
+  is purged after a **7-day grace**. Keeps the "self-destruct" promise recoverable.
+- **Quotas are optional per user** (blank = unlimited) with usage always visible.
 - **Folder shares offer a streamed "Download all as ZIP"** plus per-file download.
 
 ### Non-goals (v1 — YAGNI)
@@ -490,11 +491,11 @@ immediately even before the next tick; re-toggling `is_active` with a past `expi
 
 ---
 
-## 13. What the user provides / decisions to confirm
-1. **Review this spec** (or edit).
-2. **Brand name** — default **Mirsal / مِرسال**.
-3. Confirm the three defaults in §1: (a) admin cannot read user file contents; (b) auto-delete routes
-   through Trash with a 7-day grace (recoverable) vs instant hard purge; (c) optional per-user quotas.
+## 13. What the user provides / decisions
+1. ~~Review this spec~~ — **approved 2026-07-25**.
+2. ~~Brand name~~ — **Mirsal / مِرسال** (confirmed).
+3. ~~Three defaults~~ — **all confirmed** (§1): admin metadata-only; auto-delete → Trash + 7-day grace;
+   optional per-user quotas.
 4. Nothing else unblocks launch — project4 cert + route are ready; agent verifies the local chain and flags
    if IT must re-confirm the public route.
 
