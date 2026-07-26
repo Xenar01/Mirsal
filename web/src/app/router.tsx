@@ -1,5 +1,4 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
 import LoginPage from '../features/auth/LoginPage';
 import ChangePasswordPage from '../features/auth/ChangePasswordPage';
 import RequireAuth from '../features/auth/RequireAuth';
@@ -7,20 +6,7 @@ import DriveView from '../features/dashboard/DriveView';
 import TrashView from '../features/dashboard/TrashView';
 import SharedView from '../features/dashboard/share/SharedView';
 import AdminPanel from '../features/admin/AdminPanel';
-
-/**
- * Minimal i18n heading placeholder. The real dashboard/admin/trash/shared/
- * public UIs are Phase J — the public `/s/:token` page is a later task, so it
- * keeps this heading-only placeholder for now.
- */
-function PagePlaceholder({ titleKey }: { titleKey: string }) {
-  const { t } = useTranslation();
-  return (
-    <main className="min-h-dvh bg-paper text-ink">
-      <h1 className="font-display">{t(titleKey)}</h1>
-    </main>
-  );
-}
+import SealedDispatch from '../features/public/SealedDispatch';
 
 /**
  * App route table. Uses `<Routes>` (not a data router) so it can be mounted
@@ -31,9 +17,9 @@ export default function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      {/* Public share page (no auth); its server-side Referrer-Policy delivery
-          is a later task. Placeholder heading only for now. */}
-      <Route path="/s/:token" element={<PagePlaceholder titleKey="public.title" />} />
+      {/* Public sealed-dispatch page (no auth). Bilingual (AR default, EN toggle
+          flips to LTR); the server delivers Referrer-Policy: no-referrer. */}
+      <Route path="/s/:token" element={<SealedDispatch />} />
 
       <Route
         path="/"

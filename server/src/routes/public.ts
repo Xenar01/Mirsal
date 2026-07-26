@@ -204,7 +204,13 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
     const liveness = isShareLive(db, share, now());
     if (!liveness.live) {
       if (liveness.reason === 'stopped' || liveness.reason === 'expired') {
-        reply.code(410).send({ error: 'gone' });
+        // The 410 already reveals the token exists, so carrying WHY (stopped vs
+        // expired) + the expiry epoch is not a new oracle — it lets the public
+        // page render the distinct §3.5/§4.9 copy ("turned this link off" vs
+        // "expired on <date>"). `gone` (trashed/auto-deleted/missing node)
+        // deliberately stays an ambiguous 404 below, so a live-but-off link is
+        // never distinguishable from a deleted one.
+        reply.code(410).send({ error: 'gone', reason: liveness.reason, expires_at: share.expires_at });
       } else {
         reply.code(404).send({ error: 'not_found' });
       }

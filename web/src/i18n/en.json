@@ -1,10 +1,24 @@
 {
   "public": {
     "title": "Shared link",
+    "framingFile": "A file was sent to you via Mirsal",
+    "framingFolder": "A folder was sent to you via Mirsal",
+    "download": "Download",
+    "downloadAll": "Download all as ZIP",
     "notFound": "This link doesn't exist.",
     "stopped": "The sender turned this link off.",
     "expired": "This link expired on {{date}}.",
     "passwordGate": "This file is password-protected.",
-    "wrongPassword": "Incorrect password. {{count}} attempts left."
+    "passwordLabel": "Password",
+    "unlock": "Unlock",
+    "wrongPassword": "Incorrect password. {{count}} attempts left.",
+    "wrongPasswordNoCount": "Incorrect password.",
+    "tooManyAttempts": "Too many attempts. Please wait and try again.",
+    "loading": "Loading…",
+    "error": "Couldn't open this link. Try again.",
+    "retry": "Try again",
+    "folderEmpty": "This folder is empty.",
+    "toEnglish": "English",
+    "toArabic": "العربية"
   }
 }

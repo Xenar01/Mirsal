@@ -481,6 +481,68 @@ test('lifecycle: stopped -> 410, expired (past) -> 410 without a tick, revoked -
   expect(revokedRes.statusCode).toBe(404);
 });
 
+test('410 distinguishes stopped from expired (reason + expires_at); unknown + gone-node stay ambiguous 404', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'reason.txt', data: Buffer.from('R') });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+
+  // Stopped (is_active=0, no expiry) -> 410 carries reason:'stopped' and expires_at:null,
+  // so the public page can show the §4.9 "sender turned this link off" copy.
+  await built.inject({
+    method: 'PATCH',
+    url: `/api/shares/${share.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { is_active: false },
+  });
+  const stoppedRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}` });
+  expect(stoppedRes.statusCode).toBe(410);
+  expect(stoppedRes.json()).toEqual({ error: 'gone', reason: 'stopped', expires_at: null });
+
+  // Reactivate + a PAST expiry -> 410 carries reason:'expired' and the expiry epoch, so the page
+  // can show the §4.9 "expired on <date>" copy with a real date. (Evaluated at request time.)
+  const past = NOW - 1000;
+  await built.inject({
+    method: 'PATCH',
+    url: `/api/shares/${share.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { is_active: true, expires_at: past },
+  });
+  const expiredRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}` });
+  expect(expiredRes.statusCode).toBe(410);
+  expect(expiredRes.json()).toEqual({ error: 'gone', reason: 'expired', expires_at: past });
+
+  // An unknown token stays an ambiguous 404 (never a reason/oracle).
+  const unknownRes = await built.inject({ method: 'GET', url: '/api/public/nope-not-a-token' });
+  expect(unknownRes.statusCode).toBe(404);
+  expect(unknownRes.json()).toEqual({ error: 'not_found' });
+
+  // A GONE node (shared node trashed) must ALSO stay an ambiguous 404 — the 410 reason path
+  // must NOT fire for 'gone', so a stopped/expired link is never distinguishable from a
+  // trashed/auto-deleted one via the reason field.
+  await built.inject({
+    method: 'PATCH',
+    url: `/api/shares/${share.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { is_active: true, expires_at: null },
+  });
+  expect((await built.inject({ method: 'GET', url: `/api/public/${share.token}` })).statusCode).toBe(200);
+  await built.inject({
+    method: 'POST',
+    url: `/api/nodes/${file.id}/trash`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+  });
+  const goneRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}` });
+  expect(goneRes.statusCode).toBe(404);
+  expect(goneRes.json()).toEqual({ error: 'not_found' });
+});
+
 test('download is refused when allow_download is off -> 403', async () => {
   const built = await makeApp();
   const uid = await seedUser('alice', 'pw');
