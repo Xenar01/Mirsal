@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
@@ -7,7 +8,7 @@ import type { PasswordService } from '../auth/passwords.js';
 import { revokeAllForUser } from '../auth/sessions.js';
 import { randomToken } from '../util/ids.js';
 import { writeAudit } from '../audit.js';
-import { ownerStatus, type Share } from '../shares/shares.js';
+import { ownerStatus } from '../shares/shares.js';
 
 export interface AdminRouteDeps {
   db: Database.Database;
@@ -65,6 +66,26 @@ interface AdminNodeDto {
 const NODE_METADATA_COLUMNS =
   'id, parent_id, kind, name, size_bytes, mime_type, trashed_at, auto_delete_at, created_at';
 
+/**
+ * Raw joined row for `GET /api/admin/shares`. Deliberately has NO `token`
+ * field — the query never selects `shares.token` (see the handler) so the
+ * bearer capability for the public content routes can never be projected
+ * into the admin response, even by accident.
+ */
+interface AdminShareRow {
+  id: number;
+  node_id: number;
+  owner_id: number;
+  password_hash: string | null;
+  is_active: number;
+  expires_at: number | null;
+  allow_download: number;
+  created_at: number;
+  owner_username: string;
+  owner_is_active: number;
+  node_name: string | null;
+}
+
 // Username: a safe display+login handle (spec §8 — trusted display strings,
 // never path segments). Bounded length; ASCII letters/digits and a small set
 // of separators only, so it can never contain control chars, whitespace, or
@@ -115,6 +136,32 @@ function activeAdminCount(db: Database.Database): number {
     c: number;
   };
   return row.c;
+}
+
+/**
+ * `audit_log.action` values whose `target` column holds a secret rather than
+ * a plain DB-id reference. Currently only `share_unlock_failure` (written by
+ * routes/public.ts on a failed `/unlock` attempt) stores the literal share
+ * token as `target` — an unauthenticated bearer capability for the public
+ * `/api/public/:token/*` content routes. `GET /api/admin/audit` must never
+ * hand that to the admin role verbatim (it would defeat H5's "admin has no
+ * content path" invariant just as surely as `GET /shares` returning it
+ * would). Any future action whose `target` stores a token/secret must be
+ * added here.
+ */
+const AUDIT_TARGET_IS_SECRET = new Set(['share_unlock_failure']);
+
+/**
+ * Redacts a secret-valued `target` (see {@link AUDIT_TARGET_IS_SECRET}) to a
+ * stable, non-reversible correlation id — a truncated sha256 of the raw
+ * value — so an admin can still see "this same share was probed repeatedly"
+ * without ever being handed a live bearer token. The token is 32 bytes of
+ * `randomToken` randomness, so its hash cannot be feasibly reversed.
+ * Non-secret targets (plain numeric DB-id strings) pass through unchanged.
+ */
+function redactAuditTarget(action: string, target: string | null): string | null {
+  if (target === null || !AUDIT_TARGET_IS_SECRET.has(action)) return target;
+  return `redacted:${createHash('sha256').update(target).digest('hex').slice(0, 16)}`;
 }
 
 /** True when the caught error is a SQLite UNIQUE-constraint violation (duplicate username). */
@@ -275,18 +322,31 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
     // or written to the audit detail.
     const generated = parsed.data.password === undefined ? randomToken(GENERATED_PASSWORD_BYTES) : null;
     const plaintext = parsed.data.password ?? generated!;
+    // `hashPassword` is async — the existence check above ran before this
+    // await, so the user could have been deleted (by a concurrent request)
+    // during the gap. Re-verify atomically as part of the UPDATE itself (its
+    // own `WHERE id = @id` against the CURRENT table) rather than trusting
+    // the earlier SELECT: `info.changes === 0` means the row is gone, and the
+    // transaction below skips the session-revoke + audit write and the route
+    // reports a real 404 instead of a phantom success.
     const hash = await passwordService.hashPassword(plaintext);
     const nowMs = now();
 
     const run = db.transaction(() => {
-      db.prepare(
-        'UPDATE users SET password_hash = @hash, must_change_password = 1, updated_at = @now WHERE id = @id'
-      ).run({ hash, now: nowMs, id });
+      const info = db
+        .prepare('UPDATE users SET password_hash = @hash, must_change_password = 1, updated_at = @now WHERE id = @id')
+        .run({ hash, now: nowMs, id });
+      if (info.changes === 0) return false;
       // Reset severs every existing session — the old password is dead.
       revokeAllForUser(db, id);
       writeAudit(db, { actorId: req.user!.id, action: 'user_password_reset', target: String(id) }, now);
+      return true;
     });
-    run();
+    const updated = run();
+    if (!updated) {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
 
     reply.code(200).send(generated !== null ? { password: generated } : { ok: true });
   });
@@ -364,9 +424,15 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
 
   app.get('/api/admin/shares', { preHandler: guards.requireAdmin }, async (_req, reply) => {
     const nowMs = now();
+    // Deliberately does NOT select `s.token`: the token is a fully
+    // unauthenticated bearer capability for the public /api/public/:token/*
+    // content routes (routes/public.ts) — handing it to the admin panel would
+    // give the admin role a content path, defeating H5's metadata-only
+    // invariant (spec §3.1/§7). The share is identified to the admin by its
+    // own row id (`id`) instead; force-revoke below is by that id too.
     const rows = db
       .prepare(
-        `SELECT s.id AS id, s.node_id AS node_id, s.owner_id AS owner_id, s.token AS token,
+        `SELECT s.id AS id, s.node_id AS node_id, s.owner_id AS owner_id,
                 s.password_hash AS password_hash, s.is_active AS is_active, s.expires_at AS expires_at,
                 s.allow_download AS allow_download, s.created_at AS created_at,
                 u.username AS owner_username, u.is_active AS owner_is_active, n.name AS node_name
@@ -375,9 +441,7 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
          LEFT JOIN nodes n ON n.id = s.node_id
          ORDER BY s.created_at DESC, s.id DESC`
       )
-      .all() as Array<
-      Share & { owner_username: string; owner_is_active: number; node_name: string | null }
-    >;
+      .all() as AdminShareRow[];
 
     const dtos = rows.map((r) => ({
       id: r.id,
@@ -388,7 +452,6 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
       // shares wants to see shares belonging to deactivated users too.
       owner_active: !!r.owner_is_active,
       node_name: r.node_name,
-      token: r.token,
       is_active: !!r.is_active,
       has_password: r.password_hash !== null,
       expires_at: r.expires_at,
@@ -437,7 +500,17 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
       .prepare(
         'SELECT id, actor_id, action, target, detail, created_at FROM audit_log ORDER BY id DESC LIMIT @limit OFFSET @offset'
       )
-      .all({ limit, offset });
-    reply.code(200).send(rows);
+      .all({ limit, offset }) as Array<{
+      id: number;
+      actor_id: number | null;
+      action: string;
+      target: string | null;
+      detail: string | null;
+      created_at: number;
+    }>;
+    // Redact any secret-valued target (see redactAuditTarget) before it ever
+    // leaves the process — the admin role must never receive a live token.
+    const dtos = rows.map((r) => ({ ...r, target: redactAuditTarget(r.action, r.target) }));
+    reply.code(200).send(dtos);
   });
 }

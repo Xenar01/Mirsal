@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
+import argon2 from 'argon2';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance, InjectOptions } from 'fastify';
 import { openDb } from '../../src/db/connection.js';
@@ -354,6 +355,44 @@ test('POST /api/admin/users/:id/password with an explicit password uses it (and 
   expect(newLogin.statusCode).toBe(200);
 });
 
+test('POST /api/admin/users/:id/password: user deleted during the hashPassword await -> 404, no phantom audit row', async () => {
+  const built = await makeApp();
+  await seedUser('root', 'adminpw', { role: 'admin' });
+  const aliceId = await seedUser('alice', 'oldpw', { role: 'user' });
+  const admin = await login(built, 'root', 'adminpw');
+
+  // The route's existence check runs, finds alice, then awaits
+  // `passwordService.hashPassword`. Simulate a concurrent DELETE landing
+  // precisely inside that await gap by deleting alice from inside a mocked
+  // `argon2.hash` before it resolves (mirrors the createShare TOCTOU test in
+  // test/shares/shares.test.ts). If the route only re-checked existence
+  // before the await and blindly UPDATEd/audited afterward, this would still
+  // report a fake 200 success and write a `user_password_reset` row for a
+  // user that no longer exists.
+  const originalHash = argon2.hash.bind(argon2);
+  const spy = vi.spyOn(argon2, 'hash').mockImplementation(async (password, options) => {
+    db!.prepare('DELETE FROM users WHERE id = ?').run(aliceId);
+    return originalHash(password, options);
+  });
+
+  let res;
+  try {
+    res = await adminReq(built, 'POST', `/api/admin/users/${aliceId}/password`, admin as any, {});
+  } finally {
+    spy.mockRestore();
+  }
+  expect(res.statusCode).toBe(404);
+
+  // No phantom user_password_reset audit row for the vanished user.
+  const auditRes = await built.inject({
+    method: 'GET',
+    url: '/api/admin/audit',
+    cookies: { mirsal_session: admin.session! },
+  });
+  const actions = (auditRes.json() as Array<{ action: string }>).map((r) => r.action);
+  expect(actions).not.toContain('user_password_reset');
+});
+
 // ---------------------------------------------------------------------------
 // Metadata-only browse + no admin content endpoint
 // ---------------------------------------------------------------------------
@@ -451,6 +490,8 @@ test('GET /api/admin/shares lists shares across users with owner + node name + s
     payload: { node_id: folderId },
   });
   const shareId = share.json().id as number;
+  const rawToken = share.json().token as string;
+  expect(typeof rawToken).toBe('string');
 
   const listRes = await built.inject({
     method: 'GET',
@@ -463,6 +504,12 @@ test('GET /api/admin/shares lists shares across users with owner + node name + s
   expect(row).toBeDefined();
   expect(row).toMatchObject({ owner_username: 'alice', node_name: 'Shared', status: 'active' });
   expect(row).not.toHaveProperty('password_hash');
+
+  // The raw share token is a fully unauthenticated bearer capability for the
+  // public /api/public/:token/* content routes — it must never appear in the
+  // admin projection (defeats the "admin has no content path" invariant).
+  expect(row).not.toHaveProperty('token');
+  expect(JSON.stringify(shares)).not.toContain(rawToken);
 
   // Admin force-revokes another user's share.
   const delRes = await adminReq(built, 'DELETE', `/api/admin/shares/${shareId}`, admin as any);
@@ -514,6 +561,49 @@ test('admin state-changing actions write audit rows; GET /api/admin/audit return
   expect(createRow.actor_id).toBe(rootId);
   // No secret material in the audit detail.
   expect(JSON.stringify(rows)).not.toContain('password-aaa');
+});
+
+test('GET /api/admin/audit redacts a share_unlock_failure target (routes/public.ts stores the raw share token there) but leaves ordinary targets untouched', async () => {
+  const built = await makeApp();
+  await seedUser('root', 'adminpw', { role: 'admin' });
+  const admin = await login(built, 'root', 'adminpw');
+
+  // Simulate two pre-existing rows exactly as routes/public.ts's failed
+  // `/unlock` handler writes them: `target` is the literal share token.
+  const rawToken = 'a-very-secret-public-share-bearer-token-1234567890';
+  db!
+    .prepare('INSERT INTO audit_log(actor_id, action, target, detail, created_at) VALUES (?, ?, ?, NULL, ?)')
+    .run(1, 'share_unlock_failure', rawToken, NOW);
+  db!
+    .prepare('INSERT INTO audit_log(actor_id, action, target, detail, created_at) VALUES (?, ?, ?, NULL, ?)')
+    .run(1, 'share_unlock_failure', rawToken, NOW);
+  // An ordinary action's target (a share DB id, not a secret) must pass through unchanged.
+  db!
+    .prepare('INSERT INTO audit_log(actor_id, action, target, detail, created_at) VALUES (?, ?, ?, NULL, ?)')
+    .run(1, 'share_revoke', '42', NOW);
+
+  const res = await built.inject({
+    method: 'GET',
+    url: '/api/admin/audit',
+    cookies: { mirsal_session: admin.session! },
+  });
+  expect(res.statusCode).toBe(200);
+  const rows = res.json() as Array<{ action: string; target: string | null }>;
+
+  const unlockRows = rows.filter((r) => r.action === 'share_unlock_failure');
+  expect(unlockRows.length).toBe(2);
+  for (const r of unlockRows) {
+    expect(r.target).not.toBe(rawToken);
+    expect(r.target).not.toBeNull();
+  }
+  // Same raw token -> same redacted value (still useful for correlating
+  // repeated attempts against the same share), and the raw token never
+  // appears anywhere in the response.
+  expect(unlockRows[0].target).toBe(unlockRows[1].target);
+  expect(JSON.stringify(rows)).not.toContain(rawToken);
+
+  const revokeRow = rows.find((r) => r.action === 'share_revoke')!;
+  expect(revokeRow.target).toBe('42');
 });
 
 // ---------------------------------------------------------------------------
