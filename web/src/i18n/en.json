@@ -1,0 +1,10 @@
+{
+  "public": {
+    "title": "Shared link",
+    "notFound": "This link doesn't exist.",
+    "stopped": "The sender turned this link off.",
+    "expired": "This link expired on {{date}}.",
+    "passwordGate": "This file is password-protected.",
+    "wrongPassword": "Incorrect password. {{count}} attempts left."
+  }
+}

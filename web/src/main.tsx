@@ -1,15 +1,19 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { BrowserRouter } from 'react-router-dom';
+import { I18nextProvider } from 'react-i18next';
 import './styles/fonts';
 import './styles/index.css';
-import App from './App';
+import i18n, { dirForLang } from './i18n';
+import { AuthProvider } from './features/auth/auth-context';
+import AppRoutes from './app/router';
 
-// Defensive: index.html already sets dir="rtl" lang="ar" on <html>, but set
-// them here too so the RTL invariant holds even if this entry ever runs
-// without that HTML file (App itself also sets these — see App.tsx — this
-// is the redundant, entry-point-level layer the task brief asks for).
-document.documentElement.dir = 'rtl';
-document.documentElement.lang = 'ar';
+// Keep I1's RTL invariant on <html>. index.html already sets dir="rtl"
+// lang="ar"; restate it here from the active i18n language so this entry
+// holds even if it ever runs without that HTML shell. The app stays on `ar`
+// (no switcher yet), so this resolves to rtl/ar exactly as before.
+document.documentElement.lang = i18n.language;
+document.documentElement.dir = dirForLang(i18n.language);
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -18,6 +22,12 @@ if (!rootElement) {
 
 createRoot(rootElement).render(
   <StrictMode>
-    <App />
+    <I18nextProvider i18n={i18n}>
+      <AuthProvider>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </AuthProvider>
+    </I18nextProvider>
   </StrictMode>
 );
