@@ -1,0 +1,33 @@
+# Mirsal — single lean service. Reached only through the host nginx vhost:
+# the publish binds the mapped port to host loopback (127.0.0.1), so the
+# container is never directly world-reachable; nginx terminates TLS for
+# project4.system.mow.gov.sy and proxies to it.
+services:
+  mirsal:
+    build: .
+    image: mirsal:local
+    container_name: mirsal
+    restart: unless-stopped
+    # host 127.0.0.1:8084 -> container 8084 (app binds 0.0.0.0 inside via HOST env)
+    ports:
+      - "127.0.0.1:8084:8084"
+    env_file:
+      - .env
+    volumes:
+      # SQLite db + uploaded blobs (+ first-boot admin credential file) persist here.
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# Pin the network subnet so the reverse-proxy hop (the gateway 172.31.99.1) is
+# deterministic — TRUST_PROXY in .env then trusts exactly loopback + that gateway
+# /32, so the app reads the real client from X-Forwarded-For instead of keying
+# every request on the docker gateway. 172.31.99.0/24 is unused by other stacks.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.31.99.0/24

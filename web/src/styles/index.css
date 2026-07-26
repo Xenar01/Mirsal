@@ -1,0 +1,68 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+/* Map the raw §4.1 tokens onto Tailwind's theme with `@theme inline` so the
+   generated utilities (bg-paper, text-ink, font-display, ...) emit
+   `var(--...)` and therefore keep following the light/dark cascade above at
+   runtime, instead of being frozen to whichever value was active at build
+   time. */
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-line: var(--line);
+  --color-brass: var(--brass);
+  --color-brass-ink: var(--brass-ink);
+  --color-brass-ring: var(--brass-ring);
+  --color-teal: var(--teal);
+  --color-emerald: var(--emerald);
+  --color-clay: var(--clay);
+
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+
+  /* §4.2 type scale, exposed as Tailwind font-size utilities under a
+     `display` key (not `lg`/`xl`/`2xl`/`3xl` — those are Tailwind's own
+     reserved default steps and must not be reused, see tokens.css). This
+     properly registers the value in Tailwind's theme layer, so it overrides
+     nothing and is visible to Tailwind's own introspection/IntelliSense,
+     unlike the un-layered `:root` override this replaces. */
+  --text-display: var(--type-3xl);
+}
+
+body {
+  font-family: var(--font-body);
+}
+
+/* Visible keyboard-focus ring (§4.1) using the --focus token; 2px + 2px
+   offset. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* The brass seal's one-shot "stamp press" settle (§4.4) — the app's ONLY
+   orchestrated motion. The Seal component attaches `.mirsal-seal--stamp` only
+   when `stamp` is set AND reduced motion is NOT requested; the media guard
+   below is belt-and-suspenders so the animation never plays for a
+   reduced-motion user even if the class is somehow present (§4.8). */
+@keyframes mirsal-stamp {
+  from {
+    transform: scale(0.9);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+.mirsal-seal--stamp {
+  animation: mirsal-stamp 110ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mirsal-seal--stamp {
+    animation: none;
+  }
+}

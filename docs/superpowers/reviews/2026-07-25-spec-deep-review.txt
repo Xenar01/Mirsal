@@ -1,0 +1,169 @@
+VERDICT: needs-rework
+
+SUMMARY: The Mirsal spec has a strong, genuinely distinctive concept but is not yet buildable as written. Ten must-fix defects span real security holes (unrevocable JWT sessions; a cross-subtree IDOR in public folder shares), core data-model bugs (a UNIQUE constraint that is wrong two ways, no move-into-descendant cycle guard, unenforced foreign keys with no delete ordering, and non-atomic blob deletion that breaks the self-destruct guarantee), an accessibility-failing brand color, RTL layout written in physical directions, and an unspecified/unsafe build-and-backup process that could OOM-kill production containers or silently fail on this memory-constrained box. Nearly all are cheap to pin down in the spec now and expensive to fix after build. Recommend one revision pass resolving every must-fix plus the lifecycle/trash/quota should-fix cluster before implementation begins.
+
+########## MUST_FIX (10) ##########
+
+[M1] Stateless JWT has no revocation anchor — deactivate/reset-password/logout don't kill live sessions  (security)
+  WHY: These are stated admin capabilities, but a stateless access token plus an unspecified/unrevocable refresh means a fired or compromised account keeps full read/download access until token expiry and can silently refresh. Testing only checks inactive-at-login, never mid-session.
+  FIX: Add users.token_version (INTEGER) bumped on deactivate, password-reset, and log-out-everywhere; embed it as a JWT claim and compare every request; also re-check users.is_active on every authenticated request (cheap SQLite lookup). Store refresh tokens server-side in a sessions table (id, user_id, hash, expires_at, revoked_at) with rotation-on-use, OR drop refresh tokens entirely for one short-lived DB-validated session cookie. Add an integration test: deactivate/reset while a session is live → next request 401.
+
+[M2] Public folder-share confinement under-specified — raw node-ID download enables cross-subtree IDOR  (security,requirements)
+  WHY: The public download endpoint takes a sequential integer node id while the descendant check is prose only. An implementer can easily validate owner-match but not subtree membership, letting a folder-share recipient download any of that owner's files by enumerating IDs.
+  FIX: Mandate a single canonical resolver used by BOTH list and download: walk parent_id upward from the requested node and require the shared node as an ancestor within the same owner (else 403); reject trashed nodes and non-descendants; use the SAME addressing (relative path resolved through that function) for list and download so there is one code path to audit. State that folder shares are live views of the current non-trashed subtree, exclude trashed nodes from the public list, and warn when uploading into a shared folder. Tests: sibling id outside subtree → 403; node moved out after share → 403; ../absolute path → 403.
+
+[M3] UNIQUE(owner_id,parent_id,name,trashed) is wrong two ways — duplicate root names accepted, and trashing/restoring throws 500s  (data-model)
+  WHY: (a) parent_id is NULL at root and SQLite treats NULLs as distinct, so two files both named 'المستندات' at the root are both accepted — the exact collision the constraint should prevent. (b) Putting trashed in the key means trashing a second same-named item collides with the first trashed row → the trash action throws a UNIQUE violation, and restore-over-a-live-name is undefined. Both are silent 500s on everyday flows.
+  FIX: Give every user a real synthetic root node so all user-visible items have a non-NULL parent_id (or index over COALESCE(parent_id,0)); AND remove trashed from the uniqueness scope — on trash, move items to a per-user trash-root storing original_parent_id + trashed_at so they no longer contend for the live namespace. Tests: duplicate root names rejected; trash + re-create + re-trash same name all succeed.
+
+[M4] No move-into-own-descendant (cycle) prevention on folder move  (data-model)
+  WHY: PATCH /api/nodes/:id {parent_id} has no guard. Moving a folder into itself or a descendant detaches that subtree into a cycle unreachable from root: it vanishes from the tree, recursive size roll-ups and downward recursive deletes never reach it (orphan blobs + quota leak), and a later upward ancestor walk can infinite-loop.
+  FIX: Before committing a move, walk the parent chain upward from the new parent to root and reject with 409 if :id is encountered (or use a recursive CTE); re-validate the destination name-collision in the same transaction. Tests: move folder into itself → 409; move into its own child → 409.
+
+[M5] Foreign-key enforcement is off by default and no ON DELETE behavior or delete ordering is specified  (data-model)
+  WHY: SQLite disables FKs per-connection by default and the spec sets no PRAGMA and no ON DELETE. As-is, a buggy/partial recursive delete orphans child nodes, shares, and blobs; if someone enables FKs without CASCADE, deleting a user or non-empty folder is rejected. Delete order is never stated, so admin user-delete and folder auto-delete break one way or the other.
+  FIX: Set PRAGMA foreign_keys=ON on every connection (better-sqlite3 does not do this automatically); add ON DELETE CASCADE to shares.node_id, shares.owner_id, nodes.owner_id and a self-cascade (or documented bottom-up order) for nodes.parent_id; document the canonical delete order (shares → child nodes depth-first → parent → blobs → storage dir); declare audit_log/share_access_log FKs or explicitly leave them unconstrained. Test: delete a user/folder with active shares → zero orphan rows and zero orphan blobs.
+
+[M6] Blob unlink is not atomic with the DB delete and there is no orphan-GC path  (data-model)
+  WHY: Filesystem unlink cannot join the SQLite transaction. A crash mid-delete either commits rows before unlink (orphaned blobs forever — space leak that violates the §3.4 self-destruct guarantee) or unlinks before a rollback (surviving node rows point at missing blobs → downloads 500). The blob step has no idempotent recovery.
+  FIX: Commit the DB deletion first inside the transaction (collecting storage_paths), then unlink AFTER commit (idempotent — missing file = success). Add a periodic GC sweep that deletes blob files with no node row and flags file nodes whose storage_path is missing; treat a file as deleted only once its blob is gone. Test: simulate crash-after-commit and assert the GC reclaims the orphan.
+
+[M7] Brass #C0913C fails WCAG contrast in every signature role it is assigned  (ux-frontend)
+  WHY: Brass is the signature accent for seals, active-share, and the primary CTA, but measures ~2.86:1 on white and ~2.58:1 on paper — failing both the 4.5:1 text and 3:1 non-text minimums that the spec's own §4.5 quality floor asserts. White-on-brass CTA is ~2.86:1; even brass-deep is ~4.25:1. This is a guaranteed accessibility-audit failure and full-visual-system rework once built.
+  FIX: Keep brass as the brand color but change how it carries text/UI: primary CTA = brass fill with INK (#0F1C2E) label (~5.5:1), never white-on-brass; never use brass as a foreground for essential text or standalone icons on paper/white; give the seal a defined ink or brass-deep ring so the graphic clears 3:1; reserve pure #C0913C for large decorative fills and the seal body. Add a contrast table pinning each bg/fg token pair with its measured ratio.
+
+[M8] RTL layout is described in physical directions; drawer collides with nav rail and mono runs will scramble  (ux-frontend)
+  WHY: §4.3 puts the nav rail (right) and the details drawer ('right-hand') on the SAME edge — the correct RTL mirror is nav at inline-start (right), drawer at inline-end (left). The spec never mandates CSS logical properties, and never addresses bidi isolation for the Latin/mono runs it deliberately introduces (tokens, '100 MB', ISO dates, IDs), which render visibly scrambled inside RTL Arabic. Built as written this is a latent RTL defect across the whole app.
+  FIX: Rewrite §4.3 in logical terms: nav rail = inline-start, details drawer = inline-end (never left/right). Mandate margin/padding/inset-inline, border-inline-start, text-align:start, and dir="rtl" on root throughout. Require every Latin/mono run (tokens, sizes, timestamps, IDs, URLs) to be wrapped for bidi isolation (<bdi> / unicode-bidi:isolate with dir="ltr"). State these as explicit build rules.
+
+[M9] Image build is unsafe and under-specified — can OOM-kill production containers and/or fail the native build  (ops)
+  WHY: Two build-time hazards on a box with ~700 MiB free and 34 containers running: (a) the Vite/rollup SPA build + better-sqlite3 install spike to hundreds of MB–>1 GB, driving deep into swap where the OOM killer can reap a production container (Plane/Taiga/Mythic). (b) node:20-slim has no python3/make/g++, so if node-gyp triggers the install fails, and a compiled .node copied into a mismatched runtime base crashes at load. The spec budgets only the ~250 MB runtime, not the build.
+  FIX: Build the SPA/image off-box (or on the host's node 20.20.2) and docker load the result; if building on-box, cap it (docker build --memory=1g --memory-swap=2g, NODE_OPTIONS=--max-old-space-size=768) at low load. Add a build-time memory budget to §9 distinct from the §12 runtime budget. For the native module, pin the exact Node minor + better-sqlite3 version and rely on the linux-x64 glibc prebuilt binary with the install stage on the same node:20-slim base as runtime; if compiling instead, add python3+build-essential in a builder stage on an identical base and copy node_modules into an identical runtime (never add the toolchain to the runtime layer).
+
+[M10] Backup design is not executable as written and keeps only one on-disk copy  (ops)
+  WHY: The host has no sqlite3 CLI, so a host-cron 'nightly sqlite3 .backup' fails immediately. Backups land only in data/backups on the same bind mount/disk as the live data (an rm -rf data/ loses primary AND backup — weaker than the ODK job it cites). DB and storage are snapshotted at different instants (inconsistent restore), WAL/busy_timeout is unspecified, and a 14× full tar can exhaust disk.
+  FIX: Run .backup from inside the container (docker compose exec) or better-sqlite3's backup API, not a host binary that doesn't exist; enable WAL + a busy_timeout. Ship at least the DB dump off-box via rclone to B2 (like ODK/Freepik) and keep only 1–2 local copies. Snapshot DB and storage consistently (snapshot storage first then DB, tolerate extra blobs on restore). Bound retention by total size, skip gzip on already-compressed blobs, and add a restore-test step to the runbook.
+
+########## SHOULD_FIX (21) ##########
+
+[S1] Evaluate share/file lifecycle at request time, not via the 60s scheduler flag  (data-model,requirements)
+  WHY: If the public resolver trusts is_active alone, an expired share or a file past auto_delete_at still serves for up to ~60s until the next tick, and re-toggling is_active=1 with a past expires_at serves indefinitely. 'Stopped' and 'expired' also collapse into one flag though §3.3 promises distinct statuses.
+  FIX: Public active iff is_active=1 AND (expires_at IS NULL OR expires_at>now) AND node exists AND node not trashed AND (auto_delete_at IS NULL OR auto_delete_at>now); make the scheduler cleanup/UX only, not the access gate. Derive owner-facing stopped-vs-expired from expires_at vs now, and define what 'restart sharing' does to a past expires_at. Tests: expired-not-yet-swept → 410; re-toggled with past expires_at → 410.
+
+[S2] Specify the streaming-upload + quota + nginx-buffering mechanism  (ops,security)
+  WHY: 'Reject over-quota before committing' isn't achievable literally — true size is unknown until the stream ends and you can't hold a write transaction across a 100 MB upload. .toBuffer() puts each in-flight upload fully in RAM (a memory bomb on ~700 MiB free), and nginx's default proxy_request_buffering on buffers the whole body to disk first, negating early rejection.
+  FIX: Reserve-then-commit: atomically reserve min(Content-Length,100MB) against a running used-bytes counter in a short transaction; stream each part to a temp file on the SAME filesystem as data/storage (never .toBuffer()) with @fastify/multipart limits.fileSize=100MB aborting mid-stream; on end, check actual bytes against quota then atomically rename+commit the real size or unlink the partial and release the reservation. Set proxy_request_buffering off + client_body_timeout on the upload location.
+
+[S3] Settle trash semantics for subtrees, shares, quota, and the scheduler  (requirements,data-model)
+  WHY: Undefined whether trashing a folder trashes descendants, whether shares of a trashed node keep serving publicly, whether auto_delete still fires in trash, and whether trashed bytes count toward quota — each drives real leak/correctness behavior and the storage meter (if trash frees quota, users stash unlimited data in Trash).
+  FIX: On trashing a folder, mark the whole subtree (or move to trash-root) atomically; 410 all shares whose node is trashed and restore them on restore; keep honoring auto_delete_at inside trash (self-destruct guarantee); document that trashed bytes DO count toward quota until permanent delete (blobs not unlinked until then) and surface trash size separately in the meter; make roll-up/quota queries filter consistently. Add tests for each.
+
+[S4] Add rate-limiting/lockout on the login endpoint  (security)
+  WHY: Only share-password attempts are throttled. POST /api/auth/login (users and admin) has none, and host-level fail2ban can't see per-account app failures behind the port-80 proxy, leaving the highest-value credentials open to online brute-force and credential stuffing.
+  FIX: Add per-username and per-IP rate limiting / exponential backoff / temporary lockout (e.g. @fastify/rate-limit with a SQLite or in-memory store), audit-log failed attempts, and specify the thresholds in the spec.
+
+[S5] Pin argon2id parameters and bound concurrent hashing on the public unlock endpoint  (security)
+  WHY: Cost params are unspecified on a memory-constrained, already-swapping box, and POST /api/public/:token/unlock runs argon2 on an unauthenticated public endpoint — many concurrent ~64 MiB hashes (rotating IPs/tokens) can OOM or swap-thrash the ~250 MB container.
+  FIX: Pin tuned memoryCost/timeCost/parallelism benchmarked for this box; cap concurrent argon2 operations with a small semaphore so total argon2 memory is bounded regardless of request volume; add a GLOBAL (not just per-IP) rate limit on /unlock; consider a lower memoryCost tier for share passwords given the DoS surface.
+
+[S6] Encode Content-Disposition per RFC 6266 and strip CRLF  (security)
+  WHY: Downloads set the header from the user-controlled nodes.name; raw interpolation enables CRLF/header injection and mangles Arabic filenames, which are the norm here.
+  FIX: Emit filename*=UTF-8''<percent-encoded> plus an ASCII-fallback filename=, strip CR/LF and control characters, and never interpolate the raw name. Add a test with a filename containing quotes, CRLF, and Arabic characters.
+
+[S7] Require X-Forwarded-Proto + trustProxy for the port-80 gateway  (security,ops)
+  WHY: The IT gateway terminates TLS and forwards plain HTTP to nginx:80, so without X-Forwarded-Proto https and Fastify trustProxy the app treats every connection as insecure: share links / PUBLIC_BASE_URL emit http://, any HTTPS guard misfires, and it interacts with the Secure cookie flag. This is the class of quirk that already bit Tirhal.
+  FIX: nginx sets X-Forwarded-Proto https (plus X-Forwarded-For/Host); Fastify configured with trustProxy so req.protocol==='https'; keep the Secure cookie flag; generate all absolute URLs from the forwarded proto/host. Add this to the local-chain curl check.
+
+[S8] Lock down the protected-share pre-unlock response and add a per-token global brute-force cap  (security)
+  WHY: GET /api/public/:token returning 'metadata or 401' must not leak filename/size/type/listing/owner before a successful unlock, or the gate protects only the bytes, not what was sent. Rate-limiting 'per token+IP' only lets a distributed/IP-rotating attacker brute-force weak share passwords with no global ceiling.
+  FIX: Specify the pre-unlock response reveals only 'password required' plus non-identifying branding — no name/size/type/listing. Add a per-token GLOBAL attempt counter with lockout/backoff alongside per-IP. Recommend a minimum entropy or a generated default for share passwords.
+
+[S9] Settle and audit admin access to user file contents  (security)
+  WHY: The persona 'everything a user can, plus…' is ambiguous about whether admins can read/download any user's files; the node API is owner-scoped with no admin browse endpoint. The audit design also doesn't enumerate which actions are logged or whether audit rows survive user deletion (which deletes their nodes+blobs+shares).
+  FIX: State explicitly whether admins can read user file contents (recommended: NO — confine admin to user/quota/share management and global metadata). If YES, require an audit_log row on every admin access to another user's node/blob. Enumerate the audited action set (login, user create/disable/delete, password reset, quota change, share force-revoke, admin cross-user access) and preserve audit rows (nullable actor_id) when a user is deleted.
+
+[S10] Make the scheduler reentrant and keep heavy deletes off the event loop  (data-model,ops)
+  WHY: node-cron fires every 60s with no overlap guard — a due delete taking longer than 60s is re-selected and double-processed. Conversely, a synchronous better-sqlite3 recursive delete + in-loop unlink of a large subtree blocks the single Node event loop, freezing all HTTP (uploads/downloads/public page) unattended.
+  FIX: Add a module-level run lock (skip a tick if the prior run is still in flight); process due items in bounded batches per tick (WHERE … LIMIT, optional claimed_at/status marker) so selection is exclusive and resumable; keep DB deletes transactional but unlink blobs after commit in small batches yielding to the loop; cap work per tick and defer very large deletes across runs. Test: two overlapping runs over the same due set → exactly one deletion, no errors.
+
+[S11] Fix timestamp comparison and user-local→UTC conversion  (data-model)
+  WHY: ISO-8601 string comparison equals chronological order only under identical fixed-width canonical form; mixed ms/offsets silently mis-judge due items (e.g. '…10:00:00Z' vs '…10:00:00.123Z' sorts wrong → missed or premature deletes). Separately, datetime-local input carries no zone, so naive parsing uses the server TZ.
+  FIX: Store epoch-millis INTEGER and compare numerically (simplest, unambiguous), or mandate one canonical string format everywhere (always toISOString() with ms + trailing Z) and generate 'now' the same way. Convert user-entered Damascus datetimes to UTC at the API boundary via a fixed Asia/Damascus zone (tz library). Test whole-second-vs-ms and a DST-style boundary.
+
+[S12] Guard against removing the last admin (self-lockout)  (requirements)
+  WHY: PATCH/DELETE on admin users can demote, deactivate, or delete the only admin — including an admin acting on themselves. Recovery only happens on container restart, which then silently mints a new admin whose password lands in the log.
+  FIX: Reject any role-change/deactivate/delete that would leave zero active admins (409), and block an admin from deleting or deactivating their own account. Note the invariant in §3.1.
+
+[S13] Define name-collision resolution for upload, move, rename, and restore  (requirements,data-model)
+  WHY: Legitimate collisions against the UNIQUE constraint — a duplicate upload (an everyday case), a move into an occupied folder, or restoring over a live same-named node — surface as raw SQLite 500s unless handled.
+  FIX: Pick one policy and apply it uniformly: recommend 409 with a machine-readable error for interactive rename/move (UI prompts), and auto-suffix ('name (1)') for uploads and restores where blocking is worse. Map the SQLite constraint error to the chosen HTTP response and document it in §3.2/§3.4/§7.
+
+[S14] Author an empty/error-state copy inventory and differentiate stopped vs expired 410  (ux-frontend)
+  WHY: §4.5 promises 'errors say what to do' and a 'friendly 410' but the spec has zero authored copy and no state inventory. For an Arabic-first Drive these empty/error screens are primary surfaces, and a recipient deserves different wording for 'the sender turned this link off' vs 'this link's validity ended on <date>'.
+  FIX: Add a copy table enumerating every empty state (root/folder/Trash/Shared/search/admin lists/audit log) and error state (>100MB upload, quota exceeded, upload/network fail, share-create fail, public 404, 410-stopped, 410-expired, wrong-password with attempts-remaining) with authored MSA strings (AR+EN for public pages) in the 'sealed dispatch' voice with active-voice next-step guidance.
+
+[S15] Specify mobile collapse behavior for the RTL three-surface shell  (ux-frontend)
+  WHY: §4.5 says only 'responsive'; there is no breakpoint or collapse rule for the nav rail, details drawer, dense top bar, or storage meter, and an RTL off-canvas drawer must slide from inline-start (right) — easy to get backwards for a phone-heavy ministry audience.
+  FIX: Add a mobile section: breakpoints and the fate of each surface (nav rail → off-canvas from inline-start/right with a scrim; details drawer → bottom sheet; storage meter → inside the nav drawer; top bar → collapse search/actions into a menu, keep upload primary). State the RTL slide direction explicitly and confirm the picker is the mobile upload path.
+
+[S16] Design the bilingual public page for a non-Arabic recipient  (ux-frontend)
+  WHY: §3.5 says the page is 'bilingual so external recipients cope', but an English recipient lands on an RTL Arabic-dominant layout with a mirrored download button and possibly unreadable dates. No language toggle, Accept-Language default, or dir-flip is specified, and the decorative seal risks out-ranking the actual Download CTA.
+  FIX: Add an explicit AR/EN control (or Accept-Language default) that also flips document dir to LTR for English; make Download the unambiguous primary action (seal subordinate in ornament, not hierarchy); author the password-gate and 'valid until' copy bilingually and render the expiry date in a form the chosen language can read.
+
+[S17] Pick the numeral system and reconcile it with IBM Plex Mono  (ux-frontend)
+  WHY: Western vs Arabic-Indic numerals for sizes/dates/quotas/tokens is an unmade localization decision, and Plex Mono (assigned to tokens/sizes/timestamps/IDs) has no Arabic glyphs — any Arabic-Indic digit in a mono context falls back to tofu/mismatched metrics, and Arabic-Indic dates are unreadable to English recipients.
+  FIX: Choose Western 0-9 as the default (safest for a mixed-audience, mono-in-Latin, public-shareable app); confirm Plex Mono only ever carries ASCII/Latin digits; force Western numerals on the bilingual public page. If Arabic-Indic numerals are wanted in the Arabic UI, render them in the Arabic sans, not mono.
+
+[S18] Concretely specify the seal and push the identity into the working surfaces  (ux-frontend)
+  WHY: The distinctiveness that justifies the brief is load-bearing on the brass seal, defined only as 'a small circular brass seal badge' — every build draws a different gold circle that reads as a generic status dot. The theme only manifests on /s/<token>, while the file grid where users spend ~95% of their time is a generic Drive shell with gold accents, risking the navy+gold admin-template outcome the brief exists to prevent.
+  FIX: Specify the seal as a concrete reusable artifact: ring structure, the inscription/glyph it carries (e.g. a Kufic 'مِرسال' or an M mark), stroke weight, and the exact small-badge vs large-public-seal difference, with one built reference. Then define the file list as a 'dispatch register' (monospace ledger columns for size/date/token, stamp marks in a status column) so the theme carries the primary screen.
+
+[S19] Pin the container UID and pre-create data dirs with matching ownership  (ops)
+  WHY: ./data is bind-mounted but the container UID is unstated. node:20-slim runs as root by default; if hardened with USER node (uid 1000), the root-owned host data dir isn't writable by uid 1000 → better-sqlite3 fails to open the DB and the first upload fails. Running as root writes root-owned files into the git working tree.
+  FIX: Pin the container user explicitly and pre-create data/{db,storage,backups} on the host with matching ownership (chown -R 1000:1000 data if using USER node, or document root); reconcile with the root-run backup cron; state this as an install step in §9.
+
+[S20] Add log hygiene: rotation, retention, and no admin password in logs  (ops,security)
+  WHY: The Docker daemon has no default log-opts and every container uses unlimited json-file, so Mirsal's log (with per-download access logging) grows forever — a slow disk-fill wedge. Worse, the first-boot admin password is printed to that same unrotated log, persisting in plaintext readable via docker logs, journald, and Portainer on :9000.
+  FIX: Add logging: {driver: json-file, options: {max-size: '10m', max-file: '3'}} to the compose service; add a retention/prune policy for audit_log and share_access_log (e.g. 90 days). Do NOT leave the admin password in the log — force a password change on first admin login (seed a random hash) or write the credential to a root-only 0600 file outside the image; keep the seed idempotent.
+
+[S21] Operationalize SSH-disconnect resilience for build and deploy  (ops)
+  WHY: 'Resilient to SSH disconnects' is a stated constraint, but neither Deployment nor Testing runs the multi-minute build/migrate/seed detached; a dropped session kills a foreground run, leaving a half-built image or a partially migrated DB.
+  FIX: Specify that the build and compose up run detached and survive disconnect (systemd-run --scope / nohup / tmux) with output teed to a file, and make DB migrations and the first-boot seed idempotent and re-runnable so an interrupted deploy resumes cleanly.
+
+########## NICE_TO_HAVE (9) ##########
+
+[N1] Harden the CSRF token and add Referrer-Policy on share pages  (security)
+  WHY: 'Double-submit token' isn't specified as HMAC-signed/session-bound (weaker if any cookie-write vector exists), and the share token in /s/<token> can leak via Referer without Referrer-Policy: no-referrer (it is already recorded in nginx access logs and share_access_log).
+  FIX: Sign/bind the CSRF token to the session (or per-request HMAC) and document that the CSRF cookie is non-httpOnly while the JWT cookie is httpOnly+Secure+SameSite; set Referrer-Policy: no-referrer on /s/<token> responses and ensure CSP has no 'unsafe-inline' for scripts.
+
+[N2] Route auto-delete through trash (or a grace window) and validate the date is in the future  (requirements)
+  WHY: §3.4 auto-delete hard-deletes, bypassing the trash→restore safety net that manual delete has, and a past auto_delete_at purges within 60s — an irreversible, data-losing default not flagged for confirmation.
+  FIX: State the choice explicitly; consider routing auto-delete through trash first or a short grace window so it's recoverable; validate auto_delete_at is in the future on set; confirm hard-delete-on-schedule is what the user wants.
+
+[N3] Offer a folder-as-ZIP download for share recipients  (requirements)
+  WHY: The ask centers on 'share a whole folder', but the public view only lets a recipient download files one at a time — no bundle download matches the 'send a folder' expectation.
+  FIX: Add a streamed ZIP download of the shared subtree (archiver piped to the response, no full buffering, to protect RAM), or explicitly note single-file-only download as a conscious v1 limitation.
+
+[N4] State the manual permanent-delete cascade explicitly  (requirements)
+  WHY: For auto-delete and admin user-delete the cascade is stated, but for a user's own permanent delete of a folder the recursive removal of descendant blobs AND their shares is only implied by the module description — yet it is one of the four core lifecycle behaviors.
+  FIX: State in §3.2/§7 that permanent delete of a folder recursively removes descendant nodes, their blobs, and any shares pointing at those nodes, in one transaction.
+
+[N5] Confirm v1 scope for quotas and refresh tokens (YAGNI)  (requirements)
+  WHY: Per-user quotas (transactional enforcement + size roll-ups + meter) and JWT refresh-rotation (needs server-side state to truly revoke) add the most complexity for a lean, memory-constrained internal app; passwords, bilingual public page, and audit log are cheap and justified.
+  FIX: Confirm quotas are actually wanted for v1 (else ship usage-visibility only, unlimited storage); consider a single opaque/short-lived session cookie without a refresh-rotation store so logout is just clearing the cookie (ties to must-fix on JWT revocation).
+
+[N6] Specify an icon system so the build doesn't default to Lucide/Material  (ux-frontend)
+  WHY: A Drive-like app is defined by its file/folder/action icons; unspecified, the build reaches for a stock set — the visual signature of an AI-default template — and a generic Google-style folder glyph fights the dispatch/register concept.
+  FIX: Specify a restrained line-icon approach whose stroke weight and corner treatment match the ink/brass system, and give brand-critical glyphs subject-grounded forms (folder = dossier/dispatch pouch, share = seal/send, active-share = stamp). At minimum name the set and the customizations.
+
+[N7] Close small quality-floor gaps: color-only status, focus token, stamp motion  (ux-frontend)
+  WHY: Status is signaled by color alone with an internal clash (brass = active-share vs emerald = active) — trips WCAG 1.4.1; 'visible keyboard focus' has no defined token and must clear 3:1 on brass/teal in both themes; the signature stamp motion has no duration/easing and no reduced-motion confirmation fallback.
+  FIX: Pair every status/share state with a text label or icon and disambiguate brass-seal vs emerald-active; define one focus-ring token (e.g. 2px ring + 2px offset in a color clearing 3:1 on brass, teal, paper, and dark); specify the stamp motion (duration, easing, behavior) and its reduced-motion fallback (seal simply appears + a toast).
+
+[N8] Ensure only the mirsal vhost is enabled for project4  (ops)
+  WHY: sites-available/odk-central and jasim-bot both still contain server_name project4.system.mow.gov.sy; if either is re-symlinked during the mirsal deploy it creates a duplicate-server_name/routing conflict.
+  FIX: During deploy, enable ONLY the new mirsal vhost and confirm no other enabled vhost matches (nginx -T | grep project4); remove or clearly park the stale odk-central/jasim-bot files.
+
+[N9] Add a git branch-strategy note  (requirements)
+  WHY: 'Git branching' is a stated constraint; §9 mentions a repo but no workflow, so it will be improvised.
+  FIX: Add a one-line branch strategy (e.g. feature branch → merge to main on green).

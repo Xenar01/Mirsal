@@ -1,0 +1,24 @@
+# Keep the build context small and reproducible: never ship host installs,
+# prior build output, runtime data, secrets, or scratch into the image.
+**/node_modules
+**/dist
+web/dist
+server/dist
+data/
+*.db
+*.db-shm
+*.db-wal
+.git/
+.superpowers/
+docs/
+deploy/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+coverage/
+.vite/
+Dockerfile
+docker-compose.yml
+.dockerignore

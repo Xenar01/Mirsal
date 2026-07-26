@@ -1,0 +1,15 @@
+{
+  "name": "mirsal",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "20"
+  },
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "test": "npm run test --workspace=server && npm run test --workspace=web"
+  }
+}
