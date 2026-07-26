@@ -111,6 +111,17 @@ export function CalendarStamp(props: IconProps) {
   );
 }
 
+/** Dispatch sheet (= a file): a document with a folded corner + two rule lines. */
+export function FileSheet(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M6.5 3.5h6.5l4.5 4.5v10.5a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-13a2 2 0 0 1 2-2Z" />
+      <path d="M13 3.5V8h4.5" />
+      <path d="M8.5 13h7M8.5 16.2h4.5" />
+    </IconBase>
+  );
+}
+
 /* ── Utility glyphs used by the J1 primitives ─────────────────────────── */
 
 /** Close (X) — Modal / Drawer / Toast dismiss control. */

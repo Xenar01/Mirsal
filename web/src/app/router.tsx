@@ -4,6 +4,8 @@ import LoginPage from '../features/auth/LoginPage';
 import ChangePasswordPage from '../features/auth/ChangePasswordPage';
 import RequireAuth from '../features/auth/RequireAuth';
 import { useAuth } from '../features/auth/auth-context';
+import DriveView from '../features/dashboard/DriveView';
+import TrashView from '../features/dashboard/TrashView';
 
 /**
  * Minimal i18n heading placeholder. The real dashboard/admin/trash/shared/
@@ -49,7 +51,7 @@ export default function AppRoutes() {
         path="/"
         element={
           <RequireAuth>
-            <PagePlaceholder titleKey="dashboard.title" />
+            <DriveView />
           </RequireAuth>
         }
       />
@@ -65,7 +67,7 @@ export default function AppRoutes() {
         path="/trash"
         element={
           <RequireAuth>
-            <PagePlaceholder titleKey="trash.title" />
+            <TrashView />
           </RequireAuth>
         }
       />

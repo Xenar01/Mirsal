@@ -51,8 +51,14 @@ export class ApiError extends Error {
   }
 }
 
-/** Reads the double-submit CSRF token from `document.cookie` (may be absent). */
-function readCsrfToken(): string | null {
+/**
+ * Reads the double-submit CSRF token from `document.cookie` (may be absent).
+ * Exported so the multipart-upload path (which uses `XMLHttpRequest` for
+ * upload-progress events — `fetch` has none) can echo the same
+ * `mirsal_csrf` cookie into its `x-csrf-token` header, exactly like
+ * {@link request} does.
+ */
+export function readCsrfToken(): string | null {
   const match = document.cookie.match(
     new RegExp('(?:^|;\\s*)' + CSRF_COOKIE + '=([^;]*)')
   );

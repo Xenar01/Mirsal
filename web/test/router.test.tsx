@@ -2,8 +2,10 @@ import { describe, test, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { I18nextProvider } from 'react-i18next';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import i18n from '../src/i18n';
 import { AuthProvider } from '../src/features/auth/auth-context';
+import { ToastProvider } from '../src/components/Toast';
 import AppRoutes from '../src/app/router';
 
 function jsonResponse(status: number, body?: unknown): Response {
@@ -13,15 +15,22 @@ function jsonResponse(status: number, body?: unknown): Response {
   });
 }
 
+// The `/` route now mounts the real DriveView (TanStack Query + Toast), so the
+// route guard is exercised through the same provider stack the app uses.
 function renderApp(initialEntries: string[]) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
-    <I18nextProvider i18n={i18n}>
-      <AuthProvider>
-        <MemoryRouter initialEntries={initialEntries}>
-          <AppRoutes />
-        </MemoryRouter>
-      </AuthProvider>
-    </I18nextProvider>
+    <QueryClientProvider client={queryClient}>
+      <I18nextProvider i18n={i18n}>
+        <AuthProvider>
+          <ToastProvider>
+            <MemoryRouter initialEntries={initialEntries}>
+              <AppRoutes />
+            </MemoryRouter>
+          </ToastProvider>
+        </AuthProvider>
+      </I18nextProvider>
+    </QueryClientProvider>
   );
 }
 
