@@ -414,10 +414,33 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
   // bound) ------------------------------------------------------------------
   // Tracks `/zip` requests currently streaming, server-wide, so a burst of
   // concurrent requests (which a time-window rate limit alone cannot bound)
-  // can't pile up archiver runs. Released via the `onResponse` hook below,
-  // which fires exactly once per request regardless of how it completes.
+  // can't pile up archiver runs.
   let activeZipCount = 0;
   const zipSlotHolders = new WeakSet<FastifyRequest>();
+
+  /**
+   * Releases a `/zip` concurrency slot AT MOST ONCE per request (idempotent
+   * via the WeakSet membership check), so it is safe to wire to more than one
+   * teardown signal without ever double-decrementing the counter.
+   *
+   * Correctness here is security-critical: the slot MUST be released even when
+   * the client aborts the download mid-stream. Fastify's `onResponse` hook
+   * does NOT fire on a mid-stream abort (verified empirically against the
+   * installed fastify@5.10.0: destroying the client socket while the ZIP body
+   * is still streaming never triggers `onResponse`) — relying on it alone let
+   * an unauthenticated caller permanently strand a slot per cancelled request,
+   * exhausting all `MAX_CONCURRENT_ZIPS` slots (and taking `/zip` down for
+   * every share) in just a handful of aborted downloads. The raw-response
+   * `'close'` event (wired per-request in the handler below) DOES fire on both
+   * a normal finish AND a mid-stream abort, so it is the authoritative
+   * release; the `onResponse` hook is kept only as idempotent defence in
+   * depth.
+   */
+  function releaseZipSlot(req: FastifyRequest): void {
+    if (zipSlotHolders.delete(req)) {
+      activeZipCount--;
+    }
+  }
 
   await app.register(async function zipScope(scope) {
     await scope.register(fastifyRateLimit, {
@@ -434,9 +457,7 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
     });
 
     scope.addHook('onResponse', async (req) => {
-      if (zipSlotHolders.delete(req)) {
-        activeZipCount--;
-      }
+      releaseZipSlot(req);
     });
 
     scope.get('/api/public/:token/zip', async (req, reply) => {
@@ -466,10 +487,15 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
 
       const files = collectSubtreeFiles(db, share.owner_id, rootNode);
 
-      // Slot taken from here on — released exactly once by the onResponse
-      // hook above once this response finishes (success, error, or abort).
+      // Slot taken from here on. The authoritative release is the raw
+      // response's `'close'` event, which fires on BOTH a normal finish AND a
+      // mid-stream client abort (unlike `onResponse`, which does not fire on
+      // abort under fastify@5.10.0 — see `releaseZipSlot`), so a cancelled
+      // download can never strand a slot. `releaseZipSlot` is idempotent, so
+      // the `onResponse` hook firing too (normal completions) is harmless.
       activeZipCount++;
       zipSlotHolders.add(req);
+      reply.raw.once('close', () => releaseZipSlot(req));
 
       const archive = new ZipArchive({ zlib: { level: ZIP_COMPRESSION_LEVEL } });
       // Post-headers stream failure can't change the status — tear the response

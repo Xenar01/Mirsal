@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import http from 'node:http';
+import crypto from 'node:crypto';
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
@@ -672,4 +674,127 @@ test('public /download is rate-limited (per-token), bounding unbounded-bandwidth
   }
   expect(codes.filter((c) => c === 200).length).toBeGreaterThanOrEqual(1);
   expect(codes).toContain(429);
+}, 30_000);
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Opens a real (non-inject) `/zip` request and resolves `response` when the
+ * response headers arrive — at which point the server handler has already
+ * taken its concurrency slot and begun streaming. The body is deliberately
+ * NEVER consumed, so a large (near-incompressible) archive stays blocked on
+ * socket backpressure and the slot stays held until the request is destroyed.
+ * `closed` resolves once the client socket has torn down (either its response
+ * stream closes or the request errors on `destroy()`).
+ */
+function parkedZipRequest(
+  port: number,
+  token: string
+): { request: http.ClientRequest; response: Promise<http.IncomingMessage>; closed: Promise<void> } {
+  let settled = false;
+  let resolveResp!: (r: http.IncomingMessage) => void;
+  let rejectResp!: (e: Error) => void;
+  let resolveClosed!: () => void;
+  const response = new Promise<http.IncomingMessage>((res, rej) => {
+    resolveResp = res;
+    rejectResp = rej;
+  });
+  const closed = new Promise<void>((res) => {
+    resolveClosed = res;
+  });
+
+  const request = http.request(
+    { host: '127.0.0.1', port, path: `/api/public/${token}/zip`, method: 'GET', agent: false },
+    (res) => {
+      settled = true;
+      res.on('close', () => resolveClosed());
+      res.on('error', () => resolveClosed());
+      // Intentionally do NOT read res — leave the download parked mid-stream.
+      resolveResp(res);
+    }
+  );
+  request.on('error', (err) => {
+    if (!settled) {
+      settled = true;
+      rejectResp(err);
+    }
+    resolveClosed();
+  });
+  request.end();
+  return { request, response, closed };
+}
+
+/** Opens a real `/zip` request and reads it to completion. */
+function fullZipRequest(port: number, token: string): Promise<{ statusCode: number; body: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      { host: '127.0.0.1', port, path: `/api/public/${token}/zip`, method: 'GET', agent: false },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks) }));
+        res.on('error', reject);
+      }
+    );
+    request.on('error', reject);
+    request.end();
+  });
+}
+
+test('/zip concurrency slot is released on a mid-stream client abort (onResponse does not fire on abort)', async () => {
+  const built = await makeApp();
+  await built.listen({ host: '127.0.0.1', port: 0 });
+  const addr = built.server.address();
+  const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
+  expect(port).toBeGreaterThan(0);
+
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const folder = await makeFolder(built, session, csrf, rootId, 'BigBundle');
+  // A large, ~incompressible payload so the streamed ZIP cannot fully flush
+  // into the OS socket buffers without the client reading it — the response
+  // therefore stays open (slot held) for a parked client that never consumes
+  // the body. Random bytes barely compress, so compressed size ~= 32 MiB,
+  // comfortably above any default loopback socket buffering.
+  const big = crypto.randomBytes(32 * 1024 * 1024);
+  await uploadFile(built, session, csrf, {
+    parentId: folder.id,
+    filename: 'big.bin',
+    data: big,
+    contentType: 'application/octet-stream',
+  });
+  const share = await createShare(built, session, csrf, { node_id: folder.id });
+
+  // MAX_CONCURRENT_ZIPS in routes/public.ts. Park exactly this many downloads
+  // so every slot is held (each 'response' event proves the handler took its
+  // slot and started streaming).
+  const MAX_CONCURRENT_ZIPS = 4;
+  const parked = Array.from({ length: MAX_CONCURRENT_ZIPS }, () => parkedZipRequest(port, share.token));
+  await Promise.all(parked.map((p) => p.response));
+
+  // All slots held -> a fresh /zip is rejected by the hard concurrency bound.
+  // (Well under the per-IP rate cap of 10, so this 429 can only be the
+  // concurrency bound, not the rate limiter.)
+  const blocked = await fullZipRequest(port, share.token);
+  expect(blocked.statusCode).toBe(429);
+
+  // Abort every parked download mid-stream by destroying the client socket.
+  // Under fastify@5.10.0 this does NOT fire the route's `onResponse` hook; the
+  // fix's raw-response 'close' listener is what must free each slot.
+  for (const p of parked) p.request.destroy();
+  await Promise.all(parked.map((p) => p.closed));
+
+  // Bounded poll (total real /zip requests stay < 10, the per-IP cap, so no
+  // rate-limit 429 can masquerade here) for the aborted slots to free up.
+  let finalStatus = 0;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await delay(150);
+    const res = await fullZipRequest(port, share.token);
+    finalStatus = res.statusCode;
+    if (finalStatus === 200) break;
+  }
+  // Without the fix, the aborted downloads strand their slots permanently and
+  // this stays 429 forever; with it, the slots are freed and /zip works again.
+  expect(finalStatus).toBe(200);
 }, 30_000);
