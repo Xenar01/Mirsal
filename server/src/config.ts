@@ -16,6 +16,13 @@ const configSchema = z.object({
   // 0.0.0.0 — the container is reachable only through the compose publish
   // `127.0.0.1:8084:8084`, which is what actually confines it to host loopback.
   HOST: z.string().min(1).default('127.0.0.1'),
+  // Fastify `trustProxy` value (comma-separated IPs/subnets/keywords). Default
+  // 'loopback' suits a direct host run where nginx proxies from 127.0.0.1. In
+  // the container the reverse-proxy hop is the docker bridge gateway (a private
+  // IP, NOT loopback), so the compose env sets this to trust loopback + the
+  // pinned docker subnet — otherwise X-Forwarded-For is ignored and every
+  // request keys on the gateway IP (collapsing per-IP rate limits).
+  TRUST_PROXY: z.string().min(1).default('loopback'),
   ARGON_MEMORY_KIB: z.coerce.number().int().positive().default(19456),
   ARGON_TIME: z.coerce.number().int().positive().default(2),
   ARGON_PARALLELISM: z.coerce.number().int().positive().default(1),

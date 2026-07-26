@@ -139,16 +139,17 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // `trustProxy: true` would trust the ENTIRE X-Forwarded-For chain
   // unboundedly — including hops an attacker fully controls — letting a
   // remote client spoof a fresh `req.ip` on every request (defeating
-  // IP-keyed rate limiting; see routes/auth.ts's login limiter). The only
-  // real proxy in front of this app is the host nginx vhost, reverse-proxying
-  // from 127.0.0.1 (global-constraints.md: "Host nginx reverse-proxies
-  // 127.0.0.1:8084"), so trust is bounded to exactly that: `'loopback'`
-  // trusts just 127.0.0.0/8 and ::1, and Fastify (via @fastify/proxy-addr)
-  // walks the X-Forwarded-For chain from the socket address inward only
-  // while each hop is itself loopback, stopping at — and using — the first
-  // untrusted (i.e. real client) address. Anything an attacker prepends
-  // further left in the header is never consulted.
-  const app = Fastify({ trustProxy: 'loopback' });
+  // IP-keyed rate limiting; see routes/auth.ts's login limiter). So trust is
+  // bounded to exactly the real reverse-proxy hop via `config.TRUST_PROXY`:
+  // Fastify (via @fastify/proxy-addr) walks the X-Forwarded-For chain from the
+  // socket address inward only while each hop is trusted, stopping at — and
+  // using — the first untrusted (real client) address. For a direct host run
+  // that hop is loopback (the default). In the container the nginx→app hop
+  // arrives from the docker bridge gateway (a private IP, not loopback), so the
+  // compose env sets TRUST_PROXY to 'loopback' + the PINNED docker subnet —
+  // tight enough that only that gateway is trusted; anything an attacker
+  // prepends further left is never consulted (nginx's appended hop shields it).
+  const app = Fastify({ trustProxy: deps.config.TRUST_PROXY });
 
   // Strict CSP: self-only, no `unsafe-inline` scripts, no framing. `useDefaults:
   // false` means only the directives listed below apply (Helmet's own bundled

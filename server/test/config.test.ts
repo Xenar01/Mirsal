@@ -59,6 +59,13 @@ test('HOST defaults to loopback and can be overridden (container binds 0.0.0.0)'
   expect(loadConfig(baseEnv({ HOST: '0.0.0.0' })).HOST).toBe('0.0.0.0');
 });
 
+test('TRUST_PROXY defaults to loopback and can be overridden (container trusts docker subnet)', () => {
+  expect(loadConfig(baseEnv()).TRUST_PROXY).toBe('loopback');
+  expect(loadConfig(baseEnv({ TRUST_PROXY: 'loopback,172.31.99.0/24' })).TRUST_PROXY).toBe(
+    'loopback,172.31.99.0/24',
+  );
+});
+
 test('a missing required var throws a clear error naming the field', () => {
   const env = baseEnv();
   delete env.SESSION_SECRET;

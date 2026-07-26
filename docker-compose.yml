@@ -21,3 +21,13 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+# Pin the network subnet so the reverse-proxy hop (the gateway 172.31.99.1) is
+# deterministic — TRUST_PROXY in .env trusts exactly loopback + this subnet, so
+# the app reads the real client from X-Forwarded-For instead of keying every
+# request on the docker gateway. 172.31.99.0/24 is unused by other stacks here.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.31.99.0/24
