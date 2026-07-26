@@ -45,6 +45,12 @@ export interface SetShareStatePatch {
  * instance) and stored as `password_hash`; otherwise `password_hash` is
  * NULL. Returns the freshly inserted row. Async: awaits `hashPassword` when
  * a password is supplied.
+ *
+ * The initial existence/ownership/trashed check runs before the
+ * `hashPassword` await, so it is re-verified a second time, atomically with
+ * the INSERT (a single synchronous INSERT...SELECT against the current
+ * `nodes` row) — otherwise a node trashed (or re-owned) during that await
+ * gap could still get a share row inserted for it.
  */
 export async function createShare(
   db: Database.Database,
@@ -65,12 +71,23 @@ export async function createShare(
   const passwordHash = options.password ? await hashPassword(options.password) : null;
   const expiresAt = options.expiresAt ?? null;
 
+  // The ownership/trashed guard above ran before the `await hashPassword`
+  // gap, so the node could have been trashed (or its ownership changed)
+  // while we awaited. Re-verify atomically as part of the INSERT itself
+  // (an INSERT...SELECT with the same guard in its WHERE clause) so no
+  // other JS can run between the check and the write — closing that race.
   const info = db
     .prepare(
       `INSERT INTO shares(node_id, owner_id, token, password_hash, is_active, expires_at, allow_download, created_at, revoked_at)
-       VALUES (@nodeId, @ownerId, @token, @passwordHash, 1, @expiresAt, 1, @now, NULL)`
+       SELECT @nodeId, @ownerId, @token, @passwordHash, 1, @expiresAt, 1, @now, NULL
+       FROM nodes
+       WHERE id = @nodeId AND owner_id = @ownerId AND trashed_at IS NULL`
     )
     .run({ nodeId, ownerId, token, passwordHash, expiresAt, now });
+
+  if (info.changes === 0) {
+    throw new Error(`Invalid node for createShare: ${nodeId}`);
+  }
 
   return db.prepare('SELECT * FROM shares WHERE id = @id').get({ id: info.lastInsertRowid }) as Share;
 }

@@ -1,11 +1,12 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, afterEach, beforeAll, beforeEach, expect, test } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, test, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/connection.js';
 import { migrate } from '../../src/db/migrate.js';
 import { ensureUserRoots } from '../../src/nodes/tree.js';
+import * as passwords from '../../src/auth/passwords.js';
 import { verifyPassword } from '../../src/auth/passwords.js';
 import { createShare, ownerStatus, revokeShare, setShareState, type Share } from '../../src/shares/shares.js';
 
@@ -136,6 +137,33 @@ test('createShare throws when the node is trashed', async () => {
   const nodeId = seedFileNode(uid, now, { trashedAt: now });
 
   await expect(createShare(db!, uid, nodeId, {}, now)).rejects.toThrow();
+});
+
+test('createShare closes the TOCTOU race: a node trashed during the hashPassword await must not get a share row', async () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const nodeId = seedFileNode(uid, now);
+
+  // The initial guard (node live, owned by uid) passes here. Simulate a
+  // concurrent trash happening precisely during createShare's `await
+  // hashPassword(...)` gap, by trashing the node from inside a mocked
+  // hashPassword before it resolves. If createShare only re-checked the
+  // node before the await (and inserted unconditionally after), this would
+  // still succeed in inserting a share for a now-trashed node.
+  const original = passwords.hashPassword;
+  const spy = vi.spyOn(passwords, 'hashPassword').mockImplementation(async (password: string) => {
+    db!.prepare('UPDATE nodes SET trashed_at = @now WHERE id = @nodeId').run({ nodeId, now });
+    return original(password);
+  });
+
+  try {
+    await expect(createShare(db!, uid, nodeId, { password: 'secret' }, now)).rejects.toThrow();
+
+    const count = db!.prepare('SELECT COUNT(*) AS c FROM shares').get() as { c: number };
+    expect(count.c).toBe(0);
+  } finally {
+    spy.mockRestore();
+  }
 });
 
 // --- setShareState ---------------------------------------------------------------
