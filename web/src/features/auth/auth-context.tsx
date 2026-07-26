@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -35,11 +36,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<PublicUser | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Monotonic counter guarding every write to `user`. `refresh`, `login`, and
+  // `logout` each capture the counter's value before making their network
+  // call and only apply their result if it is still current when the call
+  // resolves. Without this, the mount-time `/me` probe and a fast `login()`
+  // race on the same `user` state: if the probe resolves after login (e.g. a
+  // slow/queued request), its stale 401 would call `setUser(null)` and
+  // silently log the just-authenticated user back out. Any newer operation
+  // (a subsequent refresh/login/logout) bumps the counter, so a late
+  // resolution is recognized as stale and its result is discarded.
+  const requestSeqRef = useRef(0);
+
   const refresh = useCallback(async () => {
+    const seq = ++requestSeqRef.current;
     setLoading(true);
     try {
       const me = await apiGet<PublicUser>('/auth/me');
-      setUser(me);
+      if (requestSeqRef.current === seq) setUser(me);
     } catch (err) {
       // 401 → not signed in. Any other error (network, 5xx) also can't
       // establish a session, so fail closed to "logged out" rather than crash.
@@ -47,9 +60,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Surface unexpected non-API failures in dev without breaking the app.
         console.error('auth: /me probe failed', err);
       }
-      setUser(null);
+      if (requestSeqRef.current === seq) setUser(null);
     } finally {
-      setLoading(false);
+      if (requestSeqRef.current === seq) setLoading(false);
     }
   }, []);
 
@@ -58,17 +71,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const login = useCallback(async (username: string, password: string) => {
+    const seq = ++requestSeqRef.current;
     const res = await apiPost<{ user: PublicUser }>('/auth/login', { username, password });
-    setUser(res.user);
+    if (requestSeqRef.current === seq) setUser(res.user);
     return res.user;
   }, []);
 
   const logout = useCallback(async () => {
-    try {
-      await apiPost('/auth/logout');
-    } finally {
-      setUser(null);
-    }
+    const seq = ++requestSeqRef.current;
+    // Only clear local state once the server confirms the session was
+    // revoked. If this throws (network drop, blocked request, a 403 from a
+    // stale/missing CSRF cookie, ...) the `user` state is left untouched —
+    // the httpOnly `mirsal_session` cookie is still valid, so the UI must
+    // keep showing the user as signed in rather than lie about a revocation
+    // that didn't happen. The error propagates to the caller to surface.
+    await apiPost('/auth/logout');
+    if (requestSeqRef.current === seq) setUser(null);
   }, []);
 
   return (
