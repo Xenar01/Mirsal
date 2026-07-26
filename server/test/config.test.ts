@@ -54,6 +54,11 @@ test('omitted argon numerics fall back to their documented defaults', () => {
   expect(cfg.ARGON_MAX_CONCURRENCY).toBe(2);
 });
 
+test('HOST defaults to loopback and can be overridden (container binds 0.0.0.0)', () => {
+  expect(loadConfig(baseEnv()).HOST).toBe('127.0.0.1');
+  expect(loadConfig(baseEnv({ HOST: '0.0.0.0' })).HOST).toBe('0.0.0.0');
+});
+
 test('a missing required var throws a clear error naming the field', () => {
   const env = baseEnv();
   delete env.SESSION_SECRET;

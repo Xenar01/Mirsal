@@ -64,8 +64,9 @@ export function createShutdown(
 /**
  * The real server entrypoint: load config, open + migrate the DB, seed the
  * first-boot admin, build the app, start the cleanup scheduler, and start
- * listening. Host nginx reverse-proxies `127.0.0.1:8084` (global
- * constraints) — that host/port pair is fixed, not configurable.
+ * listening. Host nginx reverse-proxies port `8084`; the bind address is
+ * `config.HOST` (default loopback for a direct run, `0.0.0.0` inside the
+ * container where the compose publish `127.0.0.1:8084:8084` confines exposure).
  */
 async function main(): Promise<void> {
   const config = loadConfig(process.env);
@@ -85,7 +86,7 @@ async function main(): Promise<void> {
     void shutdown();
   });
 
-  await app.listen({ host: '127.0.0.1', port: 8084 });
+  await app.listen({ host: config.HOST, port: 8084 });
 }
 
 // Guard: only run (and bind a real port) when this module is the actual
