@@ -11,6 +11,9 @@ import type Database from 'better-sqlite3';
 import { MAX_FILE_BYTES, type Config } from './config.js';
 import type { Clock } from './clock.js';
 import healthRoute from './routes/health.js';
+import authRoutes from './routes/auth.js';
+import { createPasswordService } from './auth/passwords.js';
+import { makeGuards } from './auth/guards.js';
 
 export interface AppDeps {
   db: Database.Database;
@@ -61,12 +64,30 @@ const WEB_DIST = path.resolve(
 );
 
 /**
- * Registers every route plugin onto `app`. `health` is this task's only
- * route; H2–H6 add their own route plugins here onto the same instance,
- * keeping registration composable.
+ * Registers every route plugin onto `app`. `health` was H1's only route;
+ * H2 adds `auth`; H3–H6 add their own route plugins here onto the same
+ * instance, keeping registration composable.
+ *
+ * `passwordService` and `guards` are built once, here, from the `config`/`db`/
+ * `now` injected into `buildApp` — every route plugin below is handed the
+ * same instances rather than each constructing its own (a fresh
+ * `createPasswordService` per route would mean a fresh argon2 concurrency
+ * semaphore per route, defeating its purpose of bounding *total* concurrent
+ * argon2 memory use across the whole app).
  */
-async function registerRoutes(app: FastifyInstance, _deps: AppDeps): Promise<void> {
+async function registerRoutes(app: FastifyInstance, deps: AppDeps): Promise<void> {
   await app.register(healthRoute);
+
+  const passwordService = createPasswordService(deps.config);
+  const guards = makeGuards({ db: deps.db, csrfSecret: deps.config.CSRF_SECRET, now: deps.now });
+
+  await app.register(authRoutes, {
+    db: deps.db,
+    now: deps.now,
+    passwordService,
+    guards,
+    csrfSecret: deps.config.CSRF_SECRET,
+  });
 }
 
 /**
