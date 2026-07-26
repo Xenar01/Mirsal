@@ -227,6 +227,78 @@ test('restoreNode falls back to the user root when the original parent no longer
   expect(readNode(child).trashed_at).toBeNull();
 });
 
+test('restoreNode does not resurrect an independently-trashed descendant when restoring an ancestor', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { f, a, sub, b } = buildTree(uid, now);
+
+  // Trash the child `a` on its own first (independent trash, timestamp `now`).
+  trashNode(db!, uid, a, now);
+  // Then trash the ancestor `F` itself, at a later timestamp. trashNode's CTE
+  // stops recursing at `a` because it is already trashed, so `a` keeps its
+  // own earlier trashed_at instead of being folded into F's batch.
+  trashNode(db!, uid, f.id, now + 1);
+
+  restoreNode(db!, uid, f.id, now + 2);
+
+  // F (and the rest of its own batch: sub, b) is live again...
+  expect(readNode(f.id).trashed_at).toBeNull();
+  expect(readNode(sub.id).trashed_at).toBeNull();
+  expect(readNode(b).trashed_at).toBeNull();
+  // ...but `a` — independently trashed before F — must remain trashed.
+  expect(readNode(a).trashed_at).toBe(now);
+});
+
+test('restoreNode throws a graceful CollisionError (not a raw SqliteError) on an internal name collision among resurrected descendants', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { f } = buildTree(uid, now);
+
+  trashNode(db!, uid, f.id, now);
+  // Simulate a second row that happens to share both the exact trashed_at
+  // value of F's batch and the (parent_id, name) of an existing descendant
+  // ('sub') already in that batch — the trashed_at partial-unique index
+  // permits two trashed rows with the same name since neither is live.
+  const dupSub = insertNode({
+    ownerId: uid,
+    parentId: f.id,
+    kind: 'folder',
+    name: 'sub',
+    trashedAt: now,
+  });
+
+  let caught: unknown;
+  try {
+    restoreNode(db!, uid, f.id, now + 1);
+  } catch (e) {
+    caught = e;
+  }
+
+  expect(caught).toBeInstanceOf(Error);
+  expect((caught as Error).name).not.toBe('SqliteError');
+  // The transaction rolled back: F (and the duplicate) are left exactly as
+  // they were before the failed restore attempt.
+  expect(readNode(f.id).trashed_at).toBe(now);
+  expect(readNode(dupSub).trashed_at).toBe(now);
+});
+
+test('restoreNode clears a stale purge_after on the top node', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { f } = buildTree(uid, now);
+
+  trashNode(db!, uid, f.id, now);
+  // Simulate the (future) scheduler having stamped a future purge deadline
+  // on this already-trashed node sometime after it was manually trashed.
+  const futurePurge = now + 7 * 24 * 60 * 60 * 1000;
+  db!.prepare('UPDATE nodes SET purge_after = ? WHERE id = ?').run(futurePurge, f.id);
+  expect(readNode(f.id).purge_after).toBe(futurePurge);
+
+  restoreNode(db!, uid, f.id, now + 1);
+
+  expect(readNode(f.id).purge_after).toBeNull();
+});
+
 test('restoreNode throws when the node is not currently trashed', () => {
   const uid = seedUser();
   const now = Date.now();
@@ -312,4 +384,26 @@ test('permanentDelete throws when the node is not owned by ownerId (IDOR guard)'
 
   expect(() => permanentDelete(db!, otherUid, f.id)).toThrow();
   expect(readNode(f.id)).toBeTruthy();
+});
+
+test('permanentDelete throws when the node is the synthetic root or trash node (kind guard)', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId, f, a, sub, b } = buildTree(uid, now);
+  const { trashId } = ensureUserRoots(db!, uid, now);
+
+  expect(() => permanentDelete(db!, uid, rootId)).toThrow();
+  expect(() => permanentDelete(db!, uid, trashId)).toThrow();
+
+  // Nothing was deleted anywhere in the tree, and the user's root/trash
+  // pointers are still intact (would otherwise dangle after a cascade).
+  for (const id of [rootId, trashId, f.id, a, sub.id, b]) {
+    expect(readNode(id)).toBeTruthy();
+  }
+  const user = db!.prepare('SELECT root_node_id, trash_node_id FROM users WHERE id = ?').get(uid) as {
+    root_node_id: number;
+    trash_node_id: number;
+  };
+  expect(user.root_node_id).toBe(rootId);
+  expect(user.trash_node_id).toBe(trashId);
 });

@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { Node } from './tree.js';
+import { CollisionError } from './tree.js';
 import { nextSuffixedName } from './collisions.js';
 import { subtract } from '../storage/quota.js';
 
@@ -7,6 +8,15 @@ import { subtract } from '../storage/quota.js';
 export interface PermanentDeleteResult {
   freedBytes: number;
   storagePaths: string[];
+}
+
+/** True iff a raw SQLite error is a UNIQUE-constraint violation (`ux_live_name`). */
+function isUniqueConstraintError(e: unknown): boolean {
+  return (
+    e instanceof Error &&
+    ((e as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+      /UNIQUE constraint failed/i.test(e.message))
+  );
 }
 
 /**
@@ -68,10 +78,21 @@ export function trashNode(db: Database.Database, ownerId: number, nodeId: number
  *  - The top node's name is passed through {@link nextSuffixedName} against
  *    the destination — a no-op if the name is free there, otherwise it comes
  *    back auto-suffixed (`"F (1)"`, ...).
- *  - Every node in the subtree (walked structurally via `parent_id`,
- *    regardless of individual `trashed_at` state) gets `trashed_at = NULL`.
+ *  - Every node in the subtree that was trashed together with the top node
+ *    (i.e. shares its exact `trashed_at` value — the same batch stamped by a
+ *    single {@link trashNode} call) gets `trashed_at = NULL`. The recursive
+ *    walk stops at any branch trashed at a *different* time: an
+ *    independently-trashed descendant (trashed separately, before or after
+ *    the top node) is left untouched rather than silently resurrected.
  *  - Only the top node also gets `parent_id = destParent`,
- *    `original_parent_id = NULL`, the resolved name, and `updated_at = now`.
+ *    `original_parent_id = NULL`, `purge_after = NULL` (clears any stale
+ *    auto-purge deadline a scheduler may have stamped while this node was
+ *    trashed — a restored, live node must never be eligible for purge), the
+ *    resolved name, and `updated_at = now`.
+ *  - A residual live-name collision among the resurrected batch (e.g. two
+ *    independently-trashed rows that happen to share both a `trashed_at`
+ *    value and a `(parent_id, name)`) is caught and re-thrown as a
+ *    {@link CollisionError} rather than propagating a raw SQLite error.
  */
 export function restoreNode(db: Database.Database, ownerId: number, nodeId: number, now: number): Node {
   const node = db
@@ -83,6 +104,8 @@ export function restoreNode(db: Database.Database, ownerId: number, nodeId: numb
   if (!node || node.owner_id !== ownerId || node.trashed_at === null) {
     throw new Error(`Invalid node for restoreNode: ${nodeId}`);
   }
+
+  const topTrashedAt = node.trashed_at;
 
   const run = db.transaction((): Node => {
     let destParent: number | null = null;
@@ -106,24 +129,37 @@ export function restoreNode(db: Database.Database, ownerId: number, nodeId: numb
 
     const finalName = nextSuffixedName(db, destParent, node.name);
 
-    // Clear the descendants first, excluding the top node itself: the top
-    // node's trashed_at, name, and parent_id must all flip together in one
-    // statement below, or it would transiently go live under its old name
-    // at its old parent and collide with whatever now occupies that slot.
-    db.prepare(
-      `WITH RECURSIVE sub(id) AS (
-         SELECT id FROM nodes WHERE id = @nodeId
-         UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id
-       )
-       UPDATE nodes SET trashed_at = NULL WHERE id IN (SELECT id FROM sub) AND id != @nodeId`
-    ).run({ nodeId });
+    try {
+      // Clear the descendants first, excluding the top node itself, and
+      // scoped to the top node's own trash batch (same trashed_at value):
+      // the recursion stops as soon as it hits a row trashed at a different
+      // time, leaving any independently-trashed sub-subtree alone. The top
+      // node's trashed_at, name, and parent_id must all flip together in the
+      // statement below, or it would transiently go live under its old name
+      // at its old parent and collide with whatever now occupies that slot.
+      db.prepare(
+        `WITH RECURSIVE sub(id) AS (
+           SELECT id FROM nodes WHERE id = @nodeId
+           UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id
+           WHERE n.trashed_at = @topTrashedAt
+         )
+         UPDATE nodes SET trashed_at = NULL WHERE id IN (SELECT id FROM sub) AND id != @nodeId`
+      ).run({ nodeId, topTrashedAt });
 
-    db.prepare(
-      `UPDATE nodes
-       SET trashed_at = NULL, parent_id = @destParent, original_parent_id = NULL,
-           name = @finalName, updated_at = @now
-       WHERE id = @nodeId`
-    ).run({ nodeId, destParent, finalName, now });
+      db.prepare(
+        `UPDATE nodes
+         SET trashed_at = NULL, parent_id = @destParent, original_parent_id = NULL,
+             purge_after = NULL, name = @finalName, updated_at = @now
+         WHERE id = @nodeId`
+      ).run({ nodeId, destParent, finalName, now });
+    } catch (e) {
+      if (isUniqueConstraintError(e)) {
+        throw new CollisionError(
+          `Cannot restore node ${nodeId}: a live-name collision occurred while resurrecting its subtree`
+        );
+      }
+      throw e;
+    }
 
     return db.prepare('SELECT * FROM nodes WHERE id = @nodeId').get({ nodeId }) as Node;
   });
@@ -133,6 +169,10 @@ export function restoreNode(db: Database.Database, ownerId: number, nodeId: numb
 
 /**
  * Permanently deletes `nodeId` (owned by `ownerId`) and its whole subtree.
+ * The node must exist, be owned by `ownerId`, and be a `folder` or `file` —
+ * the synthetic `root`/`trash` nodes can never be permanently deleted (doing
+ * so would cascade-delete the owner's entire tree and leave the
+ * non-FK-constrained `users.root_node_id`/`trash_node_id` columns dangling).
  * In one transaction:
  *  - The full subtree is collected structurally (a recursive CTE walk down
  *    via `parent_id`, including already-trashed rows).
@@ -153,11 +193,15 @@ export function permanentDelete(
   ownerId: number,
   nodeId: number
 ): PermanentDeleteResult {
-  const node = db.prepare('SELECT owner_id FROM nodes WHERE id = @nodeId').get({ nodeId }) as
-    | { owner_id: number }
+  const node = db.prepare('SELECT owner_id, kind FROM nodes WHERE id = @nodeId').get({ nodeId }) as
+    | { owner_id: number; kind: Node['kind'] }
     | undefined;
 
-  if (!node || node.owner_id !== ownerId) {
+  if (
+    !node ||
+    node.owner_id !== ownerId ||
+    (node.kind !== 'folder' && node.kind !== 'file')
+  ) {
     throw new Error(`Invalid node for permanentDelete: ${nodeId}`);
   }
 
