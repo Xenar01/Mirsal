@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../src/db/connection.js';
 import { migrate } from '../src/db/migrate.js';
@@ -89,4 +89,36 @@ test('ensureAdmin is idempotent: a second call creates no second admin and leave
   expect(after).toBe(before);
   const statAfter = fs.statSync(p);
   expect(statAfter.mtimeMs).toBe(statBefore.mtimeMs);
+});
+
+test('a failure while writing the credential file rolls back the admin row + roots atomically, leaving a clean retry state', async () => {
+  const writeSpy = vi.spyOn(fs, 'writeFileSync').mockImplementationOnce(() => {
+    throw new Error('simulated disk-full failure');
+  });
+
+  await expect(ensureAdmin(db!, testConfig, () => 1000)).rejects.toThrow(
+    'simulated disk-full failure'
+  );
+  writeSpy.mockRestore();
+
+  // The INSERT + ensureUserRoots ran inside the same db.transaction() as the
+  // failing write, so both must have rolled back with it: no admin row, and
+  // (as a consequence) no orphaned roots either.
+  const count = db!.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").get() as {
+    n: number;
+  };
+  expect(count.n).toBe(0);
+
+  // No credential file should exist (the failing write never completed).
+  expect(fs.existsSync(credentialPath())).toBe(false);
+
+  // A retry after the transient failure clears must succeed cleanly and
+  // produce exactly one admin — proving the rollback really did leave the DB
+  // in the pristine "no admin yet" state, not a half-seeded one.
+  await ensureAdmin(db!, testConfig, () => 2000);
+  const countAfterRetry = db!.prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin'").get() as {
+    n: number;
+  };
+  expect(countAfterRetry.n).toBe(1);
+  expect(fs.existsSync(credentialPath())).toBe(true);
 });
