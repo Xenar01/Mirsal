@@ -22,6 +22,14 @@
   --font-display: var(--font-display);
   --font-body: var(--font-body);
   --font-mono: var(--font-mono);
+
+  /* §4.2 type scale, exposed as Tailwind font-size utilities under a
+     `display` key (not `lg`/`xl`/`2xl`/`3xl` — those are Tailwind's own
+     reserved default steps and must not be reused, see tokens.css). This
+     properly registers the value in Tailwind's theme layer, so it overrides
+     nothing and is visible to Tailwind's own introspection/IntelliSense,
+     unlike the un-layered `:root` override this replaces. */
+  --text-display: var(--type-3xl);
 }
 
 body {

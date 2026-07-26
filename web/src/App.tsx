@@ -16,7 +16,7 @@ export default function App() {
 
   return (
     <div className="min-h-dvh bg-paper text-ink">
-      <span className="font-display text-3xl">مِرسال</span>
+      <span className="font-display text-display">مِرسال</span>
     </div>
   );
 }

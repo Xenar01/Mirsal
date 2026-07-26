@@ -28,15 +28,31 @@
 
   --focus: #0E5A63;
 
-  /* Type scale (§4.2), rem */
-  --text-xs: 0.75rem;
-  --text-sm: 0.875rem;
-  --text-base: 1rem;
-  --text-md: 1.125rem;
-  --text-lg: 1.375rem;
-  --text-xl: 1.75rem;
-  --text-2xl: 2.25rem;
-  --text-3xl: 3rem;
+  /* Type scale (§4.2), rem.
+   *
+   * NOTE: prefixed "--type-*", NOT "--text-*". Tailwind v4's default theme
+   * reserves that other custom-property namespace for its own font-size
+   * scale (small/large/extra-large/2x/3x steps, emitted inside its
+   * `@layer theme`). A plain un-layered `:root` custom property of the same
+   * name always wins the cascade over a `@layer theme` declaration
+   * regardless of source order (per the CSS Cascade Layers spec, un-layered
+   * beats layered), so reusing that namespace here would silently and
+   * invisibly override Tailwind's built-in font-size utilities app-wide —
+   * see task-I1-report.md fix-up notes. (Deliberately not spelling out the
+   * reserved property names as literal text here: Tailwind's content
+   * scanner treats any plausible-looking utility-class substring found
+   * anywhere under src/, including CSS comments, as a candidate and will
+   * generate that utility even when nothing actually uses it.) "--type-*"
+   * does not collide with any Tailwind v4 reserved theme namespace.
+   */
+  --type-xs: 0.75rem;
+  --type-sm: 0.875rem;
+  --type-base: 1rem;
+  --type-md: 1.125rem;
+  --type-lg: 1.375rem;
+  --type-xl: 1.75rem;
+  --type-2xl: 2.25rem;
+  --type-3xl: 3rem;
 
   /* Font families (§4.2) — self-hosted via @fontsource, see styles/fonts.ts */
   --font-display: "Reem Kufi", system-ui, sans-serif;
