@@ -6,7 +6,7 @@ import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { openDb } from '../../src/db/connection.js';
 import { migrate } from '../../src/db/migrate.js';
-import { loadConfig } from '../../src/config.js';
+import { loadConfig, MAX_FILE_BYTES } from '../../src/config.js';
 import { buildApp } from '../../src/app.js';
 import { createPasswordService } from '../../src/auth/passwords.js';
 import { ensureUserRoots } from '../../src/nodes/tree.js';
@@ -585,4 +585,188 @@ test('auto-delete with a past timestamp -> 400 past_date; a future value -> 200 
     auto_delete_at: number;
   };
   expect(row.auto_delete_at).toBe(future);
+});
+
+// ---------------------------------------------------------------------------
+// Review fixes (H3 findings #1, #2/#4, #3, #5)
+// ---------------------------------------------------------------------------
+
+test('GET /api/nodes/trash reports the real size of a trashed folder that contains files (finding #1)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  const folderRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { parent_id: rootId, name: 'Docs' },
+  });
+  const folder = folderRes.json();
+
+  await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'a.txt', data: Buffer.from('hello') }); // 5 bytes
+
+  const nestedRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { parent_id: folder.id, name: 'Nested' },
+  });
+  const nested = nestedRes.json();
+
+  await uploadFile(built, session, csrf, { parentId: nested.id, filename: 'b.txt', data: Buffer.from('world!!') }); // 7 bytes
+
+  const trashRes = await built.inject({
+    method: 'POST',
+    url: `/api/nodes/${folder.id}/trash`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+  });
+  expect(trashRes.statusCode).toBe(200);
+
+  const trashListRes = await built.inject({
+    method: 'GET',
+    url: '/api/nodes/trash',
+    cookies: { mirsal_session: session },
+  });
+  expect(trashListRes.statusCode).toBe(200);
+  const trashList = trashListRes.json() as Array<{ name: string; size_bytes: number }>;
+  const trashedDocs = trashList.find((n) => n.name === 'Docs');
+  expect(trashedDocs).toBeDefined();
+  expect(trashedDocs!.size_bytes).toBe(12); // 5 + 7, across two levels of trashed subtree
+});
+
+test('PATCH move+rename in one request never spuriously 409s on an intermediate-state collision (findings #2/#4)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  const aRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { parent_id: rootId, name: 'A' },
+  });
+  const a = aRes.json();
+
+  const bRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { parent_id: rootId, name: 'B' },
+  });
+  const b = bRes.json();
+
+  // An existing item in B named "shared", matching the target's OLD name —
+  // the buggy two-step (moveNode-then-renameNode) implementation would
+  // collide against THIS while still at the target's old name, even though
+  // the final requested state (B + "unique") never collides with it.
+  await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { parent_id: b.id, name: 'shared' },
+  });
+
+  const targetRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { parent_id: a.id, name: 'shared' },
+  });
+  const target = targetRes.json();
+
+  const patchRes = await built.inject({
+    method: 'PATCH',
+    url: `/api/nodes/${target.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { parent_id: b.id, name: 'unique' },
+  });
+
+  expect(patchRes.statusCode).toBe(200);
+  expect(patchRes.json()).toMatchObject({ parent_id: b.id, name: 'unique' });
+
+  const bChildren = (
+    await built.inject({ method: 'GET', url: `/api/nodes?parent=${b.id}`, cookies: { mirsal_session: session } })
+  ).json() as Array<{ name: string }>;
+  expect(bChildren.map((n) => n.name).sort()).toEqual(['shared', 'unique']);
+});
+
+test('upload larger than MAX_FILE_BYTES -> 413 file_too_large, not silently truncated to 200 (finding #3)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  const oversized = Buffer.alloc(MAX_FILE_BYTES + 1024, 'a');
+  const { statusCode, body } = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'huge.bin',
+    data: oversized,
+  });
+
+  expect(statusCode).toBe(413);
+  expect(body).toMatchObject({ code: 'file_too_large' });
+
+  const rows = db!.prepare("SELECT * FROM nodes WHERE kind = 'file' AND owner_id = ?").all(uid);
+  expect(rows).toEqual([]);
+
+  const user = db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number };
+  expect(user.used_bytes).toBe(0);
+
+  const ownerDir = path.join(storageDir!, String(uid));
+  if (fs.existsSync(ownerDir)) {
+    expect(fs.readdirSync(ownerDir)).toEqual([]);
+  }
+}, 20_000);
+
+test('rollup size on a pathologically wide live folder is bounded, not an unbounded scan (finding #5)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  const folderInfo = db!
+    .prepare(
+      `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
+       VALUES (@uid, @rootId, 'folder', 'Wide', 0, @now, @now)`
+    )
+    .run({ uid, rootId, now: NOW });
+  const folderId = Number(folderInfo.lastInsertRowid);
+
+  const insertFile = db!.prepare(
+    `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
+     VALUES (@uid, @folderId, 'file', @name, 1, @now, @now)`
+  );
+  const insertMany = db!.transaction((count: number) => {
+    for (let i = 0; i < count; i++) {
+      insertFile.run({ uid, folderId, name: `f${i}.txt`, now: NOW });
+    }
+  });
+  const totalFiles = 10_050;
+  insertMany(totalFiles);
+
+  const listRes = await built.inject({
+    method: 'GET',
+    url: `/api/nodes?parent=${rootId}`,
+    cookies: { mirsal_session: session },
+  });
+  expect(listRes.statusCode).toBe(200);
+  const wide = (listRes.json() as Array<{ name: string; size_bytes: number }>).find((n) => n.name === 'Wide');
+  expect(wide).toBeDefined();
+
+  // The real total would be `totalFiles` (one byte each) — bounded well
+  // below that proves the recursive-CTE rollup can't be forced to scan an
+  // unbounded number of rows.
+  expect(wide!.size_bytes).toBeGreaterThan(0);
+  expect(wide!.size_bytes).toBeLessThan(totalFiles);
 });

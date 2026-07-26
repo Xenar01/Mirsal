@@ -12,10 +12,10 @@ import {
   CycleError,
   createFolder,
   ensureUserRoots,
+  isAncestor,
   listChildren,
   moveNode,
   renameNode,
-  rollupSize,
   type Node,
 } from '../nodes/tree.js';
 import { mapDbError, nextSuffixedName } from '../nodes/collisions.js';
@@ -109,9 +109,64 @@ function getOwnedNode(db: Database.Database, ownerId: number, nodeId: number): N
   return row;
 }
 
+/**
+ * Cap on the total number of nodes a single size-rollup query will traverse
+ * before its recursive CTE stops (loop/DoS-safety — mirrors
+ * shares/resolver.ts's `MAX_CHAIN_DEPTH` pattern). Review H3 finding #5: an
+ * unbounded per-folder recursive-CTE rollup, run once per folder returned by
+ * `GET /api/nodes`, let any authenticated user freeze this single-process app
+ * with a pathologically deep/wide tree. The `LIMIT` sits inside the
+ * recursive term of the CTE itself (not the outer `SELECT`), which bounds how
+ * many rows the CTE ever produces, not merely how many the final query
+ * returns — confirmed empirically against this exact better-sqlite3 version
+ * (see https://www.sqlite.org/lang_with.html, "Outer LIMIT and OFFSET"). A
+ * subtree larger than this cap yields an under-count rather than an
+ * unbounded scan — an acceptable trade-off for a pathological case that
+ * should never occur in normal usage.
+ */
+const MAX_ROLLUP_NODES = 10_000;
+
+/**
+ * Sums `size_bytes` over `nodeId`'s subtree, bounded to at most
+ * `MAX_ROLLUP_NODES` nodes total.
+ *  - `includeTrashed=false` (a LIVE folder, as returned by `GET /api/nodes`):
+ *    the walk stops at any already-trashed descendant and only live files are
+ *    summed — same contract as `nodes/tree.ts`'s `rollupSize`.
+ *  - `includeTrashed=true` (a TRASHED folder, as returned by `GET
+ *    /api/nodes/trash` — review H3 finding #1): `trashNode()` stamps a
+ *    node's whole live subtree with the identical `trashed_at` in one shot,
+ *    so a trashed folder's own descendants also read as trashed and
+ *    `rollupSize`'s live-only walk (which only descends through
+ *    `trashed_at IS NULL` children) stops immediately at the top node,
+ *    always summing to 0. The walk here instead descends the full physical
+ *    subtree unconditionally (matching what `permanentDelete` would free)
+ *    and sums every file regardless of its own `trashed_at`.
+ */
+function rollupSizeBounded(db: Database.Database, nodeId: number, includeTrashed: boolean): number {
+  const sql = includeTrashed
+    ? `WITH RECURSIVE sub(id) AS (
+         SELECT id FROM nodes WHERE id = @nodeId
+         UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id
+         LIMIT @cap
+       )
+       SELECT COALESCE(SUM(size_bytes), 0) AS total FROM nodes
+       WHERE id IN (SELECT id FROM sub) AND kind = 'file'`
+    : `WITH RECURSIVE sub(id) AS (
+         SELECT id FROM nodes WHERE id = @nodeId
+         UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.trashed_at IS NULL
+         LIMIT @cap
+       )
+       SELECT COALESCE(SUM(size_bytes), 0) AS total FROM nodes
+       WHERE id IN (SELECT id FROM sub) AND kind = 'file' AND trashed_at IS NULL`;
+
+  const row = db.prepare(sql).get({ nodeId, cap: MAX_ROLLUP_NODES }) as { total: number };
+  return row.total;
+}
+
 /** Folders roll up their size on read (their own `size_bytes` column is always 0). */
 function toDto(db: Database.Database, node: Node): NodeDto {
-  const sizeBytes = node.kind === 'folder' ? rollupSize(db, node.id) : node.size_bytes;
+  const sizeBytes =
+    node.kind === 'folder' ? rollupSizeBounded(db, node.id, node.trashed_at !== null) : node.size_bytes;
   return {
     id: node.id,
     parent_id: node.parent_id,
@@ -154,6 +209,60 @@ function handleServiceError(e: unknown, reply: FastifyReply): void {
     return;
   }
   throw e;
+}
+
+/**
+ * Performs a combined move+rename as ONE `UPDATE` that sets `parent_id`,
+ * `name`, and `updated_at` together (review H3 findings #2/#4). Calling
+ * `moveNode` then `renameNode` as two separate dependent UPDATEs persists an
+ * INTERMEDIATE state (new parent, OLD name) that can spuriously collide with
+ * an existing live sibling even when the caller's actual final request (new
+ * parent, NEW name) collides with nothing at all. Mirrors `moveNode`'s own
+ * validation (node + destination ownership/kind, live destination, cycle
+ * check via `isAncestor`) so every rejection reason it can throw is
+ * unchanged; a UNIQUE-constraint violation on the single combined `UPDATE`
+ * is left as a raw SQLite error for the caller's shared `mapDbError`/
+ * `handleServiceError` path to map to `409 name_conflict`, exactly like
+ * `moveNode`/`renameNode`'s own raw-error fallback already does.
+ */
+function moveAndRename(
+  db: Database.Database,
+  ownerId: number,
+  nodeId: number,
+  newParentId: number,
+  newName: string,
+  now: number
+): Node {
+  const node = db.prepare('SELECT owner_id, kind FROM nodes WHERE id = @nodeId').get({ nodeId }) as
+    | { owner_id: number; kind: Node['kind'] }
+    | undefined;
+  if (!node || node.owner_id !== ownerId || (node.kind !== 'folder' && node.kind !== 'file')) {
+    throw new Error(`Invalid node for moveAndRename: ${nodeId}`);
+  }
+
+  const newParent = db
+    .prepare('SELECT owner_id, kind, trashed_at FROM nodes WHERE id = @newParentId')
+    .get({ newParentId }) as
+    | { owner_id: number; kind: Node['kind']; trashed_at: number | null }
+    | undefined;
+  if (
+    !newParent ||
+    newParent.owner_id !== ownerId ||
+    (newParent.kind !== 'root' && newParent.kind !== 'folder') ||
+    newParent.trashed_at !== null
+  ) {
+    throw new Error(`Invalid destination for moveAndRename: ${newParentId}`);
+  }
+
+  if (nodeId === newParentId || isAncestor(db, nodeId, newParentId)) {
+    throw new CycleError();
+  }
+
+  db.prepare(
+    'UPDATE nodes SET parent_id = @newParentId, name = @newName, updated_at = @now WHERE id = @nodeId AND owner_id = @ownerId'
+  ).run({ nodeId, newParentId, newName, now, ownerId });
+
+  return db.prepare('SELECT * FROM nodes WHERE id = @nodeId').get({ nodeId }) as Node;
 }
 
 /** Waits for `stream`'s `open` event, or rejects with the `error` event's error (e.g. ENOENT). */
@@ -310,6 +419,21 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
       return;
     }
 
+    // @fastify/multipart's own `limits.fileSize` (app.ts, the same
+    // MAX_FILE_BYTES) truncates the part's stream at exactly that many bytes
+    // instead of erroring it — writeStreamToTemp's own over-limit Transform
+    // never sees more than MAX_FILE_BYTES bytes, so it resolves normally
+    // above with `bytes === MAX_FILE_BYTES` even though the real upload was
+    // larger. `data.file.truncated` is the only signal that this happened
+    // (review H3 finding #3, critical) and must be checked explicitly, or an
+    // over-limit upload is silently accepted (200) instead of rejected (413).
+    if (data.file.truncated) {
+      release(db, uid, reserveBytes);
+      await unlink(tempPath).catch(() => {});
+      reply.code(413).send({ code: 'file_too_large' });
+      return;
+    }
+
     const base = sanitizeNodeName(data.filename) ?? 'file';
     const finalName = nextSuffixedName(db, parentId, base);
 
@@ -391,14 +515,19 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
     const nowMs = now();
     try {
       const run = db.transaction((): Node => {
-        let node: Node | undefined;
-        if (parsed.data.parent_id !== undefined) {
-          node = moveNode(db, uid, id, parsed.data.parent_id, nowMs);
+        const wantsMove = parsed.data.parent_id !== undefined;
+        const wantsRename = sanitizedName !== null;
+        // Combined move+rename runs as ONE update (moveAndRename) — never
+        // moveNode-then-renameNode — so a collision check only ever sees the
+        // final (new parent, new name) state, never the intermediate one
+        // (review H3 findings #2/#4).
+        if (wantsMove && wantsRename) {
+          return moveAndRename(db, uid, id, parsed.data.parent_id!, sanitizedName!, nowMs);
         }
-        if (sanitizedName !== null) {
-          node = renameNode(db, uid, id, sanitizedName, nowMs);
+        if (wantsMove) {
+          return moveNode(db, uid, id, parsed.data.parent_id!, nowMs);
         }
-        return node!;
+        return renameNode(db, uid, id, sanitizedName!, nowMs);
       });
       const node = run();
       reply.code(200).send(toDto(db, node));
