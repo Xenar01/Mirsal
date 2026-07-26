@@ -170,12 +170,16 @@ export function isAncestor(db: Database.Database, maybeAncestorId: number, nodeI
 
 /**
  * Moves `nodeId` (owned by `ownerId`) to become a child of `newParentId`.
- * Both nodes must exist and be owned by `ownerId`; `newParentId` must be a
- * `root` or `folder` (never a `file`). Guards against cycles *before*
- * touching the row: moving a node into itself, or into one of its own
- * descendants, throws `CycleError`. A live-name clash at the destination
- * (caught from the UPDATE's `ux_live_name` UNIQUE violation) throws
- * `CollisionError` instead of the raw SQLite error.
+ * Both nodes must exist and be owned by `ownerId`; `nodeId` must be a
+ * `folder` or `file` (the synthetic `root`/`trash` nodes can never be
+ * reparented — `parent_id` is NULL only for those two, per schema
+ * invariant); `newParentId` must be a live (`trashed_at IS NULL`) `root` or
+ * `folder` (never a `file`, and never an already-trashed folder — moving a
+ * live node under a trashed ancestor would orphan it). Guards against
+ * cycles *before* touching the row: moving a node into itself, or into one
+ * of its own descendants, throws `CycleError`. A live-name clash at the
+ * destination (caught from the UPDATE's `ux_live_name` UNIQUE violation)
+ * throws `CollisionError` instead of the raw SQLite error.
  */
 export function moveNode(
   db: Database.Database,
@@ -184,20 +188,27 @@ export function moveNode(
   newParentId: number,
   now: number
 ): Node {
-  const node = db.prepare('SELECT owner_id FROM nodes WHERE id = @nodeId').get({ nodeId }) as
-    | { owner_id: number }
+  const node = db.prepare('SELECT owner_id, kind FROM nodes WHERE id = @nodeId').get({ nodeId }) as
+    | { owner_id: number; kind: Node['kind'] }
     | undefined;
-  if (!node || node.owner_id !== ownerId) {
+  if (
+    !node ||
+    node.owner_id !== ownerId ||
+    (node.kind !== 'folder' && node.kind !== 'file')
+  ) {
     throw new Error(`Invalid node for moveNode: ${nodeId}`);
   }
 
   const newParent = db
-    .prepare('SELECT owner_id, kind FROM nodes WHERE id = @newParentId')
-    .get({ newParentId }) as { owner_id: number; kind: Node['kind'] } | undefined;
+    .prepare('SELECT owner_id, kind, trashed_at FROM nodes WHERE id = @newParentId')
+    .get({ newParentId }) as
+    | { owner_id: number; kind: Node['kind']; trashed_at: number | null }
+    | undefined;
   if (
     !newParent ||
     newParent.owner_id !== ownerId ||
-    (newParent.kind !== 'root' && newParent.kind !== 'folder')
+    (newParent.kind !== 'root' && newParent.kind !== 'folder') ||
+    newParent.trashed_at !== null
   ) {
     throw new Error(`Invalid destination for moveNode: ${newParentId}`);
   }

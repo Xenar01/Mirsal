@@ -301,6 +301,57 @@ test('moveNode throws when the destination is a file, not a folder/root', () => 
   expect(() => moveNode(db!, uid, a.id, fileId, now)).toThrow();
 });
 
+test('moveNode throws when the node being moved is the synthetic trash node', () => {
+  // trash sits parallel to root (parent_id NULL, not an ancestor of anything),
+  // so unlike root this case is NOT incidentally caught by the cycle guard —
+  // it only fails if moveNode explicitly checks the moved node's own kind.
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId, trashId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+
+  expect(() => moveNode(db!, uid, trashId, a.id, now)).toThrow();
+
+  const reread = db!.prepare('SELECT parent_id FROM nodes WHERE id = ?').get(trashId) as {
+    parent_id: number | null;
+  };
+  expect(reread.parent_id).toBeNull();
+});
+
+test('moveNode throws when the node being moved is the synthetic root node', () => {
+  // Every live folder for this owner descends from root, so this is already
+  // blocked by the cycle guard (root is always an ancestor of the destination);
+  // asserted here as a product-behavior spec, not as evidence for the kind guard.
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+
+  expect(() => moveNode(db!, uid, rootId, a.id, now)).toThrow();
+});
+
+test('moveNode throws when the destination folder is trashed (cannot move a live node under a trashed ancestor)', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+  const trashedFolder = insertNode({
+    ownerId: uid,
+    parentId: rootId,
+    kind: 'folder',
+    name: 'trashed-folder',
+    trashedAt: now,
+  });
+
+  expect(() => moveNode(db!, uid, a.id, trashedFolder, now)).toThrow();
+
+  // Confirm it wasn't silently reparented under the trashed folder either.
+  const reread = db!.prepare('SELECT parent_id FROM nodes WHERE id = ?').get(a.id) as {
+    parent_id: number;
+  };
+  expect(reread.parent_id).toBe(rootId);
+});
+
 // --- renameNode --------------------------------------------------------------
 
 test('renameNode renames a live folder', () => {
