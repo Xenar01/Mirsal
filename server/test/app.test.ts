@@ -76,6 +76,59 @@ test('GET /api/does-not-exist returns a JSON 404, not HTML', async () => {
   expect(body).toHaveProperty('error');
 });
 
+// `trustProxy` must be bounded to the one real proxy in front of this app
+// (host nginx, reverse-proxying from 127.0.0.1) rather than `true` (which
+// would trust the WHOLE X-Forwarded-For chain, letting any client spoof
+// `req.ip` — the login rate-limiter's key, see routes/auth.ts — by simply
+// setting the header themselves). These assert the actual `req.ip`
+// resolution Fastify derives via `@fastify/proxy-addr`, using a throwaway
+// route (this app has no route that echoes `req.ip` otherwise).
+test('req.ip ignores a spoofed X-Forwarded-For from a non-loopback (untrusted) connection', async () => {
+  const built = await makeApp();
+  built.get('/__whoami', async (req) => ({ ip: req.ip }));
+
+  const res = await built.inject({
+    method: 'GET',
+    url: '/__whoami',
+    remoteAddress: '203.0.113.50', // a real, non-loopback peer — not our nginx
+    headers: { 'x-forwarded-for': '9.9.9.9' }, // attacker-supplied, must be ignored
+  });
+
+  expect(res.json()).toEqual({ ip: '203.0.113.50' });
+});
+
+test('req.ip honors X-Forwarded-For appended by a loopback proxy (the real nginx setup)', async () => {
+  const built = await makeApp();
+  built.get('/__whoami', async (req) => ({ ip: req.ip }));
+
+  const res = await built.inject({
+    method: 'GET',
+    url: '/__whoami',
+    remoteAddress: '127.0.0.1', // our nginx, on loopback
+    headers: { 'x-forwarded-for': '198.51.100.7' }, // the real client, as nginx reported it
+  });
+
+  expect(res.json()).toEqual({ ip: '198.51.100.7' });
+});
+
+test('req.ip ignores an attacker-prepended hop even when arriving via the trusted loopback proxy', async () => {
+  const built = await makeApp();
+  built.get('/__whoami', async (req) => ({ ip: req.ip }));
+
+  const res = await built.inject({
+    method: 'GET',
+    url: '/__whoami',
+    remoteAddress: '127.0.0.1',
+    // The client sent their own fake `X-Forwarded-For: evil-fake-ip` value;
+    // nginx appends the real peer address it saw, producing this 2-entry
+    // chain. Only the entry nginx itself appended (closest to the trusted
+    // hop) may be trusted — the attacker-supplied one further out must not.
+    headers: { 'x-forwarded-for': 'evil-fake-ip, 198.51.100.7' },
+  });
+
+  expect(res.json()).toEqual({ ip: '198.51.100.7' });
+});
+
 // findServerRoot backs WEB_DIST's resolution of `web/dist`. It must find the
 // same package root regardless of how many directory levels deep the calling
 // module happens to live — e.g. `server/src/app.ts` (source, one level under

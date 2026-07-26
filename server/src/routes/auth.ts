@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import fastifyRateLimit from '@fastify/rate-limit';
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import type { Clock } from '../clock.js';
@@ -19,7 +20,17 @@ export interface AuthRouteDeps {
 
 /** Login attempt cap per (username, ip) key before a 429 (spec §8: login brute-force). */
 const LOGIN_RATE_LIMIT_MAX = 5;
-/** Login rate-limit window. */
+/**
+ * Standalone per-IP login attempt cap (global-constraints.md: login must be
+ * rate-limited "per-IP and per-token/user" — two independent ceilings, not
+ * one). Deliberately looser than `LOGIN_RATE_LIMIT_MAX` so it isn't the one
+ * that trips for a single account under normal use; its job is to bound a
+ * single IP spraying many *different* usernames (or the same password across
+ * many accounts), which the username+ip-keyed cap alone can never catch
+ * since each such attempt gets its own distinct key.
+ */
+const LOGIN_IP_RATE_LIMIT_MAX = 20;
+/** Login rate-limit window (shared by both the per-IP and per-username+ip caps). */
 const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 /** Minimum length enforced on a new password (POST /password). */
 const MIN_NEW_PASSWORD_LENGTH = 8;
@@ -103,25 +114,49 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
   // this same verify cost below.
   const dummyHash = await passwordService.hashPassword(DUMMY_PASSWORD);
 
-  app.post(
-    '/api/auth/login',
-    {
-      config: {
-        rateLimit: {
-          max: LOGIN_RATE_LIMIT_MAX,
-          timeWindow: LOGIN_RATE_LIMIT_WINDOW_MS,
-          // Body is only parsed by the time preHandler hooks run — onRequest
-          // (the plugin's default hook) fires too early to read `username`.
-          hook: 'preHandler',
-          keyGenerator(req) {
-            const body = req.body as { username?: unknown } | undefined;
-            const username = typeof body?.username === 'string' ? body.username : '';
-            return `${username}:${req.ip}`;
-          },
-        },
+  // `/login` carries TWO independent rate-limit caps (global-constraints.md:
+  // login must be rate-limited "per-IP and per-token/user"): a standalone
+  // per-IP cap and a per-(username+ip) cap. These are deliberately registered
+  // as two SEPARATE `@fastify/rate-limit` plugin instances in a dedicated
+  // nested scope, rather than one registration plus a route-level
+  // `config.rateLimit` object (the original approach): every
+  // `@fastify/rate-limit` instance whose `onRoute` hook sees a non-null
+  // `routeOptions.config.rateLimit` merges ITS OWN default params with THAT
+  // object — so a second registration sharing the route's `config.rateLimit`
+  // silently collapses onto the exact same key/max as the first instead of
+  // enforcing an independent cap (verified empirically: two registrations
+  // both consulting one `config.rateLimit` end up byte-for-byte identical).
+  // Keeping the route free of `config.rateLimit` and letting each
+  // registration's own default (global-to-its-scope) params apply is what
+  // keeps the two caps — and their per-key counters — genuinely independent.
+  await app.register(async function loginRateLimits(scope) {
+    // Cap 1: standalone per-IP — catches one IP spraying many *different*
+    // usernames (or one password against many accounts), which the
+    // username+ip-keyed cap below can never catch on its own since each such
+    // attempt gets a distinct key there.
+    await scope.register(fastifyRateLimit, {
+      max: LOGIN_IP_RATE_LIMIT_MAX,
+      timeWindow: LOGIN_RATE_LIMIT_WINDOW_MS,
+      hook: 'preHandler',
+      keyGenerator: (req) => req.ip,
+    });
+
+    // Cap 2: per-(username, ip) — catches a distributed attack against one
+    // specific account from many IPs.
+    await scope.register(fastifyRateLimit, {
+      max: LOGIN_RATE_LIMIT_MAX,
+      timeWindow: LOGIN_RATE_LIMIT_WINDOW_MS,
+      // Body is only parsed by the time preHandler hooks run — onRequest
+      // (the plugin's default hook) fires too early to read `username`.
+      hook: 'preHandler',
+      keyGenerator(req) {
+        const body = req.body as { username?: unknown } | undefined;
+        const username = typeof body?.username === 'string' ? body.username : '';
+        return `${username}:${req.ip}`;
       },
-    },
-    async (req, reply) => {
+    });
+
+    scope.post('/api/auth/login', async (req, reply) => {
       const parsed = loginBodySchema.safeParse(req.body);
       if (!parsed.success) {
         reply.code(400).send({ error: 'invalid_body' });
@@ -156,8 +191,8 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
       writeAudit(db, { actorId: row!.id, action: 'login_success', target: username }, now);
 
       reply.code(200).send({ user: toPublicUser(row!) });
-    }
-  );
+    });
+  });
 
   app.post('/api/auth/logout', { preHandler: guards.requireAuth }, async (req, reply) => {
     const token = req.cookies[SESSION_COOKIE];
@@ -212,20 +247,34 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
 
     const newHash = await passwordService.hashPassword(newPassword);
     const nowMs = now();
-    db.prepare(`UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?`).run(
-      newHash,
-      nowMs,
-      row.id
-    );
 
-    // Revoke every session (including the one used for this request) then
-    // issue a fresh one — simplest way to guarantee every OTHER session is
-    // dead while this request still ends with a working, current session.
-    revokeAllForUser(db, row.id);
-    const { token } = createSession(db, row.id, nowMs);
+    // The password_hash UPDATE, the revoke-all session wipe, the fresh
+    // session INSERT, and the audit row are one atomic "password change"
+    // state transition — wrapped in a single db.transaction() (matching
+    // every other multi-statement mutation in this codebase, e.g.
+    // nodes/trash.ts, nodes/tree.ts, scheduler/runner.ts) so a mid-sequence
+    // failure can't leave the account with e.g. a new password hash but
+    // stale/dangling sessions, or a revoked-all with no replacement session.
+    const run = db.transaction((): { token: string } => {
+      db.prepare(`UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?`).run(
+        newHash,
+        nowMs,
+        row.id
+      );
+
+      // Revoke every session (including the one used for this request) then
+      // issue a fresh one — simplest way to guarantee every OTHER session is
+      // dead while this request still ends with a working, current session.
+      revokeAllForUser(db, row.id);
+      const created = createSession(db, row.id, nowMs);
+
+      writeAudit(db, { actorId: row.id, action: 'password_change' }, now);
+
+      return { token: created.token };
+    });
+    const { token } = run();
+
     setAuthCookies(reply, token, issueCsrf(token));
-
-    writeAudit(db, { actorId: row.id, action: 'password_change' }, now);
 
     reply.code(200).send({ ok: true });
   });

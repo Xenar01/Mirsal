@@ -222,6 +222,50 @@ test('rate limit: max+1 rapid bad logins for the same username+ip -> last is 429
   expect(statuses.at(-1)).toBe(429);
 });
 
+test('rate limit: a standalone per-IP cap trips even across distinct usernames (spraying), which the username+ip cap alone cannot catch', async () => {
+  const built = await makeApp();
+  // No seeded users needed — every attempt is against a distinct, nonexistent
+  // username, so the per-(username+ip) cap's key differs every time and can
+  // never trip; only a standalone per-IP cap can catch this pattern.
+  const attempts = 21; // LOGIN_IP_RATE_LIMIT_MAX (20) + 1
+  const statuses: number[] = [];
+  for (let i = 0; i < attempts; i++) {
+    const res = await built.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: `sprayed-user-${i}`, password: 'whatever' },
+    });
+    statuses.push(res.statusCode);
+  }
+
+  expect(statuses.slice(0, -1)).toEqual(statuses.slice(0, -1).map(() => 401));
+  expect(statuses.at(-1)).toBe(429);
+});
+
+test('rate limit: the per-IP cap keys off the address behind the trusted (loopback) proxy hop, not an attacker-spoofed X-Forwarded-For prefix', async () => {
+  const built = await makeApp();
+  const attempts = 21; // LOGIN_IP_RATE_LIMIT_MAX (20) + 1
+  const statuses: number[] = [];
+  for (let i = 0; i < attempts; i++) {
+    const res = await built.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: `sprayed-user-${i}`, password: 'whatever' },
+      remoteAddress: '127.0.0.1', // arriving via the trusted local nginx hop
+      // A different attacker-supplied prefix on every request, but nginx's
+      // own appended (real, constant) client address is always last.
+      headers: { 'x-forwarded-for': `fake-hop-${i}, 198.51.100.9` },
+    });
+    statuses.push(res.statusCode);
+  }
+
+  // If a spoofed, ever-changing X-Forwarded-For prefix could reset/evade the
+  // per-IP counter, every one of these would stay 401. It must still trip,
+  // because req.ip resolves to the stable 198.51.100.9, not the fake prefix.
+  expect(statuses.slice(0, -1)).toEqual(statuses.slice(0, -1).map(() => 401));
+  expect(statuses.at(-1)).toBe(429);
+});
+
 test('mid-flight revocation: login, then deactivate the user -> a subsequent authed request is 401', async () => {
   const built = await makeApp();
   const uid = await seedUser('admin', 'pw', { role: 'admin' });
@@ -345,6 +389,53 @@ test('password change: session A changes password -> 200; A (refreshed) still wo
     cookies: { mirsal_session: b.session! },
   });
   expect(meB.statusCode).toBe(401);
+});
+
+test('password change: the update+revoke+recreate+audit sequence is atomic — a mid-sequence failure rolls back everything, including the already-applied password UPDATE', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'pw', { role: 'admin' });
+  const a = await login(built, 'admin', 'pw');
+
+  // Force the session INSERT (createSession, inside the write sequence) to
+  // fail, simulating a mid-transaction error *after* the password_hash
+  // UPDATE and the revoke-all DELETE have already run. If those two writes
+  // aren't in the same db.transaction() as this INSERT, they'd survive the
+  // failure; wrapped correctly, they must be rolled back too.
+  const originalPrepare = db!.prepare.bind(db!);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (db as any).prepare = (sql: string, ...rest: unknown[]) => {
+    if (sql.includes('INSERT INTO sessions')) {
+      throw new Error('simulated failure mid password-change transaction');
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (originalPrepare as any)(sql, ...rest);
+  };
+
+  const res = await built.inject({
+    method: 'POST',
+    url: '/api/auth/password',
+    cookies: { mirsal_session: a.session! },
+    headers: { 'x-csrf-token': a.csrf! },
+    payload: { current: 'pw', new: 'a-new-password-123' },
+  });
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (db as any).prepare = originalPrepare;
+
+  expect(res.statusCode).toBe(500); // unhandled throw -> Fastify's default error handler
+
+  // The session used to make the request must still be valid: revokeAllForUser's
+  // DELETE was rolled back along with the failed INSERT.
+  const me = await built.inject({
+    method: 'GET',
+    url: '/api/auth/me',
+    cookies: { mirsal_session: a.session! },
+  });
+  expect(me.statusCode).toBe(200);
+
+  // The password itself must have reverted too: the OLD password still logs in.
+  const reLogin = await login(built, 'admin', 'pw');
+  expect(reLogin.statusCode).toBe(200);
 });
 
 test('password change: wrong current password -> 401, nothing revoked', async () => {

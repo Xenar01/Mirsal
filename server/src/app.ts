@@ -97,7 +97,19 @@ async function registerRoutes(app: FastifyInstance, deps: AppDeps): Promise<void
  * passed down to route plugins.
  */
 export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
-  const app = Fastify({ trustProxy: true });
+  // `trustProxy: true` would trust the ENTIRE X-Forwarded-For chain
+  // unboundedly — including hops an attacker fully controls — letting a
+  // remote client spoof a fresh `req.ip` on every request (defeating
+  // IP-keyed rate limiting; see routes/auth.ts's login limiter). The only
+  // real proxy in front of this app is the host nginx vhost, reverse-proxying
+  // from 127.0.0.1 (global-constraints.md: "Host nginx reverse-proxies
+  // 127.0.0.1:8084"), so trust is bounded to exactly that: `'loopback'`
+  // trusts just 127.0.0.0/8 and ::1, and Fastify (via @fastify/proxy-addr)
+  // walks the X-Forwarded-For chain from the socket address inward only
+  // while each hop is itself loopback, stopping at — and using — the first
+  // untrusted (i.e. real client) address. Anything an attacker prepends
+  // further left in the header is never consulted.
+  const app = Fastify({ trustProxy: 'loopback' });
 
   // Strict CSP: self-only, no `unsafe-inline` scripts, no framing. `useDefaults:
   // false` means only the directives listed below apply (Helmet's own bundled
@@ -127,7 +139,13 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     limits: { fileSize: MAX_FILE_BYTES },
   });
 
-  // Per-route limiters opt in later (H2/H4) via each route's own `config.rateLimit`.
+  // Opt-in via a route's own `config.rateLimit` — available to future
+  // single-cap routes (e.g. H4's `/unlock`). H2's `/login` needs TWO
+  // independent caps (per-IP and per-username+ip) and registers its own
+  // dedicated `@fastify/rate-limit` instances directly in routes/auth.ts
+  // instead, since two limiters can't share one route's `config.rateLimit`
+  // object without collapsing into a single, identical cap (see the comment
+  // there).
   await app.register(fastifyRateLimit, { global: false });
 
   await registerRoutes(app, deps);
