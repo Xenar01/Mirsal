@@ -258,22 +258,41 @@ describe('Admin — reveal-once generated password (§3.1)', () => {
 });
 
 describe('Admin — last-admin / self guards (§3.1)', () => {
-  test('with exactly one active admin, its deactivate + delete controls are disabled with the last-admin reason', async () => {
+  test('with exactly one active admin, its deactivate + delete controls stay focusable, expose the last-admin reason accessibly, and do nothing when activated', async () => {
     const users = [mkUser({ id: 1, username: 'admin', role: 'admin', is_active: 1 }), mkUser({ id: 2, username: 'sara' })];
-    stubFetch({ users });
+    const { calls } = stubFetch({ users });
     await renderAdmin({ users });
 
     const row = await screen.findByTestId('user-row-1');
+
+    // The reason is VISIBLE text in the row (discoverable to mouse users), not
+    // hidden inside a native `title` on an unfocusable button.
+    expect(within(row).getByText(t('admin.guard.lastAdmin'))).toBeInTheDocument();
+
     const deactivate = within(row).getByRole('button', { name: t('admin.users.action.deactivate') });
-    expect(deactivate).toBeDisabled();
-    expect(deactivate).toHaveAttribute('title', t('admin.guard.lastAdmin'));
+    // aria-disabled (not native `disabled`) → the control keeps focus + the
+    // reason is exposed to keyboard/AT via aria-describedby.
+    expect(deactivate).toHaveAttribute('aria-disabled', 'true');
+    expect(deactivate).not.toBeDisabled();
+    expect(deactivate).toHaveAccessibleDescription(t('admin.guard.lastAdmin'));
 
     const del = within(row).getByRole('button', { name: t('admin.users.action.delete') });
-    expect(del).toBeDisabled();
-    expect(del).toHaveAttribute('title', t('admin.guard.lastAdmin'));
+    expect(del).toHaveAttribute('aria-disabled', 'true');
+    expect(del).not.toBeDisabled();
+    expect(del).toHaveAccessibleDescription(t('admin.guard.lastAdmin'));
+
+    // Activating a guarded (aria-disabled) control is a no-op: no mutation fires
+    // and the destructive delete modal never opens.
+    await act(async () => {
+      fireEvent.click(deactivate);
+      fireEvent.click(del);
+    });
+    expect(calls.find((c) => c.method === 'PATCH')).toBeUndefined();
+    expect(calls.find((c) => c.method === 'DELETE')).toBeUndefined();
+    expect(screen.queryByRole('button', { name: t('admin.delete.confirm') })).toBeNull();
   });
 
-  test('with two active admins, a non-self admin row deactivate control is enabled', async () => {
+  test('with two active admins, a non-self admin row deactivate control is enabled and carries no guard', async () => {
     const users = [
       mkUser({ id: 1, username: 'admin', role: 'admin', is_active: 1 }),
       mkUser({ id: 2, username: 'admin2', role: 'admin', is_active: 1 }),
@@ -284,6 +303,8 @@ describe('Admin — last-admin / self guards (§3.1)', () => {
     const row2 = await screen.findByTestId('user-row-2');
     const deactivate = within(row2).getByRole('button', { name: t('admin.users.action.deactivate') });
     expect(deactivate).toBeEnabled();
+    expect(deactivate).not.toHaveAttribute('aria-disabled', 'true');
+    expect(within(row2).queryByText(t('admin.guard.lastAdmin'))).toBeNull();
   });
 });
 

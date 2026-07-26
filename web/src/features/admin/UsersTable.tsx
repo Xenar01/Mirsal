@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import Modal from '../../components/Modal';
 import Button from '../../components/Button';
@@ -155,6 +155,50 @@ function UsageCell({ user }: { user: AdminUserDto }) {
   );
 }
 
+/* ── Guarded row action (accessible last-admin / self guard) ──────────── */
+
+/*
+ * A row action that may be blocked by the last-admin / self guard. When
+ * blocked it must stay DISCOVERABLE: native `disabled` makes a button both
+ * unfocusable and (in Chromium/WebKit) an unreliable `title` host, which hides
+ * the required guard explanation from keyboard and often mouse users. So the
+ * guard uses `aria-disabled` (keeps the control focusable + in the a11y tree)
+ * and points `aria-describedby` at the visible reason note rendered alongside;
+ * the click is a no-op while blocked. Native `disabled` is reserved for the
+ * transient in-flight (`pending`) state only.
+ */
+function GuardedAction({
+  onAct,
+  guardBlocked,
+  reasonId,
+  pending,
+  className,
+  children,
+}: {
+  onAct: () => void;
+  guardBlocked: boolean;
+  reasonId: string;
+  pending?: boolean;
+  className: string;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (guardBlocked) return;
+        onAct();
+      }}
+      disabled={pending}
+      aria-disabled={guardBlocked || undefined}
+      aria-describedby={guardBlocked ? reasonId : undefined}
+      className={`${className} aria-disabled:cursor-not-allowed aria-disabled:opacity-50 disabled:cursor-not-allowed disabled:opacity-50`}
+    >
+      {children}
+    </button>
+  );
+}
+
 /* ── User row ─────────────────────────────────────────────────────────── */
 
 function UserRow({
@@ -175,6 +219,7 @@ function UserRow({
   const { t } = useTranslation();
   const { toast } = useToast();
   const patch = usePatchUser();
+  const reasonId = useId();
 
   const active = row.is_active === 1;
   const isAdmin = row.role === 'admin';
@@ -246,64 +291,75 @@ function UserRow({
         </bdi>
       </td>
       <td className="ps-3 pe-3 py-2">
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {active ? (
-            <button
-              type="button"
-              onClick={toggleActive}
-              disabled={guard.blocked || patch.isPending}
-              title={guard.blocked ? guardReason : undefined}
-              className="text-teal disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {t('admin.users.action.deactivate')}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={toggleActive}
-              disabled={patch.isPending}
-              className="text-teal disabled:opacity-50"
-            >
-              {t('admin.users.action.activate')}
-            </button>
-          )}
+        <div className="flex flex-col items-end gap-1.5">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {active ? (
+              <GuardedAction
+                onAct={toggleActive}
+                guardBlocked={guard.blocked}
+                reasonId={reasonId}
+                pending={patch.isPending}
+                className="text-teal"
+              >
+                {t('admin.users.action.deactivate')}
+              </GuardedAction>
+            ) : (
+              <button
+                type="button"
+                onClick={toggleActive}
+                disabled={patch.isPending}
+                className="text-teal disabled:opacity-50"
+              >
+                {t('admin.users.action.activate')}
+              </button>
+            )}
 
-          {isAdmin ? (
-            <button
-              type="button"
-              onClick={toggleRole}
-              disabled={guard.blocked || patch.isPending}
-              title={guard.blocked ? guardReason : undefined}
-              className="text-teal disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {t('admin.users.action.demote')}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={toggleRole}
-              disabled={patch.isPending}
-              className="text-teal disabled:opacity-50"
-            >
-              {t('admin.users.action.promote')}
-            </button>
-          )}
+            {isAdmin ? (
+              <GuardedAction
+                onAct={toggleRole}
+                guardBlocked={guard.blocked}
+                reasonId={reasonId}
+                pending={patch.isPending}
+                className="text-teal"
+              >
+                {t('admin.users.action.demote')}
+              </GuardedAction>
+            ) : (
+              <button
+                type="button"
+                onClick={toggleRole}
+                disabled={patch.isPending}
+                className="text-teal disabled:opacity-50"
+              >
+                {t('admin.users.action.promote')}
+              </button>
+            )}
 
-          <button type="button" onClick={onReset} className="text-teal">
-            {t('admin.users.action.resetPassword')}
-          </button>
-          <button type="button" onClick={onQuota} className="text-teal">
-            {t('admin.users.action.quota')}
-          </button>
-          <button
-            type="button"
-            onClick={onDelete}
-            disabled={guard.blocked}
-            title={guard.blocked ? guardReason : undefined}
-            className="text-clay disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {t('admin.users.action.delete')}
-          </button>
+            <button type="button" onClick={onReset} className="text-teal">
+              {t('admin.users.action.resetPassword')}
+            </button>
+            <button type="button" onClick={onQuota} className="text-teal">
+              {t('admin.users.action.quota')}
+            </button>
+            <GuardedAction
+              onAct={onDelete}
+              guardBlocked={guard.blocked}
+              reasonId={reasonId}
+              className="text-clay"
+            >
+              {t('admin.users.action.delete')}
+            </GuardedAction>
+          </div>
+
+          {/* The guard reason is shown as VISIBLE text (discoverable to mouse
+              users) and linked to every guarded control via aria-describedby —
+              the guarded buttons stay focusable (aria-disabled, not native
+              `disabled`), so keyboard + AT users reach the explanation too. */}
+          {guard.blocked && guardReason && (
+            <p id={reasonId} className="max-w-xs text-end font-body text-xs text-ink-2">
+              {guardReason}
+            </p>
+          )}
         </div>
       </td>
     </tr>
