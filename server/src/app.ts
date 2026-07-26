@@ -12,6 +12,7 @@ import { MAX_FILE_BYTES, type Config } from './config.js';
 import type { Clock } from './clock.js';
 import healthRoute from './routes/health.js';
 import authRoutes from './routes/auth.js';
+import adminRoutes from './routes/admin.js';
 import nodesRoutes from './routes/nodes.js';
 import sharesRoutes from './routes/shares.js';
 import publicRoutes from './routes/public.js';
@@ -91,6 +92,15 @@ async function registerRoutes(app: FastifyInstance, deps: AppDeps): Promise<void
     passwordService,
     guards,
     csrfSecret: deps.config.CSRF_SECRET,
+  });
+
+  // H5: admin control panel — every route `guards.requireAdmin` + CSRF
+  // (inherited) + audited. Same single `passwordService`/`guards` instances.
+  await app.register(adminRoutes, {
+    db: deps.db,
+    now: deps.now,
+    guards,
+    passwordService,
   });
 
   const blobStore = createBlobStore({ storageDir: deps.config.STORAGE_DIR });
