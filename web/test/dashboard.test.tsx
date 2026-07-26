@@ -274,6 +274,52 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     expect(screen.queryByText(i18n.t('dashboard.folder.error'))).toBeNull();
   });
 
+  test('"move to root" is offered from a deep-linked subfolder because the root id comes from user.rootNodeId (known even at an empty root, no child to derive it from)', async () => {
+    // A single file living in subfolder 9, reached by DEEP LINK (?parent=9):
+    // the root listing (parent=null) is never fetched here, so there is no
+    // root child from which to derive the synthetic root id. Before this fix,
+    // rootIdRef stayed null and "move to root" had no destination. Now the
+    // authoritative root id comes from the auth-context user.rootNodeId — the
+    // same value that lets a brand-new EMPTY root create folders / move-to-root.
+    const file: NodeDto = {
+      id: 42,
+      parent_id: 9,
+      kind: 'file',
+      name: 'تقرير.pdf',
+      size_bytes: 2048,
+      mime_type: 'application/pdf',
+      auto_delete_at: null,
+      created_at: NOW,
+      updated_at: NOW,
+    };
+    // The user carries rootNodeId = 3 (distinct from the subfolder id 9).
+    stubFetch({
+      '/api/nodes': [file],
+      '/api/nodes/trash': [],
+      '/api/shares': [],
+      '/api/auth/me': { ...USER, rootNodeId: 3 },
+    });
+
+    renderDrive(['/?parent=9']);
+
+    // Gate on the auth user being loaded (its username renders in the shell),
+    // so the rootNodeId is in the auth context before we open the Move modal.
+    await screen.findByText('sara');
+    await screen.findByText('تقرير.pdf');
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.action.move') }));
+
+    // The Move modal offers "root" (ملفاتي) as a destination — its id (3) came
+    // from user.rootNodeId, since the root listing was never fetched here.
+    const rootOption = (await screen.findByRole('option', {
+      name: i18n.t('dashboard.breadcrumb.root'),
+    })) as HTMLOptionElement;
+    expect(rootOption).toBeInTheDocument();
+    expect(rootOption.value).toBe('3');
+    // The "no destinations" fallback must NOT be shown.
+    expect(screen.queryByText(i18n.t('dashboard.move.noTargets'))).toBeNull();
+  });
+
   test('a 409 on folder create surfaces a name-conflict message (§3.2 / §7)', async () => {
     // A name clash needs an existing sibling, so the root is non-empty — which
     // is also how the client learns the concrete root node id (from a child's

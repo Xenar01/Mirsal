@@ -460,3 +460,64 @@ test('password change: wrong current password -> 401, nothing revoked', async ()
   });
   expect(me.statusCode).toBe(200);
 });
+
+// ── rootNodeId: non-null for any active user, even one never materialized ──
+// A brand-new admin-created user has root_node_id = NULL until their first node
+// op. Both /login and /me must still return a concrete synthetic-root id
+// (resolved via ensureUserRoots) so the web can create a folder / move-to-root
+// at an EMPTY root without waiting for a first child to exist.
+
+test('login: rootNodeId is a positive id backed by a real kind=root node owned by the user (roots not pre-materialized)', async () => {
+  const built = await makeApp();
+  const userId = await seedUser('freshuser', 'pw', { role: 'user' });
+
+  // Precondition: this user's roots were never materialized.
+  const before = db!
+    .prepare('SELECT root_node_id, trash_node_id FROM users WHERE id = ?')
+    .get(userId) as { root_node_id: number | null; trash_node_id: number | null };
+  expect(before.root_node_id).toBeNull();
+
+  const res = await built.inject({
+    method: 'POST',
+    url: '/api/auth/login',
+    payload: { username: 'freshuser', password: 'pw' },
+  });
+
+  expect(res.statusCode).toBe(200);
+  const body = res.json() as { user: { id: number; rootNodeId: number } };
+  expect(typeof body.user.rootNodeId).toBe('number');
+  expect(body.user.rootNodeId).toBeGreaterThan(0);
+
+  // It corresponds to a real synthetic root node owned by that user.
+  const rootRow = db!
+    .prepare('SELECT owner_id, kind FROM nodes WHERE id = ?')
+    .get(body.user.rootNodeId) as { owner_id: number; kind: string } | undefined;
+  expect(rootRow).toBeDefined();
+  expect(rootRow!.kind).toBe('root');
+  expect(rootRow!.owner_id).toBe(userId);
+
+  // And it was persisted onto the user row (ensureUserRoots materialized it).
+  const after = db!
+    .prepare('SELECT root_node_id FROM users WHERE id = ?')
+    .get(userId) as { root_node_id: number | null };
+  expect(after.root_node_id).toBe(body.user.rootNodeId);
+});
+
+test('GET /me: returns the same rootNodeId as login for the same user', async () => {
+  const built = await makeApp();
+  await seedUser('freshuser', 'pw', { role: 'user' });
+
+  const loginRes = await login(built, 'freshuser', 'pw');
+  const loginRoot = (loginRes.body as { user: { rootNodeId: number } }).user.rootNodeId;
+  expect(typeof loginRoot).toBe('number');
+  expect(loginRoot).toBeGreaterThan(0);
+
+  const me = await built.inject({
+    method: 'GET',
+    url: '/api/auth/me',
+    cookies: { mirsal_session: loginRes.session! },
+  });
+  expect(me.statusCode).toBe(200);
+  const meBody = me.json() as { rootNodeId: number };
+  expect(meBody.rootNodeId).toBe(loginRoot);
+});

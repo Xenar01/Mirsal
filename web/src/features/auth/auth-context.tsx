@@ -15,6 +15,12 @@ export interface PublicUser {
   username: string;
   role: string;
   mustChangePassword: boolean;
+  /**
+   * The user's synthetic root node id — always concrete for an active user,
+   * even a brand-new account whose root is still empty. Lets the drive create a
+   * folder / move-to-root at an empty root without a child to derive it from.
+   */
+  rootNodeId: number;
 }
 
 export interface AuthContextValue {

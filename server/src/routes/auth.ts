@@ -8,6 +8,7 @@ import type { Guards } from '../auth/guards.js';
 import { CSRF_COOKIE, SESSION_COOKIE } from '../auth/guards.js';
 import { SESSION_TTL_MS, createSession, revokeAllForUser, revokeSession } from '../auth/sessions.js';
 import { createCsrf } from '../auth/csrf.js';
+import { ensureUserRoots } from '../nodes/tree.js';
 import { writeAudit } from '../audit.js';
 
 export interface AuthRouteDeps {
@@ -66,14 +67,27 @@ interface PublicUser {
   username: string;
   role: string;
   mustChangePassword: boolean;
+  rootNodeId: number;
 }
 
-function toPublicUser(row: Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password'>): PublicUser {
+/**
+ * `rootNodeId` is the user's synthetic root node id — always concrete for an
+ * active user, even one whose roots were never materialized (a brand-new
+ * admin-created account): callers resolve it via the idempotent
+ * `ensureUserRoots` and pass its `rootId` in. The web needs it to create a
+ * folder / move-to-root at an EMPTY root, before any child exists to derive it
+ * from.
+ */
+function toPublicUser(
+  row: Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password'>,
+  rootNodeId: number
+): PublicUser {
   return {
     id: row.id,
     username: row.username,
     role: row.role,
     mustChangePassword: !!row.must_change_password,
+    rootNodeId,
   };
 }
 
@@ -190,7 +204,10 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
       setAuthCookies(reply, token, issueCsrf(token));
       writeAudit(db, { actorId: row!.id, action: 'login_success', target: username }, now);
 
-      reply.code(200).send({ user: toPublicUser(row!) });
+      // Materialize (idempotently) the synthetic root/trash so the returned
+      // user always carries a concrete rootNodeId — even a brand-new account.
+      const { rootId } = ensureUserRoots(db, row!.id, now());
+      reply.code(200).send({ user: toPublicUser(row!, rootId) });
     });
   });
 
@@ -220,7 +237,8 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
       reply.code(401).send();
       return;
     }
-    reply.code(200).send(toPublicUser(row));
+    const { rootId } = ensureUserRoots(db, row.id, now());
+    reply.code(200).send(toPublicUser(row, rootId));
   });
 
   app.post('/api/auth/password', { preHandler: guards.requireAuth }, async (req, reply) => {

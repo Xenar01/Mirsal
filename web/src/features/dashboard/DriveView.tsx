@@ -12,6 +12,7 @@ import UploadDrop from './UploadDrop';
 import { downloadUrl } from './api';
 import { formatBytes, formatDate } from './format';
 import { useNodes, useCreateFolder, useRenameNode, useMoveNode, useTrashNode } from './queries';
+import { useAuth } from '../auth/auth-context';
 import { useShares } from './share/queries';
 import ShareModal from './share/ShareModal';
 import AutoDeleteMenu from './share/AutoDeleteMenu';
@@ -61,14 +62,21 @@ export default function DriveView() {
     }
   }
 
-  // Learn the synthetic root node id from a root child's parent_id, so "move to
-  // root" has a concrete destination id (the root listing is `parent=null`).
+  // The synthetic root node id, so "move to root" has a concrete destination id
+  // (the root listing itself is `parent=null`). The auth-context user carries
+  // the authoritative value — known even when the root is EMPTY (a brand-new
+  // account), where there is no child's parent_id to derive it from. The
+  // legacy child-derived path is kept only as a fallback for the (transient)
+  // window before the auth user has loaded.
+  const { user } = useAuth();
   const rootIdRef = useRef<number | null>(null);
   useEffect(() => {
-    if (parentId === null && children.length > 0 && children[0].parent_id !== null) {
+    if (user && typeof user.rootNodeId === 'number') {
+      rootIdRef.current = user.rootNodeId;
+    } else if (parentId === null && children.length > 0 && children[0].parent_id !== null) {
       rootIdRef.current = children[0].parent_id;
     }
-  }, [parentId, children]);
+  }, [user, parentId, children]);
 
   const trashMutation = useTrashNode();
   const [newFolderOpen, setNewFolderOpen] = useState(false);
