@@ -8,10 +8,20 @@ import { dueTrash, duePurge, orphanBlobs } from './selectors.js';
 /** Max due rows processed per tick, per phase (auto-trash, purge). */
 const BATCH = 500;
 
+/**
+ * Max orphan blobs unlinked per tick — bounds the sweep the same way `BATCH`
+ * bounds the dueTrash/duePurge phases. Any leftover orphans beyond this cap
+ * are simply picked up by a later tick; this only spreads a large backlog
+ * across ticks, it never loses one.
+ */
+const ORPHAN_BATCH = 500;
+
 /** The subset of {@link import('../config.js').Config} the scheduler needs, injectable for tests. */
 export interface SchedulerCfg {
   GRACE_MS: number;
   STORAGE_DIR: string;
+  /** Test-only override of the orphan-sweep batch cap; defaults to {@link ORPHAN_BATCH}. */
+  ORPHAN_BATCH?: number;
 }
 
 export interface TickResult {
@@ -21,6 +31,17 @@ export interface TickResult {
 
 function defaultCfg(): SchedulerCfg {
   return { GRACE_MS: DEFAULT_GRACE_MS, STORAGE_DIR: loadConfig().STORAGE_DIR };
+}
+
+/**
+ * Resolves after the event loop has processed at least one macrotask/I/O
+ * callback ahead of us — unlike a bare microtask `await`, `setImmediate`
+ * genuinely yields, which is what lets other pending work (new requests,
+ * timers) interleave with a long synchronous sweep instead of it running as
+ * one unbounded blocking burst.
+ */
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 /** Module-level reentrancy lock — see {@link runTick}. */
@@ -36,24 +57,37 @@ let running = false;
  *
  * Ordering (crash-safety invariant: never unlink a blob whose row still
  * exists — DB rows are the source of truth):
- *  1. `dueTrash`: for each due live node, `trashNode` then stamp
- *     `purge_after = now + GRACE_MS` (auto-trash sets a purge deadline;
- *     manual trash leaves it NULL). A node that vanishes or is otherwise
- *     invalid by the time it's processed (e.g. cascaded away) is skipped,
- *     not fatal to the tick.
+ *  1. `dueTrash`: for each due live node, `trashNode` and the
+ *     `purge_after = now + GRACE_MS` stamp commit together in **one
+ *     transaction** (auto-trash sets a purge deadline; manual trash leaves
+ *     it NULL) — never two separate writes, so a crash can never strand a
+ *     node trashed-but-never-purge-scheduled. A node that vanishes/becomes
+ *     invalid by the time it's processed (e.g. cascaded away), or whose
+ *     stamp fails, rolls the whole transaction back and is skipped — not
+ *     fatal to the tick, and not left in a half-done state.
  *  2. `duePurge`: for each due node, `permanentDelete` (its own committed
  *     transaction) and collect the returned `storagePaths`. Same
  *     skip-on-error tolerance (a parent purged earlier in this batch can
  *     cascade a child row away before its own turn).
  *  3. Only after every `permanentDelete` transaction above has committed:
- *     unlink every collected blob path. `deleteBlob` is idempotent on
- *     ENOENT, so a double-unlink (e.g. a retried tick) is safe.
- *  4. Orphan sweep: unlink any blob under `STORAGE_DIR` with no matching
- *     `nodes.storage_path` row — reclaims a blob left behind by a
- *     crash between step 2's commit and step 3's unlink on a prior run.
+ *     unlink every collected blob path, one at a time with a per-item
+ *     try/catch. `deleteBlob` is idempotent on ENOENT, so a double-unlink
+ *     (e.g. a retried tick) is safe; a non-ENOENT failure on one path is
+ *     swallowed and does not abort the rest, skip the orphan sweep, or
+ *     reject the tick — the DB row is already gone, so a failed unlink here
+ *     just leaves an orphan for a later sweep to retry.
+ *  4. Orphan sweep: unlink blobs under `STORAGE_DIR` with no matching
+ *     `nodes.storage_path` row — reclaims blobs left behind by a crash
+ *     between step 2's commit and step 3's unlink on a prior run. Capped at
+ *     an orphan batch size per tick and yields to the event loop between
+ *     every unlink, so this fully-synchronous readdirSync/unlinkSync work
+ *     never blocks the loop for one unbounded burst on a large
+ *     `STORAGE_DIR` — any excess orphans are swept on a later tick. Also
+ *     per-item fault tolerant, same rationale as step 3.
  *
- * `cfg` (GRACE_MS/STORAGE_DIR) is optional and defaults to `loadConfig()` —
- * pass it explicitly in tests for an isolated temp STORAGE_DIR.
+ * `cfg` (GRACE_MS/STORAGE_DIR/ORPHAN_BATCH) is optional and defaults to
+ * `loadConfig()`/the module's batch constant — pass it explicitly in tests
+ * for an isolated temp STORAGE_DIR or a small orphan-batch cap.
  */
 export async function runTick(
   db: Database.Database,
@@ -65,19 +99,33 @@ export async function runTick(
   }
   running = true;
   try {
-    const { GRACE_MS, STORAGE_DIR } = cfg ?? defaultCfg();
+    const { GRACE_MS, STORAGE_DIR, ORPHAN_BATCH: orphanBatchOverride } = cfg ?? defaultCfg();
+    const orphanBatch = orphanBatchOverride ?? ORPHAN_BATCH;
+
+    // Atomic auto-trash + purge-deadline stamp: both writes commit together
+    // or neither does. Nested inside `runTick`'s own transaction usage
+    // elsewhere is fine — better-sqlite3 nests via SAVEPOINT, so if the
+    // purge_after UPDATE below throws, trashNode's own (already-committed
+    // inner) changes are rolled back too, never leaving a node stranded
+    // outside both dueTrash (already trashed_at-stamped) and duePurge
+    // (purge_after never stamped) forever.
+    const trashAndStampPurge = db.transaction((ownerId: number, nodeId: number) => {
+      trashNode(db, ownerId, nodeId, now);
+      db.prepare('UPDATE nodes SET purge_after = @purgeAfter WHERE id = @id').run({
+        purgeAfter: now + GRACE_MS,
+        id: nodeId,
+      });
+    });
 
     let trashed = 0;
     for (const node of dueTrash(db, now, BATCH)) {
       try {
-        trashNode(db, node.owner_id, node.id, now);
-        db.prepare('UPDATE nodes SET purge_after = @purgeAfter WHERE id = @id').run({
-          purgeAfter: now + GRACE_MS,
-          id: node.id,
-        });
+        trashAndStampPurge(node.owner_id, node.id);
         trashed++;
       } catch {
-        // Node vanished or became invalid between select and trash — skip.
+        // Node vanished/became invalid, or the purge_after stamp failed —
+        // either way the whole transaction rolled back, so the node is left
+        // exactly as it was (still live, still due) for the next tick to retry.
       }
     }
 
@@ -94,11 +142,34 @@ export async function runTick(
     }
 
     // Post-commit unlink: every permanentDelete above has already committed.
-    await Promise.all(allPaths.map((p) => deleteBlob(p)));
+    // Per-item fault tolerance (mirroring the DB phases above): a single
+    // non-ENOENT deleteBlob failure must not abort the remaining unlinks,
+    // must not skip the orphan sweep below, and must not reject runTick's
+    // promise — the DB row is already gone (source of truth), so a failed
+    // unlink here just leaves an orphan a later sweep will retry.
+    for (const p of allPaths) {
+      try {
+        deleteBlob(p);
+      } catch {
+        // Best-effort — see rationale above.
+      }
+    }
 
-    // Orphan sweep: reclaims blobs left by a crash-after-commit on a prior tick.
-    for (const rel of orphanBlobs(db, STORAGE_DIR)) {
-      await deleteBlob(rel);
+    // Orphan sweep: reclaims blobs left by a crash-after-commit on a prior
+    // tick. Capped at `orphanBatch` per tick (like the BATCH-limited phases
+    // above — any excess is swept on a later tick) and yields to the event
+    // loop between every unlink, so this synchronous readdirSync/unlinkSync
+    // work never blocks the loop for one unbounded burst proportional to a
+    // large STORAGE_DIR (design spec §9). Also per-item fault tolerant, same
+    // rationale as the unlink loop above.
+    const orphans = orphanBlobs(db, STORAGE_DIR).slice(0, orphanBatch);
+    for (const rel of orphans) {
+      try {
+        deleteBlob(rel);
+      } catch {
+        // Best-effort — see rationale above.
+      }
+      await yieldToEventLoop();
     }
 
     return { trashed, purged };

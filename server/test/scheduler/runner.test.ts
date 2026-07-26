@@ -153,6 +153,43 @@ test('runTick trashes a due live node and stamps purge_after = now + GRACE_MS', 
   expect(node.purge_after).toBe(now + TEST_GRACE_MS);
 });
 
+// --- atomicity: trashed_at + purge_after commit together ----------------------
+
+test('auto-trash: if the purge_after stamp fails, trashNode\'s own change is rolled back too (never half-done)', async () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const id = insertNode({ ownerId: uid, parentId: null, name: 'due', autoDeleteAt: now - 1 });
+
+  const originalPrepare = db!.prepare.bind(db!);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (db as any).prepare = (sql: string) => {
+    if (sql.includes('SET purge_after = @purgeAfter WHERE id = @id')) {
+      throw new Error('boom-purge-after');
+    }
+    return originalPrepare(sql);
+  };
+
+  const result = await runTick(db!, now, cfg());
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (db as any).prepare = originalPrepare;
+
+  expect(result).toEqual({ trashed: 0, purged: 0 });
+  const node = readNode(id);
+  // Rolled back atomically: NOT stranded half-trashed (trashed_at set but
+  // purge_after still NULL, which would be invisible to both dueTrash and
+  // duePurge forever). The node is left exactly as it was: fully live.
+  expect(node.trashed_at).toBeNull();
+  expect(node.purge_after).toBeNull();
+
+  // Prove it isn't stranded: an ordinary subsequent tick fully trashes it.
+  const result2 = await runTick(db!, now, cfg());
+  expect(result2).toEqual({ trashed: 1, purged: 0 });
+  const node2 = readNode(id);
+  expect(node2.trashed_at).toBe(now);
+  expect(node2.purge_after).toBe(now + TEST_GRACE_MS);
+});
+
 // --- purge + blob removal ------------------------------------------------------
 
 test('runTick purges a due-trashed node: rows gone, blob unlinked, used_bytes decremented', async () => {
@@ -175,6 +212,50 @@ test('runTick purges a due-trashed node: rows gone, blob unlinked, used_bytes de
   expect(nodeExists(id)).toBe(false);
   expect(blobExists(rel)).toBe(false);
   expect(usedBytesOf(uid)).toBe(0);
+});
+
+// --- blob-unlink fault tolerance -----------------------------------------------
+
+test('a single non-ENOENT deleteBlob failure does not abort remaining unlinks, skip the orphan sweep, or reject runTick', async () => {
+  const uid = seedUser();
+  const now = Date.now();
+
+  // A due-purge node whose "blob" is actually a directory on disk: unlinkSync
+  // on a directory throws EISDIR — a non-ENOENT failure — simulating one bad
+  // unlink among several collected paths.
+  const badRel = `g2-bad-${blobSeq++}`;
+  fs.mkdirSync(path.join(storageDir, badRel), { recursive: true });
+  const badId = insertNode({
+    ownerId: uid,
+    parentId: null,
+    name: 'bad',
+    storagePath: badRel,
+    trashedAt: now - 1000,
+    purgeAfter: now - 1,
+  });
+
+  // A second, ordinary due-purge node with a real blob file.
+  const goodRel = writeBlob();
+  const goodId = insertNode({
+    ownerId: uid,
+    parentId: null,
+    name: 'good',
+    storagePath: goodRel,
+    trashedAt: now - 1000,
+    purgeAfter: now - 1,
+  });
+
+  // An unrelated orphan blob (no node row) — proves the orphan sweep still
+  // runs after the earlier deleteBlob failure.
+  const orphanRel = writeBlob();
+
+  await expect(runTick(db!, now, cfg())).resolves.toEqual({ trashed: 0, purged: 2 });
+
+  expect(nodeExists(badId)).toBe(false); // DB row purged regardless of unlink outcome
+  expect(nodeExists(goodId)).toBe(false);
+  expect(fs.existsSync(path.join(storageDir, badRel))).toBe(true); // failed unlink left in place, not fatal
+  expect(blobExists(goodRel)).toBe(false); // remaining unlink still succeeded
+  expect(blobExists(orphanRel)).toBe(false); // orphan sweep still ran to completion
 });
 
 // --- reentrancy ---------------------------------------------------------------
@@ -219,6 +300,42 @@ test('a blob left behind by a crash-after-commit is reclaimed by the orphan swee
 
   expect(result).toEqual({ trashed: 0, purged: 0 });
   expect(blobExists(rel)).toBe(false);
+});
+
+// --- orphan sweep: batch cap + yielding -----------------------------------------
+
+test('orphan sweep caps unlinks at the configured batch size per tick; the remainder is swept on later ticks', async () => {
+  seedUser();
+  const now = Date.now();
+  const rels = [writeBlob(), writeBlob(), writeBlob(), writeBlob(), writeBlob()];
+  const smallBatchCfg = { ...cfg(), ORPHAN_BATCH: 2 };
+
+  await runTick(db!, now, smallBatchCfg);
+  expect(rels.filter((r) => blobExists(r)).length).toBe(3); // only 2 of 5 removed
+
+  await runTick(db!, now, smallBatchCfg);
+  expect(rels.filter((r) => blobExists(r)).length).toBe(1); // 2 more removed
+
+  await runTick(db!, now, smallBatchCfg);
+  expect(rels.every((r) => !blobExists(r))).toBe(true); // last one removed
+});
+
+test('orphan sweep yields to the event loop between unlinks instead of running as one blocking synchronous burst', async () => {
+  seedUser();
+  const now = Date.now();
+  const rels = [writeBlob(), writeBlob(), writeBlob()];
+
+  const setImmediateSpy = vi.spyOn(global, 'setImmediate');
+  const result = await runTick(db!, now, cfg());
+  const yieldCalls = setImmediateSpy.mock.calls.length;
+  setImmediateSpy.mockRestore();
+
+  expect(result).toEqual({ trashed: 0, purged: 0 });
+  expect(rels.every((r) => !blobExists(r))).toBe(true);
+  // One explicit event-loop yield per swept orphan — proves the sweep
+  // interleaves with other pending macrotasks instead of unlinking
+  // everything in one unbroken synchronous pass.
+  expect(yieldCalls).toBe(rels.length);
 });
 
 // --- 2-arg lazy default cfg ----------------------------------------------------
