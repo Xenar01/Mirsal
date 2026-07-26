@@ -24,6 +24,13 @@ export interface AppDeps {
   db: Database.Database;
   config: Config;
   now: Clock;
+  /**
+   * Overrides the built-SPA root (`WEB_DIST`) used for static serving and the
+   * history/`/s/*` fallback. Production leaves this unset (the real
+   * `web/dist`); tests point it at a throwaway temp dir so the `distExists`
+   * branch is exercised deterministically without a real frontend build.
+   */
+  webDist?: string;
 }
 
 /**
@@ -182,16 +189,21 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
 
   await registerRoutes(app, deps);
 
-  const distExists = fs.existsSync(WEB_DIST);
+  const webDist = deps.webDist ?? WEB_DIST;
+  const distExists = fs.existsSync(webDist);
   if (distExists) {
-    await app.register(fastifyStatic, { root: WEB_DIST });
+    await app.register(fastifyStatic, { root: webDist });
   }
 
   // Single catch-all: JSON 404 for unmatched /api/* (never let the SPA
   // fallback swallow API errors); index.html for other GETs so client-side
-  // routing works, EXCEPT under /s/* (reserved for a dedicated route with its
-  // own `Referrer-Policy: no-referrer`, added in a later task); a plain JSON
-  // 404 otherwise (including when the SPA hasn't been built yet).
+  // routing works; a plain JSON 404 otherwise (non-GET, or when the SPA hasn't
+  // been built yet). The public share page at /s/<token> (spec §3.5) is served
+  // from the SAME index.html shell, but its HTML document additionally carries
+  // `Referrer-Policy: no-referrer` so the secret token never leaks via a
+  // `Referer` header on outbound navigations. (The `/api/public/*` JSON
+  // endpoints set that header via the public plugin's own onSend hook; this is
+  // the header for the HTML document itself.)
   app.setNotFoundHandler((req, reply) => {
     const pathname = req.url.split('?')[0];
 
@@ -200,7 +212,10 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
       return;
     }
 
-    if (distExists && req.method === 'GET' && !pathname.startsWith('/s/')) {
+    if (distExists && req.method === 'GET') {
+      if (pathname.startsWith('/s/')) {
+        reply.header('Referrer-Policy', 'no-referrer');
+      }
       reply.sendFile('index.html');
       return;
     }

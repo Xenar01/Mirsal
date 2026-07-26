@@ -11,6 +11,7 @@ import { buildApp, findServerRoot } from '../src/app.js';
 
 let db: Database.Database | undefined;
 let dir: string | undefined;
+let distDir: string | undefined;
 let app: FastifyInstance | undefined;
 
 afterEach(async () => {
@@ -22,9 +23,19 @@ afterEach(async () => {
     fs.rmSync(dir, { recursive: true, force: true });
     dir = undefined;
   }
+  if (distDir) {
+    fs.rmSync(distDir, { recursive: true, force: true });
+    distDir = undefined;
+  }
 });
 
-async function makeApp(): Promise<FastifyInstance> {
+/**
+ * `webDist` lets a test point the SPA-shell root at a throwaway temp dir it
+ * controls, so the `distExists` branch of the not-found handler is exercised
+ * deterministically — without depending on a real `web` build (the gitignored
+ * `web/dist`) being present (or absent) on disk during server tests.
+ */
+async function makeApp(opts: { webDist?: string } = {}): Promise<FastifyInstance> {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mirsal-h1-'));
   const dbPath = path.join(dir, 't.db');
   db = openDb(dbPath);
@@ -38,9 +49,17 @@ async function makeApp(): Promise<FastifyInstance> {
     PUBLIC_BASE_URL: 'https://mirsal.example.test',
   });
 
-  const built = await buildApp({ db, config, now: () => 1_700_000_000_000 });
+  const built = await buildApp({ db, config, now: () => 1_700_000_000_000, webDist: opts.webDist });
   app = built;
   return built;
+}
+
+/** A throwaway `web/dist` containing a recognizable `index.html`, cleaned up in afterEach. */
+const SPA_MARKER = '<!doctype html><title>mirsal-spa-shell</title>';
+function makeDistDir(): string {
+  distDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mirsal-h1-dist-'));
+  fs.writeFileSync(path.join(distDir, 'index.html'), SPA_MARKER);
+  return distDir;
 }
 
 test('GET /api/health returns 200 {ok:true}', async () => {
@@ -160,4 +179,59 @@ test('findServerRoot locates the package root from a compiled dist/src-depth pat
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// ── §3.5: the public share page shell at /s/<token> ──────────────────────
+// GET /s/<token> must serve the SPA shell (index.html) so the React public
+// page is reachable at its own URL, and that HTML document must carry
+// `Referrer-Policy: no-referrer` so the secret token never leaks via a
+// `Referer` header on outbound navigations from the page.
+
+test('GET /s/<token> (dist present) -> 200 HTML shell with Referrer-Policy: no-referrer', async () => {
+  const built = await makeApp({ webDist: makeDistDir() });
+
+  const res = await built.inject({ method: 'GET', url: '/s/anytoken123' });
+
+  expect(res.statusCode).toBe(200);
+  expect(res.headers['content-type']).toMatch(/text\/html/);
+  expect(res.headers['referrer-policy']).toBe('no-referrer');
+  expect(res.body).toBe(SPA_MARKER);
+});
+
+test('GET /s/<token> (dist ABSENT) -> JSON 404 (unchanged fallback when the SPA is not built)', async () => {
+  // Point at a non-existent dist dir so `distExists` is false — as it is on a
+  // box where the frontend was never built.
+  const built = await makeApp({ webDist: path.join(os.tmpdir(), 'mirsal-h1-nope-does-not-exist') });
+
+  const res = await built.inject({ method: 'GET', url: '/s/anytoken123' });
+
+  expect(res.statusCode).toBe(404);
+  expect(res.headers['content-type']).toContain('application/json');
+  expect(res.json()).toHaveProperty('error');
+});
+
+test('regression: an unknown non-/s/ GET (dist present) still serves index.html (the SPA shell)', async () => {
+  const built = await makeApp({ webDist: makeDistDir() });
+
+  const res = await built.inject({ method: 'GET', url: '/some/spa/route' });
+
+  expect(res.statusCode).toBe(200);
+  expect(res.headers['content-type']).toMatch(/text\/html/);
+  expect(res.body).toBe(SPA_MARKER);
+  // NOTE: `@fastify/helmet` already applies `Referrer-Policy: no-referrer`
+  // GLOBALLY (verified on /api/health), so the header is present on every
+  // response, not just /s/*. The /s/* branch sets it explicitly anyway (per
+  // spec §3.5, and to stay correct independent of helmet's defaults); it is
+  // therefore not a distinguishing signal between /s/* and other GETs.
+  expect(res.headers['referrer-policy']).toBe('no-referrer');
+});
+
+test('regression: /api/does-not-exist stays a JSON 404 even with the SPA built (never the shell)', async () => {
+  const built = await makeApp({ webDist: makeDistDir() });
+
+  const res = await built.inject({ method: 'GET', url: '/api/does-not-exist' });
+
+  expect(res.statusCode).toBe(404);
+  expect(res.headers['content-type']).toContain('application/json');
+  expect(res.json()).toHaveProperty('error');
 });
