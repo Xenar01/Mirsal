@@ -42,3 +42,27 @@ body {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
 }
+
+/* The brass seal's one-shot "stamp press" settle (§4.4) — the app's ONLY
+   orchestrated motion. The Seal component attaches `.mirsal-seal--stamp` only
+   when `stamp` is set AND reduced motion is NOT requested; the media guard
+   below is belt-and-suspenders so the animation never plays for a
+   reduced-motion user even if the class is somehow present (§4.8). */
+@keyframes mirsal-stamp {
+  from {
+    transform: scale(0.9);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+
+.mirsal-seal--stamp {
+  animation: mirsal-stamp 110ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mirsal-seal--stamp {
+    animation: none;
+  }
+}

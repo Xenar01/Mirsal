@@ -2,6 +2,18 @@
   "brand": {
     "name": "مِرسال"
   },
+  "common": {
+    "close": "إغلاق"
+  },
+  "seal": {
+    "label": "ختم مِرسال"
+  },
+  "status": {
+    "active": "نشط",
+    "stopped": "موقوف",
+    "expired": "منتهٍ",
+    "shared": "مُشارَك"
+  },
   "login": {
     "title": "تسجيل الدخول",
     "username": "اسم المستخدم",
