@@ -5,7 +5,17 @@ import { afterEach, beforeEach, expect, test } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/connection.js';
 import { migrate } from '../../src/db/migrate.js';
-import { createFolder, ensureUserRoots, listChildren, rollupSize } from '../../src/nodes/tree.js';
+import {
+  CollisionError,
+  CycleError,
+  createFolder,
+  ensureUserRoots,
+  isAncestor,
+  listChildren,
+  moveNode,
+  renameNode,
+  rollupSize,
+} from '../../src/nodes/tree.js';
 
 let db: Database.Database | undefined;
 let dir: string | undefined;
@@ -179,4 +189,158 @@ test('createFolder throws when the parent is the trash node', () => {
   const { trashId } = ensureUserRoots(db!, uid, now);
 
   expect(() => createFolder(db!, uid, trashId, 'docs', now)).toThrow();
+});
+
+// --- isAncestor -----------------------------------------------------------
+
+test('isAncestor is true for the direct parent', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+
+  expect(isAncestor(db!, rootId, a.id)).toBe(true);
+});
+
+test('isAncestor is true transitively for a grandparent', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+  const a1 = createFolder(db!, uid, a.id, 'A1', now);
+
+  expect(isAncestor(db!, rootId, a1.id)).toBe(true);
+  expect(isAncestor(db!, a.id, a1.id)).toBe(true);
+});
+
+test('isAncestor is false for an unrelated sibling', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+  const b = createFolder(db!, uid, rootId, 'B', now);
+
+  expect(isAncestor(db!, a.id, b.id)).toBe(false);
+});
+
+test('isAncestor is false for a node against itself (not its own ancestor)', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+
+  expect(isAncestor(db!, a.id, a.id)).toBe(false);
+});
+
+// --- moveNode --------------------------------------------------------------
+
+test('moveNode into itself throws CycleError', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+
+  expect(() => moveNode(db!, uid, a.id, a.id, now)).toThrow(CycleError);
+});
+
+test('moveNode into its own child throws CycleError', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+  const a1 = createFolder(db!, uid, a.id, 'A1', now);
+
+  expect(() => moveNode(db!, uid, a.id, a1.id, now)).toThrow(CycleError);
+});
+
+test('moveNode into a sibling succeeds', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+  const b = createFolder(db!, uid, rootId, 'B', now);
+
+  const moved = moveNode(db!, uid, a.id, b.id, now);
+
+  expect(moved.parent_id).toBe(b.id);
+  const reread = db!.prepare('SELECT parent_id FROM nodes WHERE id = ?').get(a.id) as {
+    parent_id: number;
+  };
+  expect(reread.parent_id).toBe(b.id);
+});
+
+test('moveNode onto an occupied name throws CollisionError', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+  createFolder(db!, uid, rootId, 'X', now);
+  const aX = createFolder(db!, uid, a.id, 'X', now);
+
+  expect(() => moveNode(db!, uid, aX.id, rootId, now)).toThrow(CollisionError);
+});
+
+test('moveNode throws when the node is not owned by ownerId (IDOR guard)', () => {
+  const uid = seedUser();
+  const otherUid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const { rootId: otherRootId } = ensureUserRoots(db!, otherUid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+
+  expect(() => moveNode(db!, otherUid, a.id, otherRootId, now)).toThrow();
+});
+
+test('moveNode throws when the destination is a file, not a folder/root', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+  const fileId = insertNode({ ownerId: uid, parentId: rootId, kind: 'file', name: 'f.txt' });
+
+  expect(() => moveNode(db!, uid, a.id, fileId, now)).toThrow();
+});
+
+// --- renameNode --------------------------------------------------------------
+
+test('renameNode renames a live folder', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+
+  const renamed = renameNode(db!, uid, a.id, 'A-renamed', now);
+
+  expect(renamed.name).toBe('A-renamed');
+  const reread = db!.prepare('SELECT name FROM nodes WHERE id = ?').get(a.id) as { name: string };
+  expect(reread.name).toBe('A-renamed');
+});
+
+test('renameNode onto an occupied name throws CollisionError', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  createFolder(db!, uid, rootId, 'A', now);
+  const b = createFolder(db!, uid, rootId, 'B', now);
+
+  expect(() => renameNode(db!, uid, b.id, 'A', now)).toThrow(CollisionError);
+});
+
+test('renameNode throws when the node is root or trash', () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const { rootId, trashId } = ensureUserRoots(db!, uid, now);
+
+  expect(() => renameNode(db!, uid, rootId, 'nope', now)).toThrow();
+  expect(() => renameNode(db!, uid, trashId, 'nope', now)).toThrow();
+});
+
+test('renameNode throws when the node is not owned by ownerId (IDOR guard)', () => {
+  const uid = seedUser();
+  const otherUid = seedUser();
+  const now = Date.now();
+  const { rootId } = ensureUserRoots(db!, uid, now);
+  const a = createFolder(db!, uid, rootId, 'A', now);
+
+  expect(() => renameNode(db!, otherUid, a.id, 'nope', now)).toThrow();
 });
