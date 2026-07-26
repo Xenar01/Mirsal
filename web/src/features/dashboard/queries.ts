@@ -80,6 +80,20 @@ export function useDeleteNode() {
   });
 }
 
+/**
+ * Set/clear a node's auto-delete deadline (§3.4). Invalidates the whole
+ * `['nodes', …]` family (which includes `['nodes', parentId]`) so the register
+ * re-reads the node's new `auto_delete_at` immediately.
+ */
+export function useAutoDeleteNode() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { id: number; autoDeleteAt: number | null }) =>
+      nodesApi.setAutoDelete(vars.id, vars.autoDeleteAt),
+    onSuccess: () => invalidateNodes(client),
+  });
+}
+
 /** Sum `size_bytes` over a listing, tolerating an undefined/non-array cache. */
 export function sumSizes(nodes: NodeDto[] | undefined): number {
   if (!Array.isArray(nodes)) return 0;

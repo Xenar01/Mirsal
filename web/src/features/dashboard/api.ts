@@ -49,6 +49,16 @@ export function deleteNode(id: number): Promise<void> {
   return apiDelete<void>(`/nodes/${id}`);
 }
 
+/**
+ * Schedules (or clears) a node's auto-delete deadline (spec §3.4). `epoch-ms`
+ * UTC must be a future instant when set (the server validates); `null` clears
+ * the schedule. When the deadline passes the scheduler trashes the subtree and
+ * its shares go 410, then the blob is purged after a 7-day grace.
+ */
+export function setAutoDelete(id: number, autoDeleteAt: number | null): Promise<NodeDto> {
+  return apiPatch<NodeDto>(`/nodes/${id}/auto-delete`, { auto_delete_at: autoDeleteAt });
+}
+
 /** Same-origin URL for a file download — triggered via a plain anchor (RFC-6266 on the server). */
 export function downloadUrl(id: number): string {
   return `/api/nodes/${id}/download`;

@@ -3,6 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Modal from '../../components/Modal';
 import Button from '../../components/Button';
+import StatusChip from '../../components/StatusChip';
 import { useToast } from '../../components/Toast';
 import { FolderDossier, FileSheet } from '../../components/icons';
 import { ApiError } from '../../lib/api';
@@ -11,6 +12,10 @@ import UploadDrop from './UploadDrop';
 import { downloadUrl } from './api';
 import { formatBytes, formatDate } from './format';
 import { useNodes, useCreateFolder, useRenameNode, useMoveNode, useTrashNode } from './queries';
+import { useShares } from './share/queries';
+import ShareModal from './share/ShareModal';
+import AutoDeleteMenu from './share/AutoDeleteMenu';
+import type { ShareDto } from './share/types';
 import type { Crumb, NodeDto } from './types';
 
 /*
@@ -46,6 +51,16 @@ export default function DriveView() {
   const { data, isPending, isError } = useNodes(parentId);
   const children = Array.isArray(data) ? data : [];
 
+  // Live share state feeds the register's status/stamp column: a node is
+  // matched to its share by node_id (first/newest wins).
+  const { data: sharesData } = useShares();
+  const shareByNode = new Map<number, ShareDto>();
+  if (Array.isArray(sharesData)) {
+    for (const s of sharesData) {
+      if (!shareByNode.has(s.node_id)) shareByNode.set(s.node_id, s);
+    }
+  }
+
   // Learn the synthetic root node id from a root child's parent_id, so "move to
   // root" has a concrete destination id (the root listing is `parent=null`).
   const rootIdRef = useRef<number | null>(null);
@@ -59,6 +74,8 @@ export default function DriveView() {
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [renameTarget, setRenameTarget] = useState<NodeDto | null>(null);
   const [moveTarget, setMoveTarget] = useState<NodeDto | null>(null);
+  const [shareTarget, setShareTarget] = useState<NodeDto | null>(null);
+  const [autoDeleteTarget, setAutoDeleteTarget] = useState<NodeDto | null>(null);
 
   function openFolder(node: NodeDto) {
     navigate(`/?parent=${node.id}`, { state: { trail: [...trail, { id: node.id, name: node.name }] } });
@@ -94,9 +111,12 @@ export default function DriveView() {
           isPending={isPending}
           isError={isError}
           nodes={children}
+          shareByNode={shareByNode}
           onOpen={openFolder}
           onRename={setRenameTarget}
           onMove={setMoveTarget}
+          onShare={setShareTarget}
+          onAutoDelete={setAutoDeleteTarget}
           onTrash={onTrash}
         />
       </div>
@@ -118,6 +138,12 @@ export default function DriveView() {
           trail={trail}
           siblings={children}
         />
+      )}
+      {shareTarget && (
+        <ShareModal node={shareTarget} onClose={() => setShareTarget(null)} />
+      )}
+      {autoDeleteTarget && (
+        <AutoDeleteMenu node={autoDeleteTarget} onClose={() => setAutoDeleteTarget(null)} />
       )}
     </DashboardShell>
   );
@@ -179,17 +205,23 @@ function Register({
   isPending,
   isError,
   nodes,
+  shareByNode,
   onOpen,
   onRename,
   onMove,
+  onShare,
+  onAutoDelete,
   onTrash,
 }: {
   isPending: boolean;
   isError: boolean;
   nodes: NodeDto[];
+  shareByNode: Map<number, ShareDto>;
   onOpen: (node: NodeDto) => void;
   onRename: (node: NodeDto) => void;
   onMove: (node: NodeDto) => void;
+  onShare: (node: NodeDto) => void;
+  onAutoDelete: (node: NodeDto) => void;
   onTrash: (node: NodeDto) => void;
 }) {
   const { t } = useTranslation();
@@ -228,9 +260,12 @@ function Register({
             <NodeRow
               key={node.id}
               node={node}
+              share={shareByNode.get(node.id) ?? null}
               onOpen={onOpen}
               onRename={onRename}
               onMove={onMove}
+              onShare={onShare}
+              onAutoDelete={onAutoDelete}
               onTrash={onTrash}
             />
           ))}
@@ -242,15 +277,21 @@ function Register({
 
 function NodeRow({
   node,
+  share,
   onOpen,
   onRename,
   onMove,
+  onShare,
+  onAutoDelete,
   onTrash,
 }: {
   node: NodeDto;
+  share: ShareDto | null;
   onOpen: (node: NodeDto) => void;
   onRename: (node: NodeDto) => void;
   onMove: (node: NodeDto) => void;
+  onShare: (node: NodeDto) => void;
+  onAutoDelete: (node: NodeDto) => void;
   onTrash: (node: NodeDto) => void;
 }) {
   const { t } = useTranslation();
@@ -286,12 +327,16 @@ function NodeRow({
         </bdi>
       </td>
       <td className="ps-3 pe-3 py-2">
-        {/* J3 share-wiring seam: this column shows the brass Seal / StatusChip
-            status="shared" once per-row share state is fetched. J2 renders the
-            column only (fetching share state per row is J3's concern). */}
-        <span aria-hidden="true" className="text-ink-2">
-          —
-        </span>
+        {/* Live share state (§4.6): a shared node shows its StatusChip
+            (active/stopped/expired — colour + label + glyph, never colour
+            alone); an unshared node shows a neutral placeholder. */}
+        {share ? (
+          <StatusChip status={share.status} />
+        ) : (
+          <span aria-hidden="true" className="text-ink-2">
+            —
+          </span>
+        )}
       </td>
       <td className="ps-3 pe-3 py-2">
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -300,6 +345,12 @@ function NodeRow({
               {t('dashboard.action.download')}
             </a>
           )}
+          <button type="button" onClick={() => onShare(node)} className="text-teal">
+            {t('dashboard.action.share')}
+          </button>
+          <button type="button" onClick={() => onAutoDelete(node)} className="text-teal">
+            {t('dashboard.action.autoDelete')}
+          </button>
           <button type="button" onClick={() => onRename(node)} className="text-teal">
             {t('dashboard.action.rename')}
           </button>

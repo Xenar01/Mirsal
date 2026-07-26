@@ -6,6 +6,7 @@ import RequireAuth from '../features/auth/RequireAuth';
 import { useAuth } from '../features/auth/auth-context';
 import DriveView from '../features/dashboard/DriveView';
 import TrashView from '../features/dashboard/TrashView';
+import SharedView from '../features/dashboard/share/SharedView';
 
 /**
  * Minimal i18n heading placeholder. The real dashboard/admin/trash/shared/
@@ -75,7 +76,7 @@ export default function AppRoutes() {
         path="/shared"
         element={
           <RequireAuth>
-            <PagePlaceholder titleKey="shared.title" />
+            <SharedView />
           </RequireAuth>
         }
       />

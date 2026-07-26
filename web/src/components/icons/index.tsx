@@ -141,3 +141,13 @@ export function Pause(props: IconProps) {
     </IconBase>
   );
 }
+
+/** Copy — two overlapping sheets (copy the share link to the clipboard). */
+export function Copy(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M6 15H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v1" />
+    </IconBase>
+  );
+}
