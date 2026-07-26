@@ -3,15 +3,15 @@ import { useTranslation } from 'react-i18next';
 import LoginPage from '../features/auth/LoginPage';
 import ChangePasswordPage from '../features/auth/ChangePasswordPage';
 import RequireAuth from '../features/auth/RequireAuth';
-import { useAuth } from '../features/auth/auth-context';
 import DriveView from '../features/dashboard/DriveView';
 import TrashView from '../features/dashboard/TrashView';
 import SharedView from '../features/dashboard/share/SharedView';
+import AdminPanel from '../features/admin/AdminPanel';
 
 /**
  * Minimal i18n heading placeholder. The real dashboard/admin/trash/shared/
- * public UIs are Phase J — these exist only so the routes resolve and the
- * guard can be exercised.
+ * public UIs are Phase J — the public `/s/:token` page is a later task, so it
+ * keeps this heading-only placeholder for now.
  */
 function PagePlaceholder({ titleKey }: { titleKey: string }) {
   const { t } = useTranslation();
@@ -20,19 +20,6 @@ function PagePlaceholder({ titleKey }: { titleKey: string }) {
       <h1 className="font-display">{t(titleKey)}</h1>
     </main>
   );
-}
-
-function AdminPlaceholder() {
-  const { t } = useTranslation();
-  const { user } = useAuth();
-  if (user?.role !== 'admin') {
-    return (
-      <main className="min-h-dvh bg-paper text-ink">
-        <p role="alert">{t('admin.adminsOnly')}</p>
-      </main>
-    );
-  }
-  return <PagePlaceholder titleKey="admin.title" />;
 }
 
 /**
@@ -60,7 +47,7 @@ export default function AppRoutes() {
         path="/admin"
         element={
           <RequireAuth>
-            <AdminPlaceholder />
+            <AdminPanel />
           </RequireAuth>
         }
       />
