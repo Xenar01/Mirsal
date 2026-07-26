@@ -12,8 +12,10 @@ import { MAX_FILE_BYTES, type Config } from './config.js';
 import type { Clock } from './clock.js';
 import healthRoute from './routes/health.js';
 import authRoutes from './routes/auth.js';
+import nodesRoutes from './routes/nodes.js';
 import { createPasswordService } from './auth/passwords.js';
 import { makeGuards } from './auth/guards.js';
+import { createBlobStore } from './storage/blobs.js';
 
 export interface AppDeps {
   db: Database.Database;
@@ -88,6 +90,9 @@ async function registerRoutes(app: FastifyInstance, deps: AppDeps): Promise<void
     guards,
     csrfSecret: deps.config.CSRF_SECRET,
   });
+
+  const blobStore = createBlobStore({ storageDir: deps.config.STORAGE_DIR });
+  await app.register(nodesRoutes, { db: deps.db, now: deps.now, guards, blobStore });
 }
 
 /**
