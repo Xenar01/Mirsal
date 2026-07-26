@@ -321,3 +321,64 @@ test('POST /api/shares requires auth -> 401 without a session', async () => {
   const res = await built.inject({ method: 'POST', url: '/api/shares', payload: { node_id: 1 } });
   expect(res.statusCode).toBe(401);
 });
+
+test('PATCH password:"" is rejected (400), never hashed into an unrecoverable password', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const folder = await makeFolder(built, session, csrf, rootId, 'NoLockout');
+
+  const share = (
+    await built.inject({
+      method: 'POST',
+      url: '/api/shares',
+      cookies: { mirsal_session: session },
+      headers: { 'x-csrf-token': csrf },
+      payload: { node_id: folder.id },
+    })
+  ).json();
+  expect(share.has_password).toBe(false);
+
+  // '' is a "set" value per the tri-state schema (only `null` clears), and
+  // setShareState hashes whatever string it's given — so accepting '' here
+  // would store a real password_hash for an empty password. /unlock's schema
+  // requires a non-empty password, so that hash could never be resubmitted:
+  // the share would be permanently locked. The schema must reject it instead.
+  const patchRes = await built.inject({
+    method: 'PATCH',
+    url: `/api/shares/${share.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { password: '' },
+  });
+  expect(patchRes.statusCode).toBe(400);
+
+  // The share is untouched — still no password_hash was ever written.
+  const row = db!.prepare('SELECT password_hash FROM shares WHERE id = ?').get(share.id) as {
+    password_hash: string | null;
+  };
+  expect(row.password_hash).toBeNull();
+
+  // A real (non-empty) password still sets one, and `null` still clears it —
+  // confirms the fix is scoped to the empty-string case only.
+  const setRes = await built.inject({
+    method: 'PATCH',
+    url: `/api/shares/${share.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { password: 'a-real-password' },
+  });
+  expect(setRes.statusCode).toBe(200);
+  expect(setRes.json()).toMatchObject({ has_password: true });
+
+  const clearRes = await built.inject({
+    method: 'PATCH',
+    url: `/api/shares/${share.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { password: null },
+  });
+  expect(clearRes.statusCode).toBe(200);
+  expect(clearRes.json()).toMatchObject({ has_password: false });
+});

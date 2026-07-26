@@ -72,8 +72,14 @@ const createShareSchema = z.object({
 const patchShareSchema = z
   .object({
     is_active: z.boolean().optional(),
-    // Tri-state: absent = unchanged, null = clear the password, string = set it.
-    password: z.string().nullable().optional(),
+    // Tri-state: absent = unchanged, null = clear the password, non-empty
+    // string = set it. `min(1)` is deliberate (unlike createShareSchema,
+    // which treats '' as "no password"): setShareState hashes ANY string it
+    // receives here — including '' — into a real password_hash, and
+    // /unlock's schema requires a non-empty password, so an empty-string
+    // "set" would hash to a password the owner could never resubmit,
+    // permanently locking the share. Use `null` to clear a password instead.
+    password: z.string().min(1).nullable().optional(),
     // Tri-state: absent = unchanged, null = never-expires, number = new deadline.
     expires_at: z.number().int().nullable().optional(),
   })

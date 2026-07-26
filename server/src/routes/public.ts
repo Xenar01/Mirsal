@@ -55,8 +55,53 @@ const UNLOCK_IP_RATE_LIMIT_MAX = 20;
 /** Shared `/unlock` rate-limit window. */
 const UNLOCK_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 
-/** Hard cap on files walked into a `/zip` (loop/DoS-safety on a public endpoint). */
+/**
+ * `/download` and `/zip` are unauthenticated (anyone holding the share link
+ * can call them) and stream bytes/do real work per request, so both get the
+ * same two-ceiling (per-IP + per-token) rate-limit shape as `/unlock` below.
+ * `/zip` additionally gets a tighter cap plus a hard concurrency bound
+ * (`MAX_CONCURRENT_ZIPS`) and a much cheaper compression level, since it is
+ * by far the most expensive of the two (it reads and re-compresses every
+ * file in the subtree, not just one).
+ */
+const DOWNLOAD_IP_RATE_LIMIT_MAX = 60;
+const DOWNLOAD_TOKEN_RATE_LIMIT_MAX = 120;
+const DOWNLOAD_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+
+const ZIP_IP_RATE_LIMIT_MAX = 10;
+const ZIP_TOKEN_RATE_LIMIT_MAX = 20;
+const ZIP_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+
+/**
+ * Hard cap on `/zip` requests running at once, server-wide. A rate-limit
+ * window alone doesn't bound a *burst* of concurrent requests (e.g. several
+ * recipients — or several tabs — opening `/zip` at the same instant, well
+ * within the window); this caps how many archiver runs + blob reads can be
+ * in flight at any one time regardless of the window.
+ */
+const MAX_CONCURRENT_ZIPS = 4;
+
+/**
+ * zlib level for the `/zip` archiver. Level 9 (max compression) spends
+ * substantially more CPU than the marginal size reduction is worth on an
+ * unauthenticated, un-rate-limited-by-size endpoint — across a subtree near
+ * `MAX_ZIP_ENTRIES` files that cost is an easy CPU-exhaustion DoS. zlib's own
+ * default trade-off (6) keeps the archive genuinely compressed at a fraction
+ * of the CPU cost.
+ */
+const ZIP_COMPRESSION_LEVEL = 6;
+
+/** Hard cap on files included in a `/zip` (loop/DoS-safety on a public endpoint). */
 const MAX_ZIP_ENTRIES = 10_000;
+/**
+ * Hard cap on total nodes (files AND folders) visited while walking the
+ * subtree for `/zip`. `MAX_ZIP_ENTRIES` alone only bounds the files
+ * *collected* — a folder-heavy, file-sparse shared subtree (many nested
+ * empty/near-empty folders) would still make the walk itself (and its
+ * `listChildren` calls) unbounded, since the file cap is never reached. This
+ * cap bounds the walk regardless of how many of the visited nodes are files.
+ */
+const MAX_ZIP_WALK_NODES = 20_000;
 
 const unlockSchema = z.object({ password: z.string().min(1) });
 
@@ -93,16 +138,52 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
     return payload;
   });
 
-  /** base64url HMAC-SHA256(SESSION_SECRET, token) — the unlock cookie's value for `token`. */
-  function unlockValue(token: string): string {
-    return createHmac('sha256', config.SESSION_SECRET).update(token).digest('base64url');
+  /**
+   * base64url HMAC-SHA256 over `token`, the share's CURRENT `password_hash`,
+   * and a caller-supplied `issuedAtMs` (as a string, so it's covered by the
+   * MAC). Binding the password hash means a cookie issued against an old
+   * password stops verifying the instant the owner rotates or clears it
+   * (setShareState writes a new/NULL `password_hash`, so the same HMAC input
+   * can never be reproduced) — the cookie is never a pure function of the
+   * token alone. `issuedAtMs` lets {@link isUnlocked} enforce the 1800s
+   * lifetime itself, server-side, rather than trusting the client-honored
+   * cookie `Max-Age` attribute.
+   */
+  function signUnlock(token: string, passwordHash: string | null, issuedAtMs: string): string {
+    const payload = `${token}.${passwordHash ?? ''}.${issuedAtMs}`;
+    return createHmac('sha256', config.SESSION_SECRET).update(payload).digest('base64url');
   }
 
-  /** True iff the request carries the matching unlock cookie for `token` (constant-time compare). */
-  function isUnlocked(req: FastifyRequest, token: string): boolean {
+  /** Builds the unlock cookie's value: `<issuedAtMs>.<signUnlock(...)>`. */
+  function unlockCookieValue(token: string, passwordHash: string | null, issuedAtMs: number): string {
+    const issuedAtStr = String(issuedAtMs);
+    return `${issuedAtStr}.${signUnlock(token, passwordHash, issuedAtStr)}`;
+  }
+
+  /**
+   * True iff the request carries a matching, still-live unlock cookie for
+   * `share`. Re-derives the expected value from `share.password_hash` as it
+   * stands RIGHT NOW (so a rotated/cleared password invalidates every
+   * previously-issued cookie) and independently checks `issuedAtMs` against
+   * `now()` (so the 1800s lifetime is enforced here, not only via the
+   * cookie's `Max-Age`). Constant-time compare on the full cookie string.
+   */
+  function isUnlocked(req: FastifyRequest, share: Share): boolean {
     const cookie = req.cookies[UNLOCK_COOKIE];
     if (!cookie) return false;
-    const expected = Buffer.from(unlockValue(token));
+
+    const dot = cookie.indexOf('.');
+    if (dot <= 0) return false;
+    const issuedAtStr = cookie.slice(0, dot);
+    const issuedAtMs = Number(issuedAtStr);
+    if (!Number.isInteger(issuedAtMs)) return false;
+
+    const nowMs = now();
+    // Server-side lifetime enforcement — a client can always resend a cookie
+    // past its Max-Age; this is what actually bounds it.
+    if (issuedAtMs > nowMs || nowMs - issuedAtMs > UNLOCK_COOKIE_MAX_AGE_S * 1000) return false;
+
+    const expected = Buffer.from(unlockCookieValue(share.token, share.password_hash, issuedAtMs));
     const actual = Buffer.from(cookie);
     if (expected.length !== actual.length) return false;
     return timingSafeEqual(expected, actual);
@@ -138,7 +219,7 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
    * share is password-protected but not unlocked; returns true otherwise.
    */
   function requireUnlocked(req: FastifyRequest, reply: FastifyReply, share: Share): boolean {
-    if (share.password_hash !== null && !isUnlocked(req, share.token)) {
+    if (share.password_hash !== null && !isUnlocked(req, share)) {
       reply.code(401).send({ needsPassword: true });
       return false;
     }
@@ -223,7 +304,10 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
 
       // Path-scoped to THIS token's public subtree so the cookie is only ever
       // presented back to this share's own endpoints (not other shares).
-      reply.setCookie(UNLOCK_COOKIE, unlockValue(token), {
+      // Bound to THIS verification's password_hash + issuedAt (see
+      // `signUnlock`/`isUnlocked`) so a later password rotation/removal
+      // invalidates it, and its lifetime is enforced server-side too.
+      reply.setCookie(UNLOCK_COOKIE, unlockCookieValue(token, share.password_hash, now()), {
         httpOnly: true,
         secure: true,
         sameSite: 'lax',
@@ -256,114 +340,175 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
     }
   });
 
-  // --- GET download -------------------------------------------------------
-  app.get('/api/public/:token/download', async (req, reply) => {
-    const { token } = req.params as { token: string };
-    const share = loadLiveShare(reply, token);
-    if (!share) return;
-    if (!requireUnlocked(req, reply, share)) return;
+  // --- GET download (rate-limited per-IP AND per-token) --------------------
+  await app.register(async function downloadScope(scope) {
+    await scope.register(fastifyRateLimit, {
+      max: DOWNLOAD_IP_RATE_LIMIT_MAX,
+      timeWindow: DOWNLOAD_RATE_LIMIT_WINDOW_MS,
+      hook: 'preHandler',
+      keyGenerator: (req) => req.ip,
+    });
+    await scope.register(fastifyRateLimit, {
+      max: DOWNLOAD_TOKEN_RATE_LIMIT_MAX,
+      timeWindow: DOWNLOAD_RATE_LIMIT_WINDOW_MS,
+      hook: 'preHandler',
+      keyGenerator: (req) => (req.params as { token?: string }).token ?? '',
+    });
 
-    if (!share.allow_download) {
-      reply.code(403).send({ error: 'forbidden' });
-      return;
-    }
+    scope.get('/api/public/:token/download', async (req, reply) => {
+      const { token } = req.params as { token: string };
+      const share = loadLiveShare(reply, token);
+      if (!share) return;
+      if (!requireUnlocked(req, reply, share)) return;
 
-    // Default to the shared node itself so a file share is downloadable
-    // without the recipient ever learning an internal node id.
-    const nodeParam = (req.query as { node?: string }).node ?? share.node_id;
-
-    let node: Node;
-    try {
-      node = resolveInSubtree(db, share, nodeParam);
-    } catch (e) {
-      if (e instanceof ForbiddenError) {
+      if (!share.allow_download) {
         reply.code(403).send({ error: 'forbidden' });
         return;
       }
-      throw e;
-    }
 
-    // A folder (or a storage-less row) isn't downloadable here — keep the
-    // shape identical to the out-of-subtree rejection (no existence oracle).
-    if (node.kind !== 'file' || !node.storage_path) {
-      reply.code(403).send({ error: 'forbidden' });
-      return;
-    }
+      // Default to the shared node itself so a file share is downloadable
+      // without the recipient ever learning an internal node id.
+      const nodeParam = (req.query as { node?: string }).node ?? share.node_id;
 
-    const stream = blobStore.readBlob(node.storage_path);
-    try {
-      await waitForOpen(stream);
-    } catch (e) {
-      // Row exists but its blob is gone from disk (reverse-orphan) -> 404, never 500.
-      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      let node: Node;
+      try {
+        node = resolveInSubtree(db, share, nodeParam);
+      } catch (e) {
+        if (e instanceof ForbiddenError) {
+          reply.code(403).send({ error: 'forbidden' });
+          return;
+        }
+        throw e;
+      }
+
+      // A folder (or a storage-less row) isn't downloadable here — keep the
+      // shape identical to the out-of-subtree rejection (no existence oracle).
+      if (node.kind !== 'file' || !node.storage_path) {
+        reply.code(403).send({ error: 'forbidden' });
+        return;
+      }
+
+      const stream = blobStore.readBlob(node.storage_path);
+      try {
+        await waitForOpen(stream);
+      } catch (e) {
+        // Row exists but its blob is gone from disk (reverse-orphan) -> 404, never 500.
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+          reply.code(404).send({ error: 'not_found' });
+          return;
+        }
+        throw e;
+      }
+
+      reply.header('Content-Disposition', buildContentDisposition(node.name));
+      reply.header('X-Content-Type-Options', 'nosniff');
+      reply.header('Content-Type', node.mime_type ?? 'application/octet-stream');
+
+      logShareAccess(share.id, req);
+
+      return reply.send(stream);
+    });
+  });
+
+  // --- GET zip (rate-limited per-IP AND per-token, plus a hard concurrency
+  // bound) ------------------------------------------------------------------
+  // Tracks `/zip` requests currently streaming, server-wide, so a burst of
+  // concurrent requests (which a time-window rate limit alone cannot bound)
+  // can't pile up archiver runs. Released via the `onResponse` hook below,
+  // which fires exactly once per request regardless of how it completes.
+  let activeZipCount = 0;
+  const zipSlotHolders = new WeakSet<FastifyRequest>();
+
+  await app.register(async function zipScope(scope) {
+    await scope.register(fastifyRateLimit, {
+      max: ZIP_IP_RATE_LIMIT_MAX,
+      timeWindow: ZIP_RATE_LIMIT_WINDOW_MS,
+      hook: 'preHandler',
+      keyGenerator: (req) => req.ip,
+    });
+    await scope.register(fastifyRateLimit, {
+      max: ZIP_TOKEN_RATE_LIMIT_MAX,
+      timeWindow: ZIP_RATE_LIMIT_WINDOW_MS,
+      hook: 'preHandler',
+      keyGenerator: (req) => (req.params as { token?: string }).token ?? '',
+    });
+
+    scope.addHook('onResponse', async (req) => {
+      if (zipSlotHolders.delete(req)) {
+        activeZipCount--;
+      }
+    });
+
+    scope.get('/api/public/:token/zip', async (req, reply) => {
+      const { token } = req.params as { token: string };
+      const share = loadLiveShare(reply, token);
+      if (!share) return;
+      if (!requireUnlocked(req, reply, share)) return;
+
+      if (!share.allow_download) {
+        reply.code(403).send({ error: 'forbidden' });
+        return;
+      }
+
+      if (activeZipCount >= MAX_CONCURRENT_ZIPS) {
+        reply.code(429).send({ error: 'too_many_requests' });
+        return;
+      }
+
+      const rootNode = db.prepare('SELECT * FROM nodes WHERE id = @id').get({ id: share.node_id }) as
+        | Node
+        | undefined;
+      if (!rootNode) {
+        // isShareLive already proved liveness; defensive only.
         reply.code(404).send({ error: 'not_found' });
         return;
       }
-      throw e;
-    }
 
-    reply.header('Content-Disposition', buildContentDisposition(node.name));
-    reply.header('X-Content-Type-Options', 'nosniff');
-    reply.header('Content-Type', node.mime_type ?? 'application/octet-stream');
+      const files = collectSubtreeFiles(db, share.owner_id, rootNode);
 
-    logShareAccess(share.id, req);
+      // Slot taken from here on — released exactly once by the onResponse
+      // hook above once this response finishes (success, error, or abort).
+      activeZipCount++;
+      zipSlotHolders.add(req);
 
-    return reply.send(stream);
-  });
+      const archive = new ZipArchive({ zlib: { level: ZIP_COMPRESSION_LEVEL } });
+      // Post-headers stream failure can't change the status — tear the response
+      // down rather than leave a truncated body hanging or crash on an
+      // unhandled 'error'.
+      archive.on('error', (err) => {
+        req.log.error({ err }, 'zip stream failed');
+        reply.raw.destroy(err);
+      });
 
-  // --- GET zip ------------------------------------------------------------
-  app.get('/api/public/:token/zip', async (req, reply) => {
-    const { token } = req.params as { token: string };
-    const share = loadLiveShare(reply, token);
-    if (!share) return;
-    if (!requireUnlocked(req, reply, share)) return;
+      for (const f of files) {
+        archive.append(blobStore.readBlob(f.storagePath), { name: f.name });
+      }
 
-    if (!share.allow_download) {
-      reply.code(403).send({ error: 'forbidden' });
-      return;
-    }
+      reply.header('Content-Type', 'application/zip');
+      reply.header('Content-Disposition', buildContentDisposition(zipFileName(rootNode.name)));
+      reply.header('X-Content-Type-Options', 'nosniff');
 
-    const rootNode = db.prepare('SELECT * FROM nodes WHERE id = @id').get({ id: share.node_id }) as Node | undefined;
-    if (!rootNode) {
-      // isShareLive already proved liveness; defensive only.
-      reply.code(404).send({ error: 'not_found' });
-      return;
-    }
+      logShareAccess(share.id, req);
 
-    const files = collectSubtreeFiles(db, share.owner_id, rootNode);
-
-    const archive = new ZipArchive({ zlib: { level: 9 } });
-    // Post-headers stream failure can't change the status — tear the response
-    // down rather than leave a truncated body hanging or crash on an
-    // unhandled 'error'.
-    archive.on('error', (err) => {
-      req.log.error({ err }, 'zip stream failed');
-      reply.raw.destroy(err);
+      // Hand the stream to the reply BEFORE finalize so a consumer exists and
+      // backpressure holds (archiver reads each source blob lazily — never
+      // buffering the whole subtree in memory).
+      const sent = reply.send(archive);
+      void archive.finalize();
+      return sent;
     });
-
-    for (const f of files) {
-      archive.append(blobStore.readBlob(f.storagePath), { name: f.name });
-    }
-
-    reply.header('Content-Type', 'application/zip');
-    reply.header('Content-Disposition', buildContentDisposition(zipFileName(rootNode.name)));
-    reply.header('X-Content-Type-Options', 'nosniff');
-
-    logShareAccess(share.id, req);
-
-    // Hand the stream to the reply BEFORE finalize so a consumer exists and
-    // backpressure holds (archiver reads each source blob lazily — never
-    // buffering the whole subtree in memory).
-    const sent = reply.send(archive);
-    void archive.finalize();
-    return sent;
   });
 
   /**
    * Collects every live file under `root` as `{storagePath, name}` where
    * `name` is the path relative to the shared node (the shared folder itself
    * is not a prefix; its children sit at the zip root). Iterative + bounded
-   * (`MAX_ZIP_ENTRIES`) to stay loop/DoS-safe on this unauthenticated route.
+   * on BOTH axes to stay loop/DoS-safe on this unauthenticated route:
+   *  - `MAX_ZIP_ENTRIES` caps the files collected.
+   *  - `MAX_ZIP_WALK_NODES` caps the total nodes (files+folders) visited,
+   *    which in turn caps the number of `listChildren` (DB) calls — this is
+   *    the one that protects a folder-heavy, file-sparse subtree, where the
+   *    file cap above would never trip.
    * Uses `listChildren`, which already excludes trashed rows.
    */
   function collectSubtreeFiles(
@@ -378,18 +523,20 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
       return out;
     }
 
+    let visited = 0;
     const stack: Array<{ folderId: number; prefix: string }> = [{ folderId: root.id, prefix: '' }];
-    while (stack.length > 0 && out.length < MAX_ZIP_ENTRIES) {
+    while (stack.length > 0 && out.length < MAX_ZIP_ENTRIES && visited < MAX_ZIP_WALK_NODES) {
       const { folderId, prefix } = stack.pop()!;
       for (const child of listChildren(database, ownerId, folderId)) {
+        visited++;
         if (child.kind === 'file') {
           if (child.storage_path) {
             out.push({ storagePath: child.storage_path, name: prefix + child.name });
-            if (out.length >= MAX_ZIP_ENTRIES) break;
           }
         } else if (child.kind === 'folder') {
           stack.push({ folderId: child.id, prefix: `${prefix}${child.name}/` });
         }
+        if (out.length >= MAX_ZIP_ENTRIES || visited >= MAX_ZIP_WALK_NODES) break;
       }
     }
 

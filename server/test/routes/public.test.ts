@@ -12,7 +12,11 @@ import { createPasswordService } from '../../src/auth/passwords.js';
 import { ensureUserRoots } from '../../src/nodes/tree.js';
 
 const NOW = 1_700_000_000_000;
-const clock = () => NOW;
+// Mutable so a single test can simulate time passing (server-side unlock-cookie
+// expiry) without a real sleep. Reset to NOW in afterEach so no test leaks its
+// clock offset into the next one.
+let mockNow = NOW;
+const clock = () => mockNow;
 
 const TEST_ARGON = {
   ARGON_MEMORY_KIB: 19456,
@@ -57,6 +61,7 @@ afterEach(async () => {
   app = undefined;
   db?.close();
   db = undefined;
+  mockNow = NOW;
   if (dir) {
     fs.rmSync(dir, { recursive: true, force: true });
     dir = undefined;
@@ -492,3 +497,179 @@ test('download is refused when allow_download is off -> 403', async () => {
   // meta still readable (only downloading is blocked)
   expect((await built.inject({ method: 'GET', url: `/api/public/${share.token}` })).statusCode).toBe(200);
 });
+
+// ---------------------------------------------------------------------------
+// Review-fix regressions (task H4 fix pass)
+// ---------------------------------------------------------------------------
+
+test('folder-heavy (file-sparse) subtree: /zip walk is bounded by total nodes visited, not just files collected', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  const folder = await makeFolder(built, session, csrf, rootId, 'Deep');
+  // A shallow marker file, sibling to the chain's first link — visited within
+  // the very first `listChildren(folder)` call, far below any cap.
+  await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'shallow.txt', data: Buffer.from('S') });
+  const share = await createShare(built, session, csrf, { node_id: folder.id });
+
+  // Build a long chain of near-empty folders directly against the DB (fast —
+  // bypasses the HTTP/multipart layer for the bulk of it). routes/public.ts's
+  // MAX_ZIP_WALK_NODES is 20_000; this chain intentionally exceeds it, so a
+  // file-sparse tree like this — which would never trip the OLD file-count-only
+  // cap (MAX_ZIP_ENTRIES) — has to be stopped by the node-count cap instead.
+  const CHAIN_LENGTH = 20_500;
+  const insertFolder = db!.prepare(
+    `INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at)
+     VALUES (@ownerId, @parentId, 'folder', @name, @now, @now)`
+  );
+  let deepParentId = folder.id;
+  db!.transaction(() => {
+    for (let i = 0; i < CHAIN_LENGTH; i++) {
+      const info = insertFolder.run({ ownerId: uid, parentId: deepParentId, name: `c${i}`, now: NOW });
+      deepParentId = Number(info.lastInsertRowid);
+    }
+  })();
+  // A real upload (genuine blob) at the bottom of the chain — reaching it
+  // requires the walk to issue a `listChildren` call for every link in the
+  // chain, which the node-count cap must stop well short of.
+  await uploadFile(built, session, csrf, { parentId: deepParentId, filename: 'deep.txt', data: Buffer.from('D') });
+
+  const zipRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}/zip` });
+  expect(zipRes.statusCode).toBe(200);
+  // The shallow marker (visited almost immediately) made it into the archive...
+  expect(zipRes.rawPayload.includes(Buffer.from('shallow.txt'))).toBe(true);
+  // ...but the deep marker (20,500 listChildren calls away) did not — proof
+  // the walk actually stopped instead of visiting the whole chain.
+  expect(zipRes.rawPayload.includes(Buffer.from('deep.txt'))).toBe(false);
+}, 30_000);
+
+test('unlock cookie is invalidated by a password rotation (no longer a pure function of the token alone)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'r.txt', data: Buffer.from('R') });
+  const share = await createShare(built, session, csrf, { node_id: file.id, password: 'first-pw' });
+
+  const unlock1 = await built.inject({
+    method: 'POST',
+    url: `/api/public/${share.token}/unlock`,
+    payload: { password: 'first-pw' },
+  });
+  expect(unlock1.statusCode).toBe(200);
+  const cookie1 = findCookie(unlock1.cookies as InjectedCookie[], 'mirsal_unlock')!.value;
+
+  // The old cookie works before any rotation.
+  expect(
+    (await built.inject({ method: 'GET', url: `/api/public/${share.token}`, cookies: { mirsal_unlock: cookie1 } }))
+      .statusCode
+  ).toBe(200);
+
+  // Owner rotates the password.
+  const patchRes = await built.inject({
+    method: 'PATCH',
+    url: `/api/shares/${share.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { password: 'second-pw' },
+  });
+  expect(patchRes.statusCode).toBe(200);
+
+  // The OLD cookie must no longer unlock the share.
+  const staleRes = await built.inject({
+    method: 'GET',
+    url: `/api/public/${share.token}`,
+    cookies: { mirsal_unlock: cookie1 },
+  });
+  expect(staleRes.statusCode).toBe(401);
+  expect(staleRes.json()).toEqual({ needsPassword: true });
+
+  // The NEW password unlocks fine (with a fresh cookie).
+  const unlock2 = await built.inject({
+    method: 'POST',
+    url: `/api/public/${share.token}/unlock`,
+    payload: { password: 'second-pw' },
+  });
+  expect(unlock2.statusCode).toBe(200);
+  const cookie2 = findCookie(unlock2.cookies as InjectedCookie[], 'mirsal_unlock')!.value;
+  expect(
+    (await built.inject({ method: 'GET', url: `/api/public/${share.token}`, cookies: { mirsal_unlock: cookie2 } }))
+      .statusCode
+  ).toBe(200);
+});
+
+test('unlock cookie lifetime is enforced server-side, not only via the Max-Age attribute', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'ttl.txt', data: Buffer.from('T') });
+  const share = await createShare(built, session, csrf, { node_id: file.id, password: 'time-pw' });
+
+  const unlockRes = await built.inject({
+    method: 'POST',
+    url: `/api/public/${share.token}/unlock`,
+    payload: { password: 'time-pw' },
+  });
+  expect(unlockRes.statusCode).toBe(200);
+  const cookie = findCookie(unlockRes.cookies as InjectedCookie[], 'mirsal_unlock')!.value;
+
+  // Immediately after issuance, the cookie works.
+  expect(
+    (await built.inject({ method: 'GET', url: `/api/public/${share.token}`, cookies: { mirsal_unlock: cookie } }))
+      .statusCode
+  ).toBe(200);
+
+  // `built.inject` replays whatever cookie value is given regardless of any
+  // Max-Age attribute — a real browser would have already stopped sending
+  // this cookie, but nothing here does that for us. Advance the server's own
+  // clock (independent of the cookie value) past the 1800s lifetime and
+  // confirm the SAME cookie is now rejected — i.e. expiry is enforced by the
+  // route reading its own signed issuedAt, not merely by trusting the client
+  // to have honored Max-Age.
+  mockNow = NOW + 1800 * 1000 + 1;
+  const expiredRes = await built.inject({
+    method: 'GET',
+    url: `/api/public/${share.token}`,
+    cookies: { mirsal_unlock: cookie },
+  });
+  expect(expiredRes.statusCode).toBe(401);
+  expect(expiredRes.json()).toEqual({ needsPassword: true });
+});
+
+test('public /zip is rate-limited (per-IP), bounding repeated full-subtree archiver runs', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const folder = await makeFolder(built, session, csrf, rootId, 'RateLimitedZip');
+  await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'a.txt', data: Buffer.from('A') });
+  const share = await createShare(built, session, csrf, { node_id: folder.id });
+
+  const codes: number[] = [];
+  for (let i = 0; i < 12; i++) {
+    const res = await built.inject({ method: 'GET', url: `/api/public/${share.token}/zip` });
+    codes.push(res.statusCode);
+  }
+  expect(codes.filter((c) => c === 200).length).toBeGreaterThanOrEqual(1);
+  expect(codes).toContain(429);
+}, 20_000);
+
+test('public /download is rate-limited (per-token), bounding unbounded-bandwidth abuse of a single link', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'many.txt', data: Buffer.from('M') });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+
+  const codes: number[] = [];
+  for (let i = 0; i < 121; i++) {
+    const res = await built.inject({ method: 'GET', url: `/api/public/${share.token}/download` });
+    codes.push(res.statusCode);
+  }
+  expect(codes.filter((c) => c === 200).length).toBeGreaterThanOrEqual(1);
+  expect(codes).toContain(429);
+}, 30_000);
