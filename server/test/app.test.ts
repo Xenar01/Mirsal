@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { openDb } from '../src/db/connection.js';
 import { migrate } from '../src/db/migrate.js';
 import { loadConfig } from '../src/config.js';
-import { buildApp } from '../src/app.js';
+import { buildApp, findServerRoot } from '../src/app.js';
 
 let db: Database.Database | undefined;
 let dir: string | undefined;
@@ -74,4 +74,37 @@ test('GET /api/does-not-exist returns a JSON 404, not HTML', async () => {
   expect(res.headers['content-type']).toContain('application/json');
   const body = res.json();
   expect(body).toHaveProperty('error');
+});
+
+// findServerRoot backs WEB_DIST's resolution of `web/dist`. It must find the
+// same package root regardless of how many directory levels deep the calling
+// module happens to live — e.g. `server/src/app.ts` (source, one level under
+// the server root) vs. a `tsc`-compiled `server/dist/src/app.js` (two levels
+// under the server root, per this project's own `rootDir: "."` / `outDir:
+// "dist"` tsconfig). A hard-coded number of `..` hops breaks the second case
+// silently; searching upward for the nearest `package.json` does not.
+test('findServerRoot locates the package root from a source-depth path', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mirsal-h1-root-'));
+  try {
+    fs.writeFileSync(path.join(root, 'package.json'), '{}');
+    const srcDir = path.join(root, 'src');
+    fs.mkdirSync(srcDir);
+
+    expect(findServerRoot(srcDir)).toBe(root);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('findServerRoot locates the package root from a compiled dist/src-depth path', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'mirsal-h1-root-'));
+  try {
+    fs.writeFileSync(path.join(root, 'package.json'), '{}');
+    const distSrcDir = path.join(root, 'dist', 'src');
+    fs.mkdirSync(distSrcDir, { recursive: true });
+
+    expect(findServerRoot(distSrcDir)).toBe(root);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

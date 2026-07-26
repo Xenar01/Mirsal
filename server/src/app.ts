@@ -19,14 +19,42 @@ export interface AppDeps {
 }
 
 /**
- * The built SPA (`web/dist`, produced by Phase I/J's Vite build). Resolved
- * relative to this source file (`server/src/app.ts` -> repo root -> `web/dist`).
- * It does not exist yet in this phase — `buildApp` guards on it below so the
- * API boots and its tests pass without a frontend build.
+ * Locates the `server` package root — the nearest ancestor directory
+ * containing a `package.json` — starting from `startDir`. This is used
+ * instead of a hard-coded number of `..` hops because the directory depth of
+ * this module changes between environments: as TS source it lives at
+ * `server/src/app.ts` (one level under the server root), but under this
+ * project's own `tsconfig.json` (`rootDir: "."`, `outDir: "dist"`) a
+ * `tsc`-compiled build emits it at `server/dist/src/app.js` (two levels
+ * under the server root). Counting hops silently breaks in the compiled
+ * case; searching for the `package.json` marker works in both.
+ */
+export function findServerRoot(startDir: string): string {
+  let dir = startDir;
+  for (;;) {
+    if (fs.existsSync(path.join(dir, 'package.json'))) {
+      return dir;
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) {
+      throw new Error(
+        `Could not locate server package root (no package.json found above ${startDir})`
+      );
+    }
+    dir = parent;
+  }
+}
+
+/**
+ * The built SPA (`web/dist`, produced by Phase I/J's Vite build), resolved
+ * relative to the server package root (a sibling of `server/` in the repo) —
+ * so it resolves correctly whether this module is running from TS source or
+ * from a `tsc`-compiled `dist/` build (see `findServerRoot` above). It does
+ * not exist yet in this phase — `buildApp` guards on it below so the API
+ * boots and its tests pass without a frontend build.
  */
 const WEB_DIST = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '..',
+  findServerRoot(path.dirname(fileURLToPath(import.meta.url))),
   '..',
   'web',
   'dist'
