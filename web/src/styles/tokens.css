@@ -1,0 +1,108 @@
+/*
+ * Design tokens (§4.1 / §4.2) — Ink & Brass palette.
+ *
+ * Light values live on the bare `:root`. Dark values are applied via BOTH
+ * `@media (prefers-color-scheme: dark)` (so the OS/browser preference is
+ * honoured out of the box) AND `:root[data-theme="dark"]` (so a future
+ * in-app theme toggle can force dark regardless of the OS preference).
+ * `:root[data-theme="light"]` restates the light values so an explicit
+ * light choice always wins over the media query, even when the OS is set
+ * to dark.
+ */
+
+:root {
+  /* Ink & Brass — light (§4.1) */
+  --paper: #F4F5F3;
+  --surface: #FFFFFF;
+  --ink: #0F1C2E;
+  --ink-2: #45566A;
+  --line: #E2E5E1;
+
+  --brass: #C0913C;
+  --brass-ink: #0F1C2E;
+  --brass-ring: #7A5A20;
+
+  --teal: #0E5A63;
+  --emerald: #24694B;
+  --clay: #A13D28;
+
+  --focus: #0E5A63;
+
+  /* Type scale (§4.2), rem */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-md: 1.125rem;
+  --text-lg: 1.375rem;
+  --text-xl: 1.75rem;
+  --text-2xl: 2.25rem;
+  --text-3xl: 3rem;
+
+  /* Font families (§4.2) — self-hosted via @fontsource, see styles/fonts.ts */
+  --font-display: "Reem Kufi", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans Arabic", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Ink & Brass — dark, OS preference (§4.1) */
+    --paper: #0C1622;
+    --surface: #12212F;
+    --ink: #EAF0F2;
+    --ink-2: #93A4B5;
+    --line: #23384B;
+
+    --brass: #D2A24C;
+    --brass-ink: #0C1622;
+    /* Spec-silent for dark (see task-I1-report.md): a lighter brass that
+       keeps >=3:1 non-text contrast on dark paper/surface. */
+    --brass-ring: #E3B667;
+
+    --teal: #6FC5CE;
+    --emerald: #5FBF92;
+    --clay: #E08A74;
+
+    /* Spec-silent for dark (see task-I1-report.md): reuses dark --teal. */
+    --focus: #6FC5CE;
+  }
+}
+
+:root[data-theme="dark"] {
+  /* Ink & Brass — dark, explicit theme-toggle override (§4.1) */
+  --paper: #0C1622;
+  --surface: #12212F;
+  --ink: #EAF0F2;
+  --ink-2: #93A4B5;
+  --line: #23384B;
+
+  --brass: #D2A24C;
+  --brass-ink: #0C1622;
+  --brass-ring: #E3B667;
+
+  --teal: #6FC5CE;
+  --emerald: #5FBF92;
+  --clay: #E08A74;
+
+  --focus: #6FC5CE;
+}
+
+:root[data-theme="light"] {
+  /* Ink & Brass — light, explicit theme-toggle override (§4.1); wins over
+     the prefers-color-scheme media query even when the OS is set to dark */
+  --paper: #F4F5F3;
+  --surface: #FFFFFF;
+  --ink: #0F1C2E;
+  --ink-2: #45566A;
+  --line: #E2E5E1;
+
+  --brass: #C0913C;
+  --brass-ink: #0F1C2E;
+  --brass-ring: #7A5A20;
+
+  --teal: #0E5A63;
+  --emerald: #24694B;
+  --clay: #A13D28;
+
+  --focus: #0E5A63;
+}

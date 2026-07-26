@@ -1,0 +1,36 @@
+@import "tailwindcss";
+@import "./tokens.css";
+
+/* Map the raw §4.1 tokens onto Tailwind's theme with `@theme inline` so the
+   generated utilities (bg-paper, text-ink, font-display, ...) emit
+   `var(--...)` and therefore keep following the light/dark cascade above at
+   runtime, instead of being frozen to whichever value was active at build
+   time. */
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-line: var(--line);
+  --color-brass: var(--brass);
+  --color-brass-ink: var(--brass-ink);
+  --color-brass-ring: var(--brass-ring);
+  --color-teal: var(--teal);
+  --color-emerald: var(--emerald);
+  --color-clay: var(--clay);
+
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --font-mono: var(--font-mono);
+}
+
+body {
+  font-family: var(--font-body);
+}
+
+/* Visible keyboard-focus ring (§4.1) using the --focus token; 2px + 2px
+   offset. */
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
