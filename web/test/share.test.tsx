@@ -207,6 +207,99 @@ describe('ShareModal — expiry picker (§3.3 / §4.5)', () => {
   });
 });
 
+describe('ShareModal — restart-on-expired reports the SERVER status (§3.3)', () => {
+  test('starting a share whose expiry already lapsed reports still-expired guidance, not a false "started"', async () => {
+    // A stopped share whose deadline is already in the past. Flipping is_active
+    // true does NOT un-expire it — the server derives 'expired', not 'active'.
+    const stopped = mkShare({ is_active: false, status: 'stopped', expires_at: NOW - 1000 });
+    const restartedButExpired = mkShare({
+      is_active: true,
+      status: 'expired',
+      expires_at: NOW - 1000,
+    });
+    stubFetch({
+      '/api/shares': [stopped],
+      'PATCH /api/shares/1': restartedButExpired,
+    });
+    renderModal(mkNode());
+
+    const startBtn = await screen.findByRole('button', { name: i18n.t('share.start') });
+    await act(async () => {
+      fireEvent.click(startBtn);
+    });
+
+    // The guidance toast is shown; the false-positive "started" toast is NOT.
+    expect(await screen.findByText(i18n.t('share.toast.startedExpired'))).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('share.toast.started'))).toBeNull();
+  });
+
+  test('starting a non-expired stopped share DOES report "started"', async () => {
+    const stopped = mkShare({ is_active: false, status: 'stopped', expires_at: null });
+    const restarted = mkShare({ is_active: true, status: 'active', expires_at: null });
+    stubFetch({
+      '/api/shares': [stopped],
+      'PATCH /api/shares/1': restarted,
+    });
+    renderModal(mkNode());
+
+    const startBtn = await screen.findByRole('button', { name: i18n.t('share.start') });
+    await act(async () => {
+      fireEvent.click(startBtn);
+    });
+
+    expect(await screen.findByText(i18n.t('share.toast.started'))).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('share.toast.startedExpired'))).toBeNull();
+  });
+});
+
+describe('ShareModal — a failed shares fetch never masquerades as "unshared" (dedup safety)', () => {
+  test('when GET /api/shares errors, the modal surfaces an error and does NOT offer "create share"', async () => {
+    // /api/shares is intentionally unmapped => 404 => useShares().isError.
+    stubFetch({});
+    renderModal(mkNode());
+
+    expect(await screen.findByText(i18n.t('share.error'))).toBeInTheDocument();
+    // Offering "create" on an errored fetch would let the owner mint a
+    // duplicate share for an already-shared node.
+    expect(screen.queryByRole('button', { name: i18n.t('share.create') })).toBeNull();
+  });
+});
+
+describe('Shared register — quick-toggle reports the SERVER status (§3.3)', () => {
+  test('restarting a lapsed share from the register reports still-expired guidance, not a false "started"', async () => {
+    const stopped = mkShare({
+      id: 1,
+      node_id: 100,
+      is_active: false,
+      status: 'stopped',
+      expires_at: NOW - 1000,
+    });
+    const restartedButExpired = mkShare({
+      id: 1,
+      node_id: 100,
+      is_active: true,
+      status: 'expired',
+      expires_at: NOW - 1000,
+    });
+    stubFetch({
+      '/api/shares': [stopped],
+      'PATCH /api/shares/1': restartedButExpired,
+      '/api/nodes': [],
+      '/api/nodes/trash': [],
+      '/api/auth/me': USER,
+    });
+    renderShared();
+
+    const startBtn = await screen.findByRole('button', { name: i18n.t('share.start') });
+    await act(async () => {
+      fireEvent.click(startBtn);
+    });
+
+    expect(await screen.findByText(i18n.t('share.toast.startedExpired'))).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('share.toast.started'))).toBeNull();
+  });
+});
+
 describe('Shared view — owner status chips (§3.3)', () => {
   test('renders a DISTINCT StatusChip label for each of active / stopped / expired', async () => {
     stubFetch({

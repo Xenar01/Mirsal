@@ -28,7 +28,7 @@ import type { ShareDto } from './types';
  */
 export default function ShareModal({ node, onClose }: { node: NodeDto; onClose: () => void }) {
   const { t } = useTranslation();
-  const { data, isPending } = useShares();
+  const { data, isPending, isError } = useShares();
   const share = Array.isArray(data) ? data.find((s) => s.node_id === node.id) ?? null : null;
   // The stamp is the dispatch MOMENT — it fires only when a share is created in
   // this session, never on every reopen of an already-shared node (§4.4).
@@ -42,6 +42,12 @@ export default function ShareModal({ node, onClose }: { node: NodeDto; onClose: 
           <p className="font-body text-sm text-ink-2">{t('share.loading')}</p>
         ) : share ? (
           <ShareManage share={share} stamp={justCreated} />
+        ) : isError ? (
+          // A failed GET /api/shares is NOT proof the node is unshared — surface
+          // the error rather than offering "create" and risking a duplicate.
+          <p role="alert" className="font-body text-sm text-clay">
+            {t('share.error')}
+          </p>
         ) : (
           <CreateShare nodeId={node.id} onCreated={() => setJustCreated(true)} />
         )}
@@ -93,11 +99,18 @@ function ShareManage({ share, stamp }: { share: ShareDto; stamp: boolean }) {
     patch.mutate(
       { id: share.id, isActive: next },
       {
-        onSuccess: () =>
-          toast({
-            kind: 'success',
-            message: next ? t('share.toast.started') : t('share.toast.stopped'),
-          }),
+        // Report the SERVER's derived status, not the flag we sent: starting a
+        // share whose expiry has already passed leaves it 'expired', not
+        // 'active' (§3.3 restart rule) — so we must not claim it "started".
+        onSuccess: (updated) => {
+          if (!next) {
+            toast({ kind: 'success', message: t('share.toast.stopped') });
+          } else if (updated.status === 'active') {
+            toast({ kind: 'success', message: t('share.toast.started') });
+          } else {
+            toast({ kind: 'error', message: t('share.toast.startedExpired') });
+          }
+        },
         onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
       }
     );

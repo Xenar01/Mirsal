@@ -86,11 +86,18 @@ function ShareRow({ share, onRevoke }: { share: ShareDto; onRevoke: () => void }
     patch.mutate(
       { id: share.id, isActive: next },
       {
-        onSuccess: () =>
-          toast({
-            kind: 'success',
-            message: next ? t('share.toast.started') : t('share.toast.stopped'),
-          }),
+        // Trust the server's derived status: restarting a share whose expiry
+        // has already lapsed yields 'expired', not 'active' — never claim it
+        // "started" from the pre-request flag alone (§3.3 restart rule).
+        onSuccess: (updated) => {
+          if (!next) {
+            toast({ kind: 'success', message: t('share.toast.stopped') });
+          } else if (updated.status === 'active') {
+            toast({ kind: 'success', message: t('share.toast.started') });
+          } else {
+            toast({ kind: 'error', message: t('share.toast.startedExpired') });
+          }
+        },
         onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
       }
     );

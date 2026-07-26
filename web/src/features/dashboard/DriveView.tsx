@@ -327,11 +327,14 @@ function NodeRow({
         </bdi>
       </td>
       <td className="ps-3 pe-3 py-2">
-        {/* Live share state (§4.6): a shared node shows its StatusChip
-            (active/stopped/expired — colour + label + glyph, never colour
-            alone); an unshared node shows a neutral placeholder. */}
+        {/* Live share state (§4.6 / §4.4): the register's status/stamp column
+            carries the brass "shared" seal badge whenever a node is shared —
+            the purpose-built brass StatusChip variant (colour + label + glyph,
+            never colour alone). Granular active/stopped/expired state lives in
+            the ShareModal and the Shared register. An unshared node shows a
+            neutral placeholder. */}
         {share ? (
-          <StatusChip status={share.status} />
+          <StatusChip status="shared" />
         ) : (
           <span aria-hidden="true" className="text-ink-2">
             —

@@ -163,6 +163,51 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     expect(size.className).toMatch(/font-mono/);
   });
 
+  test('the status/stamp column shows the brass "shared" seal badge for a shared node, not its granular status (§4.6 / §4.4)', async () => {
+    const nodes: NodeDto[] = [
+      {
+        id: 6,
+        parent_id: 1,
+        kind: 'file',
+        name: 'تقرير.pdf',
+        size_bytes: 2048,
+        mime_type: 'application/pdf',
+        auto_delete_at: null,
+        created_at: NOW,
+        updated_at: NOW,
+      },
+    ];
+    // A live, ACTIVE share for node 6 — the register column must still show the
+    // brass "shared" seal (§4.6), never leak the granular 'active' status.
+    const share = {
+      id: 1,
+      node_id: 6,
+      token: 'Tok3nAbc',
+      is_active: true,
+      has_password: false,
+      expires_at: null,
+      allow_download: true,
+      created_at: NOW,
+      status: 'active',
+      url: 'https://project4.system.mow.gov.sy/s/Tok3nAbc',
+    };
+    stubFetch({
+      '/api/nodes': nodes,
+      '/api/nodes/trash': [],
+      '/api/shares': [share],
+      '/api/auth/me': USER,
+    });
+
+    renderDrive(['/']);
+
+    const register = await screen.findByRole('table');
+    // The purpose-built brass "shared" variant carries the column.
+    expect(within(register).getByText(i18n.t('status.shared'))).toBeInTheDocument();
+    // The granular 'active' label is NOT rendered here (it belongs to the
+    // ShareModal + the Shared register, not the drive column).
+    expect(within(register).queryByText(i18n.t('status.active'))).toBeNull();
+  });
+
   test('an empty root shows the authored empty-state copy verbatim (§4.9)', async () => {
     stubFetch({ '/api/nodes': [], '/api/nodes/trash': [], '/api/auth/me': USER });
 
