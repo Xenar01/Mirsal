@@ -72,21 +72,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (username: string, password: string) => {
     const seq = ++requestSeqRef.current;
-    const res = await apiPost<{ user: PublicUser }>('/auth/login', { username, password });
-    if (requestSeqRef.current === seq) setUser(res.user);
-    return res.user;
+    // Bumping the counter supersedes any in-flight mount `/me` probe, whose
+    // `finally` will then skip its `setLoading(false)`. So this operation owns
+    // clearing `loading` — always, even on failure — or a probe raced by login
+    // would leave `loading` stuck `true` and hang `RequireAuth` forever.
+    try {
+      const res = await apiPost<{ user: PublicUser }>('/auth/login', { username, password });
+      if (requestSeqRef.current === seq) setUser(res.user);
+      return res.user;
+    } finally {
+      if (requestSeqRef.current === seq) setLoading(false);
+    }
   }, []);
 
   const logout = useCallback(async () => {
     const seq = ++requestSeqRef.current;
-    // Only clear local state once the server confirms the session was
-    // revoked. If this throws (network drop, blocked request, a 403 from a
-    // stale/missing CSRF cookie, ...) the `user` state is left untouched —
-    // the httpOnly `mirsal_session` cookie is still valid, so the UI must
-    // keep showing the user as signed in rather than lie about a revocation
-    // that didn't happen. The error propagates to the caller to surface.
-    await apiPost('/auth/logout');
-    if (requestSeqRef.current === seq) setUser(null);
+    try {
+      // Only clear local state once the server confirms the session was
+      // revoked. If this throws (network drop, blocked request, a 403 from a
+      // stale/missing CSRF cookie, ...) the `user` state is left untouched —
+      // the httpOnly `mirsal_session` cookie is still valid, so the UI must
+      // keep showing the user as signed in rather than lie about a revocation
+      // that didn't happen. The error propagates to the caller to surface.
+      await apiPost('/auth/logout');
+      if (requestSeqRef.current === seq) setUser(null);
+    } finally {
+      // Like `login`, this supersedes any in-flight probe, so it must clear
+      // `loading` itself (regardless of success/failure) — leaving `user`
+      // untouched on failure per the comment above.
+      if (requestSeqRef.current === seq) setLoading(false);
+    }
   }, []);
 
   return (

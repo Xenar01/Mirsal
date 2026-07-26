@@ -63,6 +63,40 @@ describe('AuthProvider — request sequencing (mount /me probe vs. login race)',
 
     expect(result.current.user).toEqual(ADMIN);
   });
+
+  test('login() clears `loading` even when it supersedes a still-pending mount /me probe', async () => {
+    const me = deferred<Response>();
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.endsWith('/auth/me')) return me.promise;
+      if (u.endsWith('/auth/login')) return jsonResponse(200, { user: ADMIN });
+      throw new Error(`unexpected fetch: ${u}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { result } = renderHook(() => useAuth(), { wrapper: AuthProvider });
+
+    // Mount probe held open → still loading. Login supersedes it (bumps the
+    // sequence counter), so the probe's `finally` will skip setLoading(false).
+    expect(result.current.loading).toBe(true);
+
+    await act(async () => {
+      await result.current.login('admin', 'secret-pw-12');
+    });
+
+    // Pre-fix, `login` never touched `loading`, so it stayed stuck `true` here
+    // and RequireAuth (which renders nothing while loading) would hang forever.
+    expect(result.current.user).toEqual(ADMIN);
+    expect(result.current.loading).toBe(false);
+
+    // The stale probe resolving late must not resurrect `loading` or drop the user.
+    await act(async () => {
+      me.resolve(jsonResponse(401));
+      await flushAsync();
+    });
+    expect(result.current.loading).toBe(false);
+    expect(result.current.user).toEqual(ADMIN);
+  });
 });
 
 describe('AuthProvider — logout() failure handling', () => {
