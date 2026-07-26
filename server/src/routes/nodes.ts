@@ -241,7 +241,11 @@ function waitForOpen(stream: ReadStream): Promise<void> {
 }
 
 const folderBodySchema = z.object({
-  parent_id: z.number().int(),
+  // Nullable/optional so a brand-new account (empty root, no child to learn the
+  // root node id from) can still create its first folder: the handler resolves
+  // the synthetic root when parent_id is null/omitted, exactly like GET
+  // /api/nodes and POST /api/nodes/upload already do.
+  parent_id: z.number().int().nullable().optional(),
   name: z.string(),
 });
 
@@ -314,8 +318,15 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
 
     const uid = req.user!.id;
     const nowMs = now();
+    // A brand-new account's root listing is empty, so the client has no
+    // concrete root node id to POST against. Resolve the synthetic root when
+    // parent_id is omitted/null (mirrors GET /api/nodes and /api/nodes/upload)
+    // — spec §4.9's empty-root copy offers folder creation as an alternative to
+    // the first upload, so it MUST work with zero children.
+    const { rootId } = ensureUserRoots(db, uid, nowMs);
+    const parentId = parsed.data.parent_id ?? rootId;
     try {
-      const node = createFolder(db, uid, parsed.data.parent_id, name, nowMs);
+      const node = createFolder(db, uid, parentId, name, nowMs);
       reply.code(201).send(toDto(db, node));
     } catch (e) {
       handleServiceError(e, reply);

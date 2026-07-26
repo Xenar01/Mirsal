@@ -173,6 +173,62 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     ).toBeInTheDocument();
   });
 
+  test('New Folder is usable on a brand-new empty root — POSTs with a null parent, no generic-failure short-circuit (§4.9)', async () => {
+    // A brand-new account: the root listing is empty, so the client has NO
+    // child to learn the concrete root node id from. Folder creation must still
+    // POST (the server resolves the synthetic root from a null parent).
+    const created: NodeDto = {
+      id: 7,
+      parent_id: 1,
+      kind: 'folder',
+      name: 'مجلد جديد',
+      size_bytes: 0,
+      mime_type: null,
+      auto_delete_at: null,
+      created_at: NOW,
+      updated_at: NOW,
+    };
+    let folderBody: unknown;
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url).split('?')[0];
+      const method = init?.method ?? 'GET';
+      if (path === '/api/nodes/folder' && method === 'POST') {
+        folderBody = init?.body ? JSON.parse(String(init.body)) : undefined;
+        return jsonResponse(201, created);
+      }
+      if (path === '/api/nodes') return jsonResponse(200, []); // empty root — zero children
+      if (path === '/api/nodes/trash') return jsonResponse(200, []);
+      if (path === '/api/auth/me') return jsonResponse(200, USER);
+      return jsonResponse(404, { error: 'not_found' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderDrive(['/']);
+    // The verbatim empty-root copy is shown — it offers folder creation.
+    await screen.findByText('لا ملفات بعد. ارفع أول ملف أو أنشئ مجلدًا.');
+
+    fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.newFolder') }));
+    const nameInput = await screen.findByLabelText(i18n.t('dashboard.folder.nameLabel'));
+    fireEvent.change(nameInput, { target: { value: 'مجلد جديد' } });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.folder.create') }));
+    });
+
+    // The create endpoint WAS called (previously it short-circuited to a
+    // generic failure without ever POSTing), with a null parent so the server
+    // resolves the root for the empty account.
+    const call = fetchMock.mock.calls.find(
+      ([u, init]) =>
+        String(u).split('?')[0] === '/api/nodes/folder' &&
+        ((init as RequestInit | undefined)?.method ?? 'GET') === 'POST'
+    );
+    expect(call).toBeDefined();
+    expect(folderBody).toMatchObject({ parent_id: null, name: 'مجلد جديد' });
+    // No generic-failure message surfaced.
+    expect(screen.queryByText(i18n.t('dashboard.folder.error'))).toBeNull();
+  });
+
   test('a 409 on folder create surfaces a name-conflict message (§3.2 / §7)', async () => {
     // A name clash needs an existing sibling, so the root is non-empty — which
     // is also how the client learns the concrete root node id (from a child's

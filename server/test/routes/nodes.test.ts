@@ -193,6 +193,42 @@ test('create folder -> appears in GET /api/nodes', async () => {
   expect(list.some((n) => n.name === 'Docs')).toBe(true);
 });
 
+test('create folder with omitted parent_id resolves to the root (brand-new empty account)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  // A brand-new client can't know its concrete root node id (empty root has no
+  // child to learn it from) — omitting parent_id must resolve to the root.
+  const createRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { name: 'Docs' },
+  });
+  expect(createRes.statusCode).toBe(201);
+  expect(createRes.json()).toMatchObject({ kind: 'folder', name: 'Docs', parent_id: rootId });
+});
+
+test('create folder with null parent_id resolves to the root', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  const createRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { parent_id: null, name: 'Docs' },
+  });
+  expect(createRes.statusCode).toBe(201);
+  expect(createRes.json()).toMatchObject({ kind: 'folder', name: 'Docs', parent_id: rootId });
+});
+
 test('duplicate folder name under the same parent -> 409 name_conflict', async () => {
   const built = await makeApp();
   const uid = await seedUser('alice', 'pw');

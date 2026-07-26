@@ -19,7 +19,13 @@ export function listTrash(): Promise<NodeDto[]> {
   return apiGet<NodeDto[]>('/nodes/trash');
 }
 
-export function createFolder(parentId: number, name: string): Promise<NodeDto> {
+/**
+ * Creates a folder under `parentId`. `null` means the root: the server
+ * resolves the synthetic root itself (like the listing/upload endpoints), so a
+ * brand-new empty account — which can't yet know its concrete root node id —
+ * can still create its first folder.
+ */
+export function createFolder(parentId: number | null, name: string): Promise<NodeDto> {
   return apiPost<NodeDto>('/nodes/folder', { parent_id: parentId, name });
 }
 

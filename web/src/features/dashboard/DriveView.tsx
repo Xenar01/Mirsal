@@ -105,7 +105,6 @@ export default function DriveView() {
         open={newFolderOpen}
         onClose={() => setNewFolderOpen(false)}
         parentId={parentId}
-        rootId={rootIdRef.current}
       />
       {renameTarget && (
         <RenameModal node={renameTarget} onClose={() => setRenameTarget(null)} />
@@ -322,12 +321,10 @@ function NewFolderModal({
   open,
   onClose,
   parentId,
-  rootId,
 }: {
   open: boolean;
   onClose: () => void;
   parentId: number | null;
-  rootId: number | null;
 }) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -343,10 +340,6 @@ function NewFolderModal({
     }
   }, [open]);
 
-  // Root listing is `parent=null`, but the create endpoint needs the concrete
-  // root node id; fall back to it when at root.
-  const targetParent = parentId ?? rootId;
-
   function submit(event?: FormEvent) {
     event?.preventDefault();
     const trimmed = name.trim();
@@ -354,13 +347,12 @@ function NewFolderModal({
       setError(t('dashboard.folder.required'));
       return;
     }
-    if (targetParent === null) {
-      setError(t('dashboard.folder.error'));
-      return;
-    }
     setError(null);
+    // At root the URL carries no `parent` (parentId === null); the server
+    // resolves the synthetic root itself, so an empty brand-new account can
+    // still create its first folder without knowing the concrete root id.
     create.mutate(
-      { parentId: targetParent, name: trimmed },
+      { parentId, name: trimmed },
       {
         onSuccess: () => {
           toast({ kind: 'success', message: t('dashboard.toast.folderCreated') });

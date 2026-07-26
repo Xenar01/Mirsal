@@ -34,7 +34,7 @@ export function useTrash() {
 export function useCreateFolder() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { parentId: number; name: string }) =>
+    mutationFn: (vars: { parentId: number | null; name: string }) =>
       nodesApi.createFolder(vars.parentId, vars.name),
     onSuccess: () => invalidateNodes(client),
   });
