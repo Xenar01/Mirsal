@@ -1,11 +1,18 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, expect, test } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/connection.js';
 import { migrate } from '../../src/db/migrate.js';
 import { dueTrash, duePurge, orphanBlobs } from '../../src/scheduler/selectors.js';
+
+/** Drains the `orphanBlobs` async generator into a sorted array of relative paths. */
+async function collectOrphans(iter: AsyncIterable<string>): Promise<string[]> {
+  const out: string[] = [];
+  for await (const rel of iter) out.push(rel);
+  return out.sort();
+}
 
 let db: Database.Database | undefined;
 let dir: string | undefined;
@@ -162,7 +169,7 @@ test('duePurge respects limit over several due rows', () => {
 
 // --- orphanBlobs ---------------------------------------------------------------
 
-test('orphanBlobs returns blob files with no matching nodes.storage_path row, skipping .tmp- entries', () => {
+test('orphanBlobs returns blob files with no matching nodes.storage_path row, skipping .tmp- entries', async () => {
   const uid = seedUser();
   insertNode({ ownerId: uid, parentId: null, name: 'n1', storagePath: 'u1/n1' });
   // No node row for u1/n2 → orphan.
@@ -175,14 +182,14 @@ test('orphanBlobs returns blob files with no matching nodes.storage_path row, sk
   fs.writeFileSync(path.join(ownerDir, '.tmp-abc'), 'in-flight upload');
 
   try {
-    const result = orphanBlobs(db!, storageDir);
+    const result = await collectOrphans(orphanBlobs(db!, storageDir));
     expect(result).toEqual(['u1/n2']);
   } finally {
     fs.rmSync(storageDir, { recursive: true, force: true });
   }
 });
 
-test('orphanBlobs returns [] when nothing is orphaned', () => {
+test('orphanBlobs yields nothing when nothing is orphaned', async () => {
   const uid = seedUser();
   insertNode({ ownerId: uid, parentId: null, name: 'n1', storagePath: 'u1/n1' });
 
@@ -192,27 +199,65 @@ test('orphanBlobs returns [] when nothing is orphaned', () => {
   fs.writeFileSync(path.join(ownerDir, 'n1'), 'matched');
 
   try {
-    const result = orphanBlobs(db!, storageDir);
+    const result = await collectOrphans(orphanBlobs(db!, storageDir));
     expect(result).toEqual([]);
   } finally {
     fs.rmSync(storageDir, { recursive: true, force: true });
   }
 });
 
-test('orphanBlobs skips non-directory entries directly under storageDir', () => {
+test('orphanBlobs skips non-directory entries directly under storageDir', async () => {
   const storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mirsal-g1-storage-'));
   fs.writeFileSync(path.join(storageDir, 'stray-file'), 'not an owner dir');
 
   try {
-    expect(() => orphanBlobs(db!, storageDir)).not.toThrow();
-    expect(orphanBlobs(db!, storageDir)).toEqual([]);
+    await expect(collectOrphans(orphanBlobs(db!, storageDir))).resolves.toEqual([]);
   } finally {
     fs.rmSync(storageDir, { recursive: true, force: true });
   }
 });
 
-test('orphanBlobs tolerates a missing storageDir and returns []', () => {
+test('orphanBlobs tolerates a missing storageDir and yields nothing', async () => {
   const missingDir = path.join(os.tmpdir(), `mirsal-g1-missing-${Math.random()}`);
 
-  expect(orphanBlobs(db!, missingDir)).toEqual([]);
+  expect(await collectOrphans(orphanBlobs(db!, missingDir))).toEqual([]);
+});
+
+test('orphanBlobs walks a large STORAGE_DIR without one unbroken synchronous burst — it yields to the event loop during enumeration and still finds every orphan', async () => {
+  // Many more files than the injected yield window, so the walk is forced to
+  // hand the event loop several turns *during enumeration* rather than
+  // scanning every entry in one unbroken synchronous burst — the exact hazard
+  // the original finding named: an uncapped readdirSync + per-file DB lookup
+  // blocking the loop for a duration proportional to total stored files. None
+  // of these files has a node row → all are orphans, so correctness (every
+  // orphan still found) is asserted alongside the yielding.
+  const FILE_COUNT = 250;
+  const YIELD_EVERY = 50;
+
+  const storageDir = fs.mkdtempSync(path.join(os.tmpdir(), 'mirsal-g1-storage-'));
+  const ownerDir = path.join(storageDir, 'u1');
+  fs.mkdirSync(ownerDir, { recursive: true });
+  const expected: string[] = [];
+  for (let i = 0; i < FILE_COUNT; i++) {
+    fs.writeFileSync(path.join(ownerDir, `f${i}`), 'orphan');
+    expected.push(`u1/f${i}`);
+  }
+
+  const setImmediateSpy = vi.spyOn(global, 'setImmediate');
+  try {
+    const result = await collectOrphans(orphanBlobs(db!, storageDir, { yieldEvery: YIELD_EVERY }));
+
+    expect(result).toEqual(expected.sort());
+    // These setImmediate calls are the walk's own event-loop yields (nothing
+    // else in this test schedules one): ~FILE_COUNT/YIELD_EVERY of them, so
+    // the enumeration demonstrably broke into multiple yielded chunks rather
+    // than running as one blocking pass. (`- 1` tolerates the final partial
+    // window not reaching the threshold.)
+    expect(setImmediateSpy.mock.calls.length).toBeGreaterThanOrEqual(
+      Math.floor(FILE_COUNT / YIELD_EVERY) - 1
+    );
+  } finally {
+    setImmediateSpy.mockRestore();
+    fs.rmSync(storageDir, { recursive: true, force: true });
+  }
 });

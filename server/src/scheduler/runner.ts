@@ -78,12 +78,14 @@ let running = false;
  *     just leaves an orphan for a later sweep to retry.
  *  4. Orphan sweep: unlink blobs under `STORAGE_DIR` with no matching
  *     `nodes.storage_path` row — reclaims blobs left behind by a crash
- *     between step 2's commit and step 3's unlink on a prior run. Capped at
- *     an orphan batch size per tick and yields to the event loop between
- *     every unlink, so this fully-synchronous readdirSync/unlinkSync work
- *     never blocks the loop for one unbounded burst on a large
- *     `STORAGE_DIR` — any excess orphans are swept on a later tick. Also
- *     per-item fault tolerant, same rationale as step 3.
+ *     between step 2's commit and step 3's unlink on a prior run. Driven by
+ *     the `orphanBlobs` async generator (streamed `opendirSync`/`readSync`
+ *     enumeration with periodic event-loop yields), stopped at an orphan
+ *     batch size per tick and yielding between every unlink, so neither the
+ *     directory enumeration nor the unlinking blocks the loop for one
+ *     unbounded burst on a large `STORAGE_DIR` — any excess orphans are
+ *     swept on a later tick. Also per-item fault tolerant, same rationale as
+ *     step 3.
  *
  * `cfg` (GRACE_MS/STORAGE_DIR/ORPHAN_BATCH) is optional and defaults to
  * `loadConfig()`/the module's batch constant — pass it explicitly in tests
@@ -156,19 +158,23 @@ export async function runTick(
     }
 
     // Orphan sweep: reclaims blobs left by a crash-after-commit on a prior
-    // tick. Capped at `orphanBatch` per tick (like the BATCH-limited phases
-    // above — any excess is swept on a later tick) and yields to the event
-    // loop between every unlink, so this synchronous readdirSync/unlinkSync
-    // work never blocks the loop for one unbounded burst proportional to a
-    // large STORAGE_DIR (design spec §9). Also per-item fault tolerant, same
-    // rationale as the unlink loop above.
-    const orphans = orphanBlobs(db, STORAGE_DIR).slice(0, orphanBatch);
-    for (const rel of orphans) {
+    // tick. `orphanBlobs` is an async generator that streams the STORAGE_DIR
+    // walk (opendirSync/readSync one entry at a time + periodic event-loop
+    // yields), so neither the *enumeration* nor the *unlink* side blocks the
+    // loop for one unbounded burst proportional to a large STORAGE_DIR (design
+    // spec §9). We stop at `orphanBatch` per tick (breaking closes the
+    // generator's dir handles and does no further enumeration — any excess is
+    // swept on a later tick) and yield between unlinks. Per-item fault
+    // tolerant, same rationale as the unlink loop above.
+    let swept = 0;
+    for await (const rel of orphanBlobs(db, STORAGE_DIR)) {
+      if (swept >= orphanBatch) break;
       try {
         deleteBlob(rel);
       } catch {
         // Best-effort — see rationale above.
       }
+      swept++;
       await yieldToEventLoop();
     }
 
