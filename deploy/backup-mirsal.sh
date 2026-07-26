@@ -4,9 +4,12 @@
 # SQLite `VACUUM INTO`, which takes only a read lock and writes a fresh,
 # integrity-checked copy.
 #
-# Order matters: snapshot the blob STORAGE first, then the DB. A blob referenced
-# by the DB snapshot is therefore always already present in the storage snapshot
-# (the DB can only reference blobs that existed before it was captured).
+# Order matters: snapshot the DB FIRST, then the blob storage. The upload path
+# commits the node row BEFORE moving the blob into its final name (row-first), so
+# a storage-first order could capture a DB that references a blob missing from the
+# earlier storage tar. DB-first can only ever leave the storage snapshot holding
+# EXTRA blobs the DB doesn't reference yet (harmless), and the 7-day trash grace
+# means no referenced blob is hard-deleted within a backup window.
 #
 # Off-box shipping is OPTIONAL and OFF unless an rclone remote is configured and
 # named via MIRSAL_BACKUP_REMOTE (e.g. "b2backup:mybucket/mirsal"). rclone has no
@@ -29,17 +32,18 @@ chown 1000:1000 "$BK_DIR" 2>/dev/null || true
 
 echo "[$(date -u +%FT%TZ)] backup start ($TS)"
 
-# 1. Blob storage snapshot (tar+gzip of ./data/storage).
-tar -czf "$BK_DIR/storage-$TS.tar.gz" -C ./data storage
-echo "  storage -> storage-$TS.tar.gz ($(wc -c <"$BK_DIR/storage-$TS.tar.gz") bytes)"
-
-# 2. Consistent DB snapshot via VACUUM INTO, inside the running container (which
+# 1. Consistent DB snapshot via VACUUM INTO, inside the running container (which
 #    has better-sqlite3). /app/data is the bind mount, so it lands in ./data.
 docker compose exec -T -e BK_OUT="/app/data/backups/db-$TS.sqlite" mirsal \
   node --input-type=module -e \
   'import Database from "better-sqlite3"; const db=new Database(process.env.DB_PATH); db.exec("VACUUM INTO \x27"+process.env.BK_OUT+"\x27"); db.close();'
 gzip -f "$BK_DIR/db-$TS.sqlite"
 echo "  db -> db-$TS.sqlite.gz ($(wc -c <"$BK_DIR/db-$TS.sqlite.gz") bytes)"
+
+# 2. Blob storage snapshot (tar+gzip of ./data/storage), taken AFTER the DB so it
+#    is a superset of what the DB snapshot references.
+tar -czf "$BK_DIR/storage-$TS.tar.gz" -C ./data storage
+echo "  storage -> storage-$TS.tar.gz ($(wc -c <"$BK_DIR/storage-$TS.tar.gz") bytes)"
 
 # 3. Optional off-box copy.
 if [ -n "${MIRSAL_BACKUP_REMOTE:-}" ]; then
