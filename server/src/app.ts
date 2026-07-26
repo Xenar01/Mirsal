@@ -13,6 +13,8 @@ import type { Clock } from './clock.js';
 import healthRoute from './routes/health.js';
 import authRoutes from './routes/auth.js';
 import nodesRoutes from './routes/nodes.js';
+import sharesRoutes from './routes/shares.js';
+import publicRoutes from './routes/public.js';
 import { createPasswordService } from './auth/passwords.js';
 import { makeGuards } from './auth/guards.js';
 import { createBlobStore } from './storage/blobs.js';
@@ -93,6 +95,21 @@ async function registerRoutes(app: FastifyInstance, deps: AppDeps): Promise<void
 
   const blobStore = createBlobStore({ storageDir: deps.config.STORAGE_DIR });
   await app.register(nodesRoutes, { db: deps.db, now: deps.now, guards, blobStore });
+
+  // H4: owner-scoped share management (requireAuth + CSRF via guard).
+  await app.register(sharesRoutes, { db: deps.db, now: deps.now, guards, config: deps.config });
+
+  // H4: the public access gate — NO auth, NO CSRF; every response under
+  // `/api/public/*` gets `Referrer-Policy: no-referrer` (set inside the
+  // plugin's own encapsulated onSend hook, so it never leaks onto the
+  // authenticated routes above).
+  await app.register(publicRoutes, {
+    db: deps.db,
+    now: deps.now,
+    passwordService,
+    blobStore,
+    config: deps.config,
+  });
 }
 
 /**
