@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { FastifyInstance } from 'fastify';
 import { openDb } from '../../src/db/connection.js';
@@ -10,6 +10,29 @@ import { loadConfig, MAX_FILE_BYTES } from '../../src/config.js';
 import { buildApp } from '../../src/app.js';
 import { createPasswordService } from '../../src/auth/passwords.js';
 import { ensureUserRoots } from '../../src/nodes/tree.js';
+
+// Mock `nextSuffixedName` so a single test can force it to throw at exactly the
+// post-reserve / post-writeStreamToTemp window in POST /api/nodes/upload, while
+// EVERY other test in this file keeps the real naming behavior (toggle defaults
+// off). `mapDbError` is preserved from the real module so the handler's error
+// mapping is unchanged.
+const collisionsState = vi.hoisted(() => ({ throwOnNextSuffixedName: false }));
+const NEXT_SUFFIXED_FAILURE = 'simulated nextSuffixedName failure (SQLITE_BUSY)';
+
+vi.mock('../../src/nodes/collisions.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../src/nodes/collisions.js')>();
+  return {
+    ...actual,
+    nextSuffixedName: (...args: Parameters<typeof actual.nextSuffixedName>): string => {
+      if (collisionsState.throwOnNextSuffixedName) {
+        const err = new Error(NEXT_SUFFIXED_FAILURE) as NodeJS.ErrnoException;
+        err.code = 'SQLITE_BUSY';
+        throw err;
+      }
+      return actual.nextSuffixedName(...args);
+    },
+  };
+});
 
 const NOW = 1_700_000_000_000;
 const clock = () => NOW;
@@ -32,6 +55,7 @@ let storageDir: string | undefined;
 let app: FastifyInstance | undefined;
 
 afterEach(async () => {
+  collisionsState.throwOnNextSuffixedName = false;
   await app?.close();
   app = undefined;
   db?.close();
@@ -329,6 +353,51 @@ test('upload against a quota that is already exhausted -> 413 quota_exceeded, no
 
   const rows = db!.prepare("SELECT * FROM nodes WHERE kind = 'file' AND owner_id = ?").all(uid);
   expect(rows).toEqual([]);
+});
+
+test('upload where the naming step throws after reserve+writeTemp -> quota released, temp blob unlinked, clean error (no leak)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  // Fresh user: quota starts at 0.
+  const before = db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number };
+  expect(before.used_bytes).toBe(0);
+
+  // Force nextSuffixedName to throw in the window AFTER reserve() has bumped
+  // used_bytes and writeStreamToTemp() has written the `.tmp-*` blob.
+  collisionsState.throwOnNextSuffixedName = true;
+
+  const { statusCode, body } = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'boom.txt',
+    data: Buffer.from('this content was fully streamed to a temp blob'),
+  });
+
+  // --- The load-bearing assertions: cleanup MUST run on the throw ---
+
+  // Quota released: used_bytes is back to its pre-upload value (0), not left
+  // over-counted by the abandoned reserve().
+  const after = db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number };
+  expect(after.used_bytes).toBe(0);
+
+  // No orphaned temp blob: the `.tmp-*` file was unlinked (the scheduler's
+  // orphan sweep skips `.tmp-*`, so a leak here would never be reclaimed).
+  const ownerDir = path.join(storageDir!, String(uid));
+  const leftovers = fs.existsSync(ownerDir) ? fs.readdirSync(ownerDir) : [];
+  expect(leftovers.filter((f) => f.startsWith('.tmp-'))).toEqual([]);
+  expect(leftovers).toEqual([]);
+
+  // No file row was committed.
+  const rows = db!.prepare("SELECT * FROM nodes WHERE kind = 'file' AND owner_id = ?").all(uid);
+  expect(rows).toEqual([]);
+
+  // Clean, mapped error — never a 2xx, and the raw error message/stack must
+  // not leak into the response body.
+  expect(statusCode).not.toBe(200);
+  expect(statusCode).toBeGreaterThanOrEqual(400);
+  expect(JSON.stringify(body)).not.toContain(NEXT_SUFFIXED_FAILURE);
 });
 
 // ---------------------------------------------------------------------------

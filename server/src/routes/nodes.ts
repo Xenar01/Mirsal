@@ -412,15 +412,21 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
       return;
     }
 
-    const base = sanitizeNodeName(data.filename) ?? 'file';
-    const finalName = nextSuffixedName(db, parentId, base);
-
     // Row-first (CARRY from G): the node row (with its final storage_path
     // already set) is committed BEFORE commitTemp renames the blob into its
     // final name, so the scheduler's orphanBlobs walk never sees a
     // final-named blob with no matching row.
     let nodeId: number;
     try {
+      // Inside the try so a throw here (e.g. nextSuffixedName's DB SELECT
+      // hitting SQLITE_BUSY past the busy_timeout, or disk I/O error) is
+      // caught below and triggers the same release()+unlink() cleanup as any
+      // other post-reserve failure — otherwise the reserved quota leaks
+      // (used_bytes stays over-counted) and the `.tmp-*` blob is orphaned
+      // (the scheduler's orphan sweep skips `.tmp-*`, so it's never reclaimed).
+      const base = sanitizeNodeName(data.filename) ?? 'file';
+      const finalName = nextSuffixedName(db, parentId, base);
+
       const insertFile = db.transaction((): number => {
         const info = db
           .prepare(
