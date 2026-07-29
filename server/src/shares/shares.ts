@@ -14,6 +14,9 @@ export interface Share {
   allow_download: number;
   created_at: number;
   revoked_at: number | null;
+  download_limit: number | null;
+  download_count: number;
+  on_exhaust: 'stop' | 'delete';
 }
 
 export interface CreateShareOptions {
@@ -142,13 +145,16 @@ export function revokeShare(db: Database.Database, ownerId: number, shareId: num
 
 /**
  * Pure status derivation for a share row: `is_active = 0` → `'stopped'`
- * (checked first); else a past `expires_at` → `'expired'`; else `'active'`.
+ * (checked first); else an exhausted download limit (`download_limit` set
+ * and `download_count` has reached it) → `'exhausted'`; else a past
+ * `expires_at` → `'expired'`; else `'active'`.
  */
 export function ownerStatus(
-  share: Pick<Share, 'is_active' | 'expires_at'>,
+  share: Pick<Share, 'is_active' | 'expires_at' | 'download_limit' | 'download_count'>,
   now: number
-): 'active' | 'stopped' | 'expired' {
+): 'active' | 'stopped' | 'expired' | 'exhausted' {
   if (!share.is_active) return 'stopped';
+  if (share.download_limit != null && share.download_count >= share.download_limit) return 'exhausted';
   if (share.expires_at != null && share.expires_at < now) return 'expired';
   return 'active';
 }

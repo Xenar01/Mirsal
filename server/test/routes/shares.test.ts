@@ -382,3 +382,42 @@ test('PATCH password:"" is rejected (400), never hashed into an unrecoverable pa
   expect(clearRes.statusCode).toBe(200);
   expect(clearRes.json()).toMatchObject({ has_password: false });
 });
+
+test('GET /api/shares exposes download-limit fields and an exhausted status', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const folder = await makeFolder(built, session, csrf, rootId, 'Exhausted');
+
+  const share = (
+    await built.inject({
+      method: 'POST',
+      url: '/api/shares',
+      cookies: { mirsal_session: session },
+      headers: { 'x-csrf-token': csrf },
+      payload: { node_id: folder.id },
+    })
+  ).json();
+
+  db!
+    .prepare('UPDATE shares SET download_limit = 1, download_count = 1, is_active = 1 WHERE id = ?')
+    .run(share.id);
+
+  const listRes = await built.inject({ method: 'GET', url: '/api/shares', cookies: { mirsal_session: session } });
+  expect(listRes.statusCode).toBe(200);
+  const list = listRes.json() as Array<{
+    id: number;
+    download_limit: number | null;
+    download_count: number;
+    on_exhaust: string;
+    status: string;
+  }>;
+  const found = list.find((s) => s.id === share.id);
+  expect(found).toMatchObject({
+    download_limit: 1,
+    download_count: 1,
+    on_exhaust: 'delete',
+    status: 'exhausted',
+  });
+});

@@ -36,7 +36,10 @@ interface ShareDto {
   expires_at: number | null;
   allow_download: boolean;
   created_at: number;
-  status: 'active' | 'stopped' | 'expired';
+  status: 'active' | 'stopped' | 'expired' | 'exhausted';
+  download_limit: number | null;
+  download_count: number;
+  on_exhaust: 'stop' | 'delete';
   url: string;
 }
 
@@ -51,6 +54,10 @@ function toShareDto(share: Share, publicBaseUrl: string, nowMs: number): ShareDt
     allow_download: !!share.allow_download,
     created_at: share.created_at,
     status: ownerStatus(share, nowMs),
+    download_limit: share.download_limit,
+    // Unlimited shares always report 0 (the stored count is meaningless when NULL).
+    download_count: share.download_limit == null ? 0 : share.download_count,
+    on_exhaust: share.on_exhaust,
     url: `${publicBaseUrl}/s/${share.token}`,
   };
 }
