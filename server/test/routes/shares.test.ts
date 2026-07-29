@@ -115,6 +115,18 @@ function trashIdFor(uid: number): number {
   return ensureUserRoots(db!, uid, NOW).trashId;
 }
 
+/** Inserts a live file node directly under `uid`'s root and returns its id. */
+function seedFileNode(uid: number): number {
+  const { rootId } = ensureUserRoots(db!, uid, NOW);
+  const info = db!
+    .prepare(
+      `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
+       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @now, @now)`
+    )
+    .run({ ownerId: uid, parentId: rootId, name: `f-${Math.random()}`, now: NOW });
+  return Number(info.lastInsertRowid);
+}
+
 async function makeFolder(built: FastifyInstance, session: string, csrf: string, parentId: number, name: string): Promise<any> {
   const res = await built.inject({
     method: 'POST',
@@ -420,4 +432,180 @@ test('GET /api/shares exposes download-limit fields and an exhausted status', as
     on_exhaust: 'delete',
     status: 'exhausted',
   });
+});
+
+test('PATCH accepts a download_limit-only body and resets download_count', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const nodeId = seedFileNode(uid);
+
+  const share = (
+    await built.inject({
+      method: 'POST',
+      url: '/api/shares',
+      cookies: { mirsal_session: session },
+      headers: { 'x-csrf-token': csrf },
+      payload: { node_id: nodeId },
+    })
+  ).json();
+
+  db!.prepare('UPDATE shares SET download_count = 5 WHERE id = ?').run(share.id);
+
+  const patchRes = await built.inject({
+    method: 'PATCH',
+    url: `/api/shares/${share.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { download_limit: 3 },
+  });
+  expect(patchRes.statusCode).toBe(200);
+  const dto = patchRes.json();
+  expect(dto.download_limit).toBe(3);
+  expect(dto.download_count).toBe(0);
+
+  const row = db!.prepare('SELECT download_count FROM shares WHERE id = ?').get(share.id) as {
+    download_count: number;
+  };
+  expect(row.download_count).toBe(0);
+});
+
+test('PATCH accepts on_exhaust alongside download_limit', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const nodeId = seedFileNode(uid);
+
+  const share = (
+    await built.inject({
+      method: 'POST',
+      url: '/api/shares',
+      cookies: { mirsal_session: session },
+      headers: { 'x-csrf-token': csrf },
+      payload: { node_id: nodeId },
+    })
+  ).json();
+
+  const patchRes = await built.inject({
+    method: 'PATCH',
+    url: `/api/shares/${share.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { download_limit: 2, on_exhaust: 'stop' },
+  });
+  expect(patchRes.statusCode).toBe(200);
+  expect(patchRes.json()).toMatchObject({ download_limit: 2, on_exhaust: 'stop' });
+});
+
+test('PATCH download_limit on a FOLDER share -> 400 not_a_file', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const folder = await makeFolder(built, session, csrf, rootId, 'NotAFile');
+
+  const share = (
+    await built.inject({
+      method: 'POST',
+      url: '/api/shares',
+      cookies: { mirsal_session: session },
+      headers: { 'x-csrf-token': csrf },
+      payload: { node_id: folder.id },
+    })
+  ).json();
+
+  const patchRes = await built.inject({
+    method: 'PATCH',
+    url: `/api/shares/${share.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { download_limit: 1 },
+  });
+  expect(patchRes.statusCode).toBe(400);
+  expect(patchRes.json()).toMatchObject({ code: 'not_a_file' });
+
+  // The share is untouched — the guard ran before any write.
+  const row = db!.prepare('SELECT download_limit FROM shares WHERE id = ?').get(share.id) as {
+    download_limit: number | null;
+  };
+  expect(row.download_limit).toBeNull();
+});
+
+test('PATCH download_limit=0 -> 400 invalid_body (Zod rejects)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const nodeId = seedFileNode(uid);
+
+  const share = (
+    await built.inject({
+      method: 'POST',
+      url: '/api/shares',
+      cookies: { mirsal_session: session },
+      headers: { 'x-csrf-token': csrf },
+      payload: { node_id: nodeId },
+    })
+  ).json();
+
+  const patchRes = await built.inject({
+    method: 'PATCH',
+    url: `/api/shares/${share.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { download_limit: 0 },
+  });
+  expect(patchRes.statusCode).toBe(400);
+  expect(patchRes.json()).toMatchObject({ error: 'invalid_body' });
+});
+
+test('PATCH clearing download_limit -> null resets download_count', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const nodeId = seedFileNode(uid);
+
+  const share = (
+    await built.inject({
+      method: 'POST',
+      url: '/api/shares',
+      cookies: { mirsal_session: session },
+      headers: { 'x-csrf-token': csrf },
+      payload: { node_id: nodeId },
+    })
+  ).json();
+
+  db!.prepare('UPDATE shares SET download_limit = 5, download_count = 3 WHERE id = ?').run(share.id);
+
+  const patchRes = await built.inject({
+    method: 'PATCH',
+    url: `/api/shares/${share.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { download_limit: null },
+  });
+  expect(patchRes.statusCode).toBe(200);
+  const dto = patchRes.json();
+  expect(dto.download_limit).toBeNull();
+  expect(dto.download_count).toBe(0);
+
+  const row = db!.prepare('SELECT download_count FROM shares WHERE id = ?').get(share.id) as {
+    download_count: number;
+  };
+  expect(row.download_count).toBe(0);
+});
+
+test('PATCH download_limit on a missing share -> 404 (no oracle)', async () => {
+  const built = await makeApp();
+  await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+
+  const patchRes = await built.inject({
+    method: 'PATCH',
+    url: '/api/shares/999999',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { download_limit: 1 },
+  });
+  expect(patchRes.statusCode).toBe(404);
+  expect(patchRes.json()).toMatchObject({ error: 'not_found' });
 });
