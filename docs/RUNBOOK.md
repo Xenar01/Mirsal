@@ -36,13 +36,21 @@ re-seed (only if no admin exists).
 
 ## Backups
 
-- Script: `deploy/backup-mirsal.sh` — snapshots `./data/storage` (tar.gz) and a
-  consistent SQLite dump via `VACUUM INTO` (no downtime), into `./data/backups/`,
-  keeping the newest 2 of each. Log: `data/backups/backup.log`.
-- Cron (installed at launch): `40 2 * * *`.
-- Off-box: optional, set `MIRSAL_BACKUP_REMOTE=<rclone-remote:path>` (no rclone
-  remote is configured on this box today; SQLite dumps are plaintext — use an
-  encrypting remote if you ship them).
+**DB-only, on-box, no cloud — by design (2026-07-29).** Mirsal's uploaded files
+are meant to be transient (shared, received, then gone), so we deliberately do
+**not** back up the file blobs and do **not** ship anything off-box. Backing up
+the blobs would keep copies of "deleted" files lingering in an archive, and any
+off-box copy would put file-adjacent data on a remote — both contradict that
+intent.
+
+- Script: `deploy/backup-mirsal.sh` — consistent SQLite dump via `VACUUM INTO`
+  (no downtime), into `./data/backups/`, keeping the newest 2. The DB holds
+  accounts / share links / schedules / folder structure but **no file contents**.
+  Log: `data/backups/backup.log`.
+- Cron: `40 2 * * *`.
+- If the disk dies you recover accounts + config from the DB snapshot; the
+  (transient) files themselves are re-uploaded by users — they are not archived.
+- `data/backups` is sensitive (lists user records + share tokens): keep it on-box.
 
 ### Restore
 
@@ -57,13 +65,14 @@ docker compose exec -T -e RT=/app/data/backups/_rt.sqlite mirsal node --input-ty
  'import D from "better-sqlite3"; const db=new D(process.env.RT,{readonly:true}); console.log("users="+db.prepare("SELECT COUNT(*) c FROM users").get().c); db.close();'
 rm -f data/backups/_rt.sqlite
 
-# 2. full restore (DB + storage):
+# 2. DB restore (accounts/shares/config only — file blobs are NOT backed up):
 docker compose down
 gunzip -kc "$DUMP" > data/db/mirsal.db
 rm -f data/db/mirsal.db-shm data/db/mirsal.db-wal      # drop stale WAL/shm
-tar -xzf "$(ls -1t data/backups/storage-*.tar.gz | head -1)" -C data   # restores data/storage
 chown -R 1000:1000 data
 docker compose up -d
+# Note: restored node rows may reference blobs that no longer exist on disk
+# (files are transient / not archived). Those shares simply 404 until re-uploaded.
 ```
 
 Encrypted share passwords are hashes, not recoverable — unaffected by restore.
