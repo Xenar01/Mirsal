@@ -61,7 +61,10 @@ CREATE TABLE IF NOT EXISTS shares(
   expires_at INTEGER,                            -- NULL = never
   allow_download INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL,
-  revoked_at INTEGER
+  revoked_at INTEGER,
+  download_limit INTEGER CHECK(download_limit IS NULL OR download_limit >= 1),
+  download_count INTEGER NOT NULL DEFAULT 0,
+  on_exhaust TEXT NOT NULL DEFAULT 'delete' CHECK(on_exhaust IN ('stop','delete'))
 );
 
 CREATE TABLE IF NOT EXISTS audit_log(
