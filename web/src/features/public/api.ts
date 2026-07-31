@@ -24,6 +24,8 @@ export interface PublicMeta {
   size_bytes: number;
   isFolder: boolean;
   allow_download: boolean;
+  /** null = unlimited; ≥1 = capped (drives the static "one-time / up to N" recipient label). */
+  download_limit: number | null;
 }
 
 /** One node in a folder-share listing (the server's `PublicNodeDto`). */

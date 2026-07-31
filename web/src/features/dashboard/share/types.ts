@@ -14,6 +14,12 @@ export interface ShareDto {
   expires_at: number | null;
   allow_download: boolean;
   created_at: number;
-  status: 'active' | 'stopped' | 'expired';
+  status: 'active' | 'stopped' | 'expired' | 'exhausted';
+  /** null = unlimited; ≥1 = per-file download cap (spec §4 data model). */
+  download_limit: number | null;
+  /** Completed counted downloads; server reports 0 when unlimited. */
+  download_count: number;
+  /** Terminal action once the cap is reached. */
+  on_exhaust: 'stop' | 'delete';
   url: string;
 }
