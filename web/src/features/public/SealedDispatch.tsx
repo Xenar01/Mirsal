@@ -48,7 +48,12 @@ export default function SealedDispatch() {
     []
   );
 
-  const meta = usePublicMeta(token);
+  // A password share is treated as locked on every fresh mount (#11): `revealed`
+  // is in-memory only, so a reload/re-open resets it to false and the gate shows
+  // again. While false the meta fetch omits the unlock cookie, so a still-valid
+  // cookie can't silently reveal the content. Unlocking flips it true.
+  const [revealed, setRevealed] = useState(false);
+  const meta = usePublicMeta(token, revealed);
   const toggleLang = () => setLang((prev) => (prev === 'ar' ? 'en' : 'ar'));
 
   return (
@@ -74,7 +79,15 @@ export default function SealedDispatch() {
           <PublicFile token={token} meta={result.meta} />
         );
       case 'password':
-        return <PasswordGate token={token} onUnlocked={() => void meta.refetch()} />;
+        return (
+          <PasswordGate
+            token={token}
+            onUnlocked={() => {
+              setRevealed(true);
+              void meta.refetch();
+            }}
+          />
+        );
       case 'stopped':
         return <EndScreen variant="stopped" lang={lang} />;
       case 'expired':

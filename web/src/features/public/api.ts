@@ -55,9 +55,16 @@ function tokenPath(token: string): string {
   return `${PUBLIC_BASE}/${encodeURIComponent(token)}`;
 }
 
-export async function fetchPublicMeta(token: string): Promise<PublicMetaResult> {
+export async function fetchPublicMeta(
+  token: string,
+  opts?: { reveal?: boolean }
+): Promise<PublicMetaResult> {
   const res = await fetch(tokenPath(token), {
-    credentials: 'include',
+    // Until the recipient unlocks IN THIS page-load, omit the unlock cookie so a
+    // still-valid cookie can't silently reveal a password share — the gate must
+    // re-appear on every fresh open (#11). After unlock we pass reveal:true to
+    // send the cookie and receive the live metadata.
+    credentials: opts?.reveal ? 'include' : 'omit',
     headers: { accept: 'application/json' },
   });
   if (res.status === 200) {
