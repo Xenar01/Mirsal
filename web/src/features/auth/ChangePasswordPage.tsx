@@ -3,6 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from './auth-context';
 import { apiPost, ApiError } from '../../lib/api';
+import AuthCard from './AuthCard';
+import Button from '../../components/Button';
 
 /** Server enforces the same minimum (auth.ts: `new` MUST be ≥ 8 chars). */
 const MIN_PASSWORD_LENGTH = 8;
@@ -55,47 +57,65 @@ export default function ChangePasswordPage() {
   }
 
   return (
-    <main className="min-h-dvh bg-paper text-ink">
-      <h1 className="font-display">{t('changePassword.title')}</h1>
-      <form onSubmit={onSubmit} noValidate>
-        <label htmlFor="cp-current">{t('changePassword.current')}</label>
-        <input
-          id="cp-current"
-          name="current"
-          type="password"
-          autoComplete="current-password"
-          value={current}
-          onChange={(e) => setCurrent(e.target.value)}
-        />
+    <AuthCard title={t('changePassword.title')}>
+      <form onSubmit={onSubmit} noValidate className="flex w-full flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="cp-current" className="font-body text-sm text-ink-2">
+            {t('changePassword.current')}
+          </label>
+          <input
+            id="cp-current"
+            name="current"
+            type="password"
+            autoComplete="current-password"
+            value={current}
+            onChange={(e) => setCurrent(e.target.value)}
+            className="w-full rounded-lg border border-line bg-paper px-3 py-2 font-body text-sm text-ink"
+          />
+        </div>
 
-        <label htmlFor="cp-new">{t('changePassword.new')}</label>
-        <input
-          id="cp-new"
-          name="new"
-          type="password"
-          autoComplete="new-password"
-          value={next}
-          onChange={(e) => setNext(e.target.value)}
-        />
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="cp-new" className="font-body text-sm text-ink-2">
+            {t('changePassword.new')}
+          </label>
+          <input
+            id="cp-new"
+            name="new"
+            type="password"
+            autoComplete="new-password"
+            value={next}
+            onChange={(e) => setNext(e.target.value)}
+            className="w-full rounded-lg border border-line bg-paper px-3 py-2 font-body text-sm text-ink"
+          />
+        </div>
 
-        <label htmlFor="cp-confirm">{t('changePassword.confirm')}</label>
-        <input
-          id="cp-confirm"
-          name="confirm"
-          type="password"
-          autoComplete="new-password"
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-        />
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="cp-confirm" className="font-body text-sm text-ink-2">
+            {t('changePassword.confirm')}
+          </label>
+          <input
+            id="cp-confirm"
+            name="confirm"
+            type="password"
+            autoComplete="new-password"
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+            className="w-full rounded-lg border border-line bg-paper px-3 py-2 font-body text-sm text-ink"
+          />
+        </div>
 
-        <p>{t('changePassword.hint')}</p>
+        <p className="font-body text-xs text-ink-2">{t('changePassword.hint')}</p>
 
-        {error !== null && <p role="alert">{error}</p>}
+        {error !== null && (
+          <p role="alert" className="font-body text-sm text-clay">
+            {error}
+          </p>
+        )}
 
-        <button type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting} className="mt-1 w-full">
           {t('changePassword.submit')}
-        </button>
+        </Button>
       </form>
-    </main>
+    </AuthCard>
   );
 }
