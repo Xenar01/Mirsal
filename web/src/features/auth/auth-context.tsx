@@ -21,6 +21,10 @@ export interface PublicUser {
    * folder / move-to-root at an empty root without a child to derive it from.
    */
   rootNodeId: number;
+  /** The admin-assigned quota in bytes, or null for unlimited. */
+  quotaBytes: number | null;
+  /** Bytes currently used (server-maintained; includes trashed-but-not-purged). */
+  usedBytes: number;
 }
 
 export interface AuthContextValue {
