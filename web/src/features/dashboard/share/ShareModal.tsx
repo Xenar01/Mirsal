@@ -41,7 +41,7 @@ export default function ShareModal({ node, onClose }: { node: NodeDto; onClose: 
         {isPending && !share ? (
           <p className="font-body text-sm text-ink-2">{t('share.loading')}</p>
         ) : share ? (
-          <ShareManage share={share} stamp={justCreated} />
+          <ShareManage share={share} stamp={justCreated} nodeKind={node.kind} />
         ) : isError ? (
           // A failed GET /api/shares is NOT proof the node is unshared — surface
           // the error rather than offering "create" and risking a duplicate.
@@ -89,7 +89,15 @@ function CreateShare({ nodeId, onCreated }: { nodeId: number; onCreated: () => v
 
 /* ── Shared: link, status, active toggle, password, expiry, revoke ─────── */
 
-function ShareManage({ share, stamp }: { share: ShareDto; stamp: boolean }) {
+function ShareManage({
+  share,
+  stamp,
+  nodeKind,
+}: {
+  share: ShareDto;
+  stamp: boolean;
+  nodeKind: NodeDto['kind'];
+}) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const patch = usePatchShare();
@@ -157,6 +165,7 @@ function ShareManage({ share, stamp }: { share: ShareDto; stamp: boolean }) {
 
       <PasswordSection share={share} />
       <ExpirySection share={share} />
+      <DownloadLimitSection share={share} nodeKind={nodeKind} />
       <RevokeSection share={share} />
     </div>
   );
@@ -331,6 +340,131 @@ function ExpirySection({ share }: { share: ShareDto }) {
           {share.expires_at != null && (
             <Button variant="ghost" onClick={clear} disabled={patch.isPending}>
               {t('share.expiry.clear')}
+            </Button>
+          )}
+        </div>
+      </form>
+    </section>
+  );
+}
+
+/* ── Download limit: burn-after-N downloads → stop the link or delete the file ─ */
+
+function DownloadLimitSection({
+  share,
+  nodeKind,
+}: {
+  share: ShareDto;
+  nodeKind: NodeDto['kind'];
+}) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const patch = usePatchShare();
+  const inputId = useId();
+  const [value, setValue] = useState(
+    share.download_limit != null ? String(share.download_limit) : ''
+  );
+  const [mode, setMode] = useState<'delete' | 'stop'>(share.on_exhaust);
+  const [error, setError] = useState<string | null>(null);
+  // v1: a per-file download cap has no meaning for a whole-folder share.
+  if (nodeKind !== 'file') return null;
+
+  function apply(event?: FormEvent) {
+    event?.preventDefault();
+    const n = Number(value);
+    if (!Number.isInteger(n) || n < 1) {
+      setError(t('share.downloadLimit.invalid'));
+      return;
+    }
+    setError(null);
+    patch.mutate(
+      { id: share.id, downloadLimit: n, onExhaust: mode },
+      {
+        onSuccess: () => toast({ kind: 'success', message: t('share.downloadLimit.toast.set') }),
+        onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
+      }
+    );
+  }
+
+  function clear() {
+    setError(null);
+    patch.mutate(
+      { id: share.id, downloadLimit: null },
+      {
+        onSuccess: () => {
+          toast({ kind: 'success', message: t('share.downloadLimit.toast.cleared') });
+          setValue('');
+        },
+        onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
+      }
+    );
+  }
+
+  const isLimited = share.download_limit != null;
+  return (
+    <section className="flex flex-col gap-2 border-t border-line pt-4">
+      <h3 className="font-display text-sm text-ink">{t('share.downloadLimit.heading')}</h3>
+      <p className="font-body text-sm text-ink-2">
+        {isLimited
+          ? t('share.downloadLimit.used', {
+              used: share.download_count,
+              limit: share.download_limit,
+            })
+          : t('share.downloadLimit.unlimited')}
+      </p>
+      <form onSubmit={apply} className="flex flex-col gap-2">
+        <label htmlFor={inputId} className="font-body text-sm text-ink-2">
+          {t('share.downloadLimit.label')}
+        </label>
+        <input
+          id={inputId}
+          type="number"
+          min={1}
+          inputMode="numeric"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          className="w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-mono text-sm text-ink"
+        />
+        <fieldset className="flex flex-col gap-1">
+          <legend className="font-body text-sm text-ink-2">
+            {t('share.downloadLimit.onExhaust')}
+          </legend>
+          <label className="flex items-center gap-2 font-body text-sm text-ink">
+            <input
+              type="radio"
+              name="onExhaust"
+              checked={mode === 'delete'}
+              onChange={() => setMode('delete')}
+            />
+            {t('share.downloadLimit.modeDelete')}
+          </label>
+          <label className="flex items-center gap-2 font-body text-sm text-ink">
+            <input
+              type="radio"
+              name="onExhaust"
+              checked={mode === 'stop'}
+              onChange={() => setMode('stop')}
+            />
+            {t('share.downloadLimit.modeStop')}
+          </label>
+          {mode === 'delete' && (
+            <p role="note" className="font-body text-xs text-clay">
+              {t('share.downloadLimit.deleteWarning')}
+            </p>
+          )}
+        </fieldset>
+        {error !== null && (
+          <p role="alert" className="font-body text-sm text-clay">
+            {error}
+          </p>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" type="submit" disabled={patch.isPending}>
+            {t('share.downloadLimit.apply')}
+          </Button>
+          {isLimited && (
+            <Button variant="ghost" onClick={clear} disabled={patch.isPending}>
+              {t('share.downloadLimit.clear')}
             </Button>
           )}
         </div>

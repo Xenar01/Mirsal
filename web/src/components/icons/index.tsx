@@ -142,6 +142,16 @@ export function Pause(props: IconProps) {
   );
 }
 
+/** Depleted — a struck circle: a share whose download budget is spent (exhausted). */
+export function Depleted(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M8.5 12h7" />
+    </IconBase>
+  );
+}
+
 /** Copy — two overlapping sheets (copy the share link to the clipboard). */
 export function Copy(props: IconProps) {
   return (
