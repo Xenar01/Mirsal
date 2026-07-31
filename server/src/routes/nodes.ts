@@ -297,8 +297,20 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
 
   app.get('/api/nodes/trash', { preHandler: guards.requireAuth }, async (req, reply) => {
     const uid = req.user!.id;
+    // Only TOP-LEVEL trashed items — a node whose parent isn't itself trashed.
+    // A file/folder nested inside a trashed folder is stamped trashed in the
+    // same operation, but it must NOT appear as its own row: the parent folder
+    // already rolls up its bytes (toDto with includeTrashed), so listing the
+    // descendant too double-counts the storage meter and clutters the view.
     const rows = db
-      .prepare('SELECT * FROM nodes WHERE owner_id = @uid AND trashed_at IS NOT NULL ORDER BY trashed_at DESC')
+      .prepare(
+        `SELECT n.* FROM nodes n
+         WHERE n.owner_id = @uid AND n.trashed_at IS NOT NULL
+           AND (n.parent_id IS NULL OR NOT EXISTS (
+             SELECT 1 FROM nodes p WHERE p.id = n.parent_id AND p.trashed_at IS NOT NULL
+           ))
+         ORDER BY n.trashed_at DESC`
+      )
       .all({ uid }) as Node[];
     reply.code(200).send(rows.map((n) => toDto(db, n)));
   });
