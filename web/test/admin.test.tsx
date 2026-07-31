@@ -347,6 +347,22 @@ describe('Admin — display name (Task 3)', () => {
   });
 });
 
+describe('Admin — total-space summary (Task 6)', () => {
+  test('users table shows a total-space summary across all users', async () => {
+    const users = [
+      mkUser({ id: 2, username: 'a', used_bytes: 1024 * 1024, quota_bytes: 10 * 1024 * 1024 }),
+      mkUser({ id: 3, username: 'b', used_bytes: 3 * 1024 * 1024, quota_bytes: 20 * 1024 * 1024 }),
+    ];
+    stubFetch({ users });
+    await renderAdmin({ users });
+
+    // Σ used = 4 MB → formatBytes renders "4" and the MB unit somewhere in the strip.
+    expect(await screen.findByTestId('admin-users-summary')).toHaveTextContent('4');
+    // user count = 2
+    expect(screen.getByTestId('admin-users-summary')).toHaveTextContent('2');
+  });
+});
+
 describe('Admin — SharesTable force-revoke (§3.1)', () => {
   test('force-revoking a share issues DELETE /api/admin/shares/:id', async () => {
     const shares = [

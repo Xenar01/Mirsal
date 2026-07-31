@@ -173,6 +173,11 @@
       "mustChange": "بانتظار تغيير كلمة المرور",
       "unlimited": "بلا حصة محددة",
       "noName": "—",
+      "summary": {
+        "count": "المستخدمون: {{count}}",
+        "used": "إجمالي المستخدَم:",
+        "allocated": "إجمالي المخصَّص:"
+      },
       "action": {
         "activate": "تفعيل",
         "deactivate": "تعطيل",

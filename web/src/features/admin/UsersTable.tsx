@@ -37,6 +37,10 @@ export default function UsersTable() {
   const { data, isPending, isError } = useAdminUsers();
   const users = Array.isArray(data) ? data : [];
 
+  const totalUsed = users.reduce((sum, u) => sum + u.used_bytes, 0);
+  const anyUnlimited = users.some((u) => u.quota_bytes === null);
+  const totalQuota = users.reduce((sum, u) => sum + (u.quota_bytes ?? 0), 0);
+
   const [createOpen, setCreateOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<AdminUserDto | null>(null);
   const [quotaTarget, setQuotaTarget] = useState<AdminUserDto | null>(null);
@@ -63,37 +67,58 @@ export default function UsersTable() {
       )}
 
       {!isPending && !isError && users.length > 0 && (
-        <div className="overflow-x-auto rounded-[10px] border border-line bg-surface">
-          <table className="w-full border-collapse font-body text-sm">
-            <thead>
-              <tr className="border-b border-line text-ink-2">
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.username')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.name')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.role')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.state')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.usage')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.created')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">
-                  <span className="sr-only">{t('admin.users.col.actions')}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((row) => (
-                <UserRow
-                  key={row.id}
-                  row={row}
-                  users={users}
-                  currentUserId={user?.id}
-                  onReset={() => setResetTarget(row)}
-                  onQuota={() => setQuotaTarget(row)}
-                  onDelete={() => setDeleteTarget(row)}
-                  onLabel={() => setLabelTarget(row)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div
+            data-testid="admin-users-summary"
+            className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-[10px] border border-line bg-surface ps-3 pe-3 py-2 font-body text-sm text-ink-2"
+          >
+            <span>{t('admin.users.summary.count', { count: users.length })}</span>
+            <span>
+              {t('admin.users.summary.used')}{' '}
+              <bdi dir="ltr" className="font-mono text-ink">{formatBytes(totalUsed)}</bdi>
+            </span>
+            <span>
+              {t('admin.users.summary.allocated')}{' '}
+              {anyUnlimited ? (
+                <span className="text-ink">{t('admin.users.unlimited')}</span>
+              ) : (
+                <bdi dir="ltr" className="font-mono text-ink">{formatBytes(totalQuota)}</bdi>
+              )}
+            </span>
+          </div>
+
+          <div className="overflow-x-auto rounded-[10px] border border-line bg-surface">
+            <table className="w-full border-collapse font-body text-sm">
+              <thead>
+                <tr className="border-b border-line text-ink-2">
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.username')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.name')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.role')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.state')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.usage')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.created')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">
+                    <span className="sr-only">{t('admin.users.col.actions')}</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((row) => (
+                  <UserRow
+                    key={row.id}
+                    row={row}
+                    users={users}
+                    currentUserId={user?.id}
+                    onReset={() => setResetTarget(row)}
+                    onQuota={() => setQuotaTarget(row)}
+                    onDelete={() => setDeleteTarget(row)}
+                    onLabel={() => setLabelTarget(row)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       <CreateUserModal open={createOpen} onClose={() => setCreateOpen(false)} />
