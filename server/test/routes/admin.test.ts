@@ -190,6 +190,33 @@ test('POST /api/admin/users with an invalid role -> 400', async () => {
   expect(res.statusCode).toBe(400);
 });
 
+test('POST /users persists and returns display_name (trimmed)', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const auth = await login(built, 'admin', 'admin-pass-123');
+  const res = await adminReq(built, 'POST', '/api/admin/users', auth as { session: string; csrf: string }, {
+    username: 'labeled',
+    password: 'user-pass-123',
+    role: 'user',
+    display_name: '  أحمد الموظف  ',
+  });
+  expect(res.statusCode).toBe(201);
+  expect(JSON.parse(res.body).display_name).toBe('أحمد الموظف');
+});
+
+test('POST /users without display_name stores null', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const auth = await login(built, 'admin', 'admin-pass-123');
+  const res = await adminReq(built, 'POST', '/api/admin/users', auth as { session: string; csrf: string }, {
+    username: 'nolabel',
+    password: 'user-pass-123',
+    role: 'user',
+  });
+  expect(res.statusCode).toBe(201);
+  expect(JSON.parse(res.body).display_name).toBeNull();
+});
+
 // ---------------------------------------------------------------------------
 // List users + usage
 // ---------------------------------------------------------------------------
@@ -288,6 +315,30 @@ test('PATCH quota_bytes on the last admin is allowed (not a lowering change)', a
   expect(res.statusCode).toBe(200);
   const row = db!.prepare('SELECT quota_bytes FROM users WHERE id = ?').get(rootId) as { quota_bytes: number };
   expect(row.quota_bytes).toBe(5000);
+});
+
+test('PATCH /users/:id sets and then clears display_name', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const uid = await seedUser('target', 'x', { role: 'user' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+
+  const setRes = await adminReq(built, 'PATCH', `/api/admin/users/${uid}`, auth, { display_name: 'سارة' });
+  expect(setRes.statusCode).toBe(200);
+  expect(JSON.parse(setRes.body).display_name).toBe('سارة');
+
+  const clearRes = await adminReq(built, 'PATCH', `/api/admin/users/${uid}`, auth, { display_name: null });
+  expect(clearRes.statusCode).toBe(200);
+  expect(JSON.parse(clearRes.body).display_name).toBeNull();
+});
+
+test('PATCH /users/:id with only display_name is accepted (refine allows it)', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const uid = await seedUser('target2', 'x', { role: 'user' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+  const res = await adminReq(built, 'PATCH', `/api/admin/users/${uid}`, auth, { display_name: 'علي' });
+  expect(res.statusCode).toBe(200);
 });
 
 // ---------------------------------------------------------------------------

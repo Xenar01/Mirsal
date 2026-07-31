@@ -33,6 +33,7 @@ interface AdminUserDto {
   used_bytes: number;
   must_change_password: number;
   created_at: number;
+  display_name: string | null;
 }
 
 interface UserRow extends AdminUserDto {
@@ -48,7 +49,7 @@ interface GuardUserRow {
 }
 
 const USER_DTO_COLUMNS =
-  'id, username, role, is_active, quota_bytes, used_bytes, must_change_password, created_at';
+  'id, username, role, is_active, quota_bytes, used_bytes, must_change_password, created_at, display_name';
 
 /** Metadata-only node projection (spec §7): NEVER `storage_path`, never `owner_id`. */
 interface AdminNodeDto {
@@ -94,12 +95,35 @@ interface AdminShareRow {
 // path metacharacters.
 const USERNAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
+/** Max length of a display name (a trusted admin-facing label, never a path segment). */
+const DISPLAY_NAME_MAX = 120;
+
+// A free-text display label (Arabic or English). Trusted display string only —
+// never used as a path segment. Trimmed; empty-after-trim collapses to null;
+// bounded length; control chars rejected (defense-in-depth on a display value).
+const displayNameSchema = z
+  .string()
+  .transform((s) => s.trim())
+  .refine((s) => s.length <= DISPLAY_NAME_MAX, { message: 'display_name too long' })
+  .refine(
+    (s) =>
+      ![...s].some((c) => {
+        const n = c.charCodeAt(0);
+        return n < 0x20 || n === 0x7f;
+      }),
+    { message: 'display_name has control chars' }
+  )
+  .transform((s) => (s.length === 0 ? null : s))
+  .nullable()
+  .optional();
+
 const createUserSchema = z.object({
   username: z.string().trim().regex(USERNAME_RE),
   password: z.string().min(1),
   role: z.enum(['admin', 'user']),
   // Absent/undefined => NULL (unlimited). Explicit null also allowed.
   quota_bytes: z.number().int().nonnegative().nullable().optional(),
+  display_name: displayNameSchema,
 });
 
 const patchUserSchema = z
@@ -107,10 +131,16 @@ const patchUserSchema = z
     is_active: z.boolean().optional(),
     role: z.enum(['admin', 'user']).optional(),
     quota_bytes: z.number().int().nonnegative().nullable().optional(),
+    display_name: displayNameSchema,
   })
-  .refine((v) => v.is_active !== undefined || v.role !== undefined || v.quota_bytes !== undefined, {
-    message: 'at least one field is required',
-  });
+  .refine(
+    (v) =>
+      v.is_active !== undefined ||
+      v.role !== undefined ||
+      v.quota_bytes !== undefined ||
+      v.display_name !== undefined,
+    { message: 'at least one field is required' }
+  );
 
 const passwordResetSchema = z.object({
   // Admin may supply an explicit password; omitted => a generated one is used.
@@ -201,6 +231,7 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
     }
     const { username, password, role } = parsed.data;
     const quotaBytes = parsed.data.quota_bytes ?? null;
+    const displayName = parsed.data.display_name ?? null;
     const nowMs = now();
 
     const hash = await passwordService.hashPassword(password);
@@ -209,10 +240,10 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
     try {
       const info = db
         .prepare(
-          `INSERT INTO users(username, password_hash, role, quota_bytes, used_bytes, is_active, must_change_password, created_by, created_at, updated_at)
-           VALUES (@username, @hash, @role, @quotaBytes, 0, 1, 1, @actor, @now, @now)`
+          `INSERT INTO users(username, password_hash, role, quota_bytes, used_bytes, is_active, must_change_password, display_name, created_by, created_at, updated_at)
+           VALUES (@username, @hash, @role, @quotaBytes, 0, 1, 1, @displayName, @actor, @now, @now)`
         )
-        .run({ username, hash, role, quotaBytes, actor: req.user!.id, now: nowMs });
+        .run({ username, hash, role, quotaBytes, displayName, actor: req.user!.id, now: nowMs });
       userId = Number(info.lastInsertRowid);
     } catch (e) {
       if (isUniqueViolation(e)) {
@@ -280,6 +311,10 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
     if (parsed.data.quota_bytes !== undefined) {
       sets.push('quota_bytes = @quotaBytes');
       params.quotaBytes = parsed.data.quota_bytes;
+    }
+    if (parsed.data.display_name !== undefined) {
+      sets.push('display_name = @displayName');
+      params.displayName = parsed.data.display_name; // string | null (null clears)
     }
     sets.push('updated_at = @now');
 
