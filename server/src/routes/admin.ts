@@ -9,12 +9,15 @@ import { revokeAllForUser } from '../auth/sessions.js';
 import { randomToken } from '../util/ids.js';
 import { writeAudit } from '../audit.js';
 import { ownerStatus } from '../shares/shares.js';
+import type { BlobStore } from '../storage/blobs.js';
+import { ensureUserRoots } from '../nodes/tree.js';
 
 export interface AdminRouteDeps {
   db: Database.Database;
   now: Clock;
   guards: Guards;
   passwordService: PasswordService;
+  blobStore: BlobStore;
 }
 
 /**
@@ -228,7 +231,7 @@ function isUniqueViolation(e: unknown): boolean {
  * app-wide instances built in `buildApp`, never re-instantiated here.
  */
 export default async function adminRoutes(app: FastifyInstance, deps: AdminRouteDeps): Promise<void> {
-  const { db, now, guards, passwordService } = deps;
+  const { db, now, guards, passwordService, blobStore } = deps;
 
   // --- Users ---------------------------------------------------------------
 
@@ -441,6 +444,61 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
     run();
 
     reply.code(200).send({ ok: true });
+  });
+
+  // Permanently wipe a user's whole drive (live + trashed): delete every
+  // folder/file they own (FK cascade removes subtrees + their shares), unlink
+  // the file blobs, reset used_bytes to 0, and guarantee an empty root/trash.
+  // The account/login/role/quota are preserved. Audited (metadata-only — no
+  // content is ever read).
+  app.post('/api/admin/users/:id/clear', { preHandler: guards.requireAdmin }, async (req, reply) => {
+    const id = parseIdParam(req);
+    if (id === null) {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
+    const target = db.prepare('SELECT id FROM users WHERE id = ?').get(id) as { id: number } | undefined;
+    if (!target) {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
+
+    // Collect blob paths BEFORE deletion (unlink is post-commit — a rollback
+    // must never orphan a still-referenced blob).
+    const blobRows = db
+      .prepare(
+        `SELECT storage_path FROM nodes WHERE owner_id = ? AND kind = 'file' AND storage_path IS NOT NULL`
+      )
+      .all(id) as { storage_path: string }[];
+    const storagePaths = blobRows.map((r) => r.storage_path);
+
+    const nowMs = now();
+    const run = db.transaction(() => {
+      db.prepare(`DELETE FROM nodes WHERE owner_id = @id AND kind IN ('folder','file')`).run({ id });
+      db.prepare('UPDATE users SET used_bytes = 0, updated_at = @now WHERE id = @id').run({ id, now: nowMs });
+      writeAudit(
+        db,
+        { actorId: req.user!.id, action: 'user_clear_space', target: String(id), detail: `${storagePaths.length} files` },
+        now
+      );
+    });
+    run();
+
+    // Best-effort blob unlink (non-fatal; the scheduler's orphan sweep reaps
+    // any straggler, same as the user-delete path).
+    for (const p of storagePaths) {
+      try {
+        blobStore.deleteBlob(p);
+      } catch {
+        // ignore — orphan sweep handles it
+      }
+    }
+    // Root/trash are kind 'root'/'trash' (never deleted above), so this is
+    // idempotent; call it to guarantee the pair exists.
+    ensureUserRoots(db, id, nowMs);
+
+    const dto = db.prepare(`SELECT ${USER_DTO_COLUMNS} FROM users WHERE id = ?`).get(id) as AdminUserDto;
+    reply.code(200).send(dto);
   });
 
   // METADATA ONLY — the admin can browse another user's structure but NEVER

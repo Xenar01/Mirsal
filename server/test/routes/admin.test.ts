@@ -513,6 +513,95 @@ test('GET /api/admin/users/:id/nodes for a nonexistent user -> 404', async () =>
 });
 
 // ---------------------------------------------------------------------------
+// Clear a user's space
+// ---------------------------------------------------------------------------
+
+test('POST /users/:id/clear wipes the user drive, frees quota, keeps roots, unlinks blobs', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const uid = await seedUser('victim', 'x', { role: 'user', quotaBytes: 100 * 1024 * 1024 });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+
+  const roots = ensureUserRoots(db!, uid, NOW);
+  // A real blob on disk under STORAGE_DIR/<uid>/<name>.
+  const storageDir = path.join(dir!, 'storage');
+  const ownerDir = path.join(storageDir, String(uid));
+  fs.mkdirSync(ownerDir, { recursive: true });
+  const blobRel = `${uid}/blob1`;
+  fs.writeFileSync(path.join(storageDir, blobRel), 'hello');
+
+  // A folder + a file inside it, and used_bytes set to the file size.
+  const folderId = Number(
+    db!
+      .prepare(
+        `INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at) VALUES (?,?,?,?,?,?)`
+      )
+      .run(uid, roots.rootId, 'folder', 'Docs', NOW, NOW).lastInsertRowid
+  );
+  db!
+    .prepare(
+      `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?)`
+    )
+    .run(uid, folderId, 'file', 'a.txt', 5, blobRel, NOW, NOW);
+  db!.prepare('UPDATE users SET used_bytes = 5 WHERE id = ?').run(uid);
+
+  const res = await adminReq(built, 'POST', `/api/admin/users/${uid}/clear`, auth);
+  expect(res.statusCode).toBe(200);
+  expect(JSON.parse(res.body).used_bytes).toBe(0);
+
+  // No folder/file nodes remain for this user; root+trash remain.
+  const remaining = db!
+    .prepare(`SELECT COUNT(*) c FROM nodes WHERE owner_id = ? AND kind IN ('folder','file')`)
+    .get(uid) as { c: number };
+  expect(remaining.c).toBe(0);
+  const roleCounts = db!
+    .prepare(`SELECT COUNT(*) c FROM nodes WHERE owner_id = ? AND kind IN ('root','trash')`)
+    .get(uid) as { c: number };
+  expect(roleCounts.c).toBe(2);
+  // Blob unlinked.
+  expect(fs.existsSync(path.join(storageDir, blobRel))).toBe(false);
+  // Audited.
+  const audit = db!
+    .prepare(`SELECT COUNT(*) c FROM audit_log WHERE action = 'user_clear_space' AND target = ?`)
+    .get(String(uid)) as { c: number };
+  expect(audit.c).toBe(1);
+});
+
+test('POST /users/:id/clear cascades the user shares', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const uid = await seedUser('victim2', 'x', { role: 'user' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+  const roots = ensureUserRoots(db!, uid, NOW);
+  const fileId = Number(
+    db!
+      .prepare(
+        `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?)`
+      )
+      .run(uid, roots.rootId, 'file', 'b.txt', 0, `${uid}/b`, NOW, NOW).lastInsertRowid
+  );
+  db!
+    .prepare(
+      `INSERT INTO shares(node_id, owner_id, token, is_active, allow_download, created_at) VALUES (?,?,?,?,?,?)`
+    )
+    .run(fileId, uid, 'tok-clear-test', 1, 1, NOW);
+
+  await adminReq(built, 'POST', `/api/admin/users/${uid}/clear`, auth);
+  const shares = db!.prepare(`SELECT COUNT(*) c FROM shares WHERE owner_id = ?`).get(uid) as { c: number };
+  expect(shares.c).toBe(0);
+});
+
+test('POST /users/:id/clear on an unknown user → 404', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+  const res = await adminReq(built, 'POST', '/api/admin/users/99999/clear', auth);
+  expect(res.statusCode).toBe(404);
+});
+
+// ---------------------------------------------------------------------------
 // Global shares list + force-revoke
 // ---------------------------------------------------------------------------
 

@@ -101,16 +101,18 @@ async function registerRoutes(app: FastifyInstance, deps: AppDeps): Promise<void
     csrfSecret: deps.config.CSRF_SECRET,
   });
 
+  const blobStore = createBlobStore({ storageDir: deps.config.STORAGE_DIR });
+
   // H5: admin control panel — every route `guards.requireAdmin` + CSRF
-  // (inherited) + audited. Same single `passwordService`/`guards` instances.
+  // (inherited) + audited. Same single `passwordService`/`guards`/`blobStore`.
   await app.register(adminRoutes, {
     db: deps.db,
     now: deps.now,
     guards,
     passwordService,
+    blobStore,
   });
 
-  const blobStore = createBlobStore({ storageDir: deps.config.STORAGE_DIR });
   await app.register(nodesRoutes, { db: deps.db, now: deps.now, guards, blobStore });
 
   // H4: owner-scoped share management (requireAuth + CSRF via guard).
