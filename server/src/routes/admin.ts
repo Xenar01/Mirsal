@@ -184,6 +184,22 @@ function activeAdminCount(db: Database.Database): number {
 const AUDIT_TARGET_IS_SECRET = new Set(['share_unlock_failure']);
 
 /**
+ * `audit_log.action` values whose `target` holds a **numeric user id** — the
+ * only rows whose target should be resolved to a username/display-name for the
+ * admin view. Deliberately excludes `login_*` (target is a plain username
+ * string, not an id) and every share/secret action (see AUDIT_TARGET_IS_SECRET).
+ * Adding an action here must guarantee its target is a users.id.
+ */
+const USER_TARGET_ACTIONS = new Set([
+  'user_create',
+  'user_update',
+  'user_delete',
+  'user_password_reset',
+  'user_nodes_view',
+  'user_clear_space',
+]);
+
+/**
  * Redacts a secret-valued `target` (see {@link AUDIT_TARGET_IS_SECRET}) to a
  * stable, non-reversible correlation id — a truncated sha256 of the raw
  * value — so an admin can still see "this same share was probed repeatedly"
@@ -546,9 +562,40 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
       detail: string | null;
       created_at: number;
     }>;
-    // Redact any secret-valued target (see redactAuditTarget) before it ever
-    // leaves the process — the admin role must never receive a live token.
-    const dtos = rows.map((r) => ({ ...r, target: redactAuditTarget(r.action, r.target) }));
+    // Collect the distinct user ids we can resolve: every non-null actor, plus
+    // every numeric target of a user-target action (never a secret/username
+    // target). One lookup, then attach names to each DTO.
+    const ids = new Set<number>();
+    for (const r of rows) {
+      if (r.actor_id !== null) ids.add(r.actor_id);
+      if (USER_TARGET_ACTIONS.has(r.action) && r.target !== null && /^\d+$/.test(r.target)) {
+        ids.add(Number(r.target));
+      }
+    }
+
+    const nameById = new Map<number, { username: string; display_name: string | null }>();
+    if (ids.size > 0) {
+      const idList = [...ids];
+      const placeholders = idList.map(() => '?').join(',');
+      const nameRows = db
+        .prepare(`SELECT id, username, display_name FROM users WHERE id IN (${placeholders})`)
+        .all(...idList) as { id: number; username: string; display_name: string | null }[];
+      for (const nr of nameRows) nameById.set(nr.id, { username: nr.username, display_name: nr.display_name });
+    }
+
+    const dtos = rows.map((r) => {
+      const actor = r.actor_id !== null ? nameById.get(r.actor_id) : undefined;
+      const isUserTarget = USER_TARGET_ACTIONS.has(r.action) && r.target !== null && /^\d+$/.test(r.target);
+      const targetUser = isUserTarget ? nameById.get(Number(r.target)) : undefined;
+      return {
+        ...r,
+        target: redactAuditTarget(r.action, r.target),
+        actor_username: actor?.username ?? null,
+        actor_display_name: actor?.display_name ?? null,
+        target_username: targetUser?.username ?? null,
+        target_display_name: targetUser?.display_name ?? null,
+      };
+    });
     reply.code(200).send(dtos);
   });
 }

@@ -105,7 +105,7 @@ async function login(
 /** Convenience for a mutating admin call carrying the session + CSRF header. */
 function adminReq(
   built: FastifyInstance,
-  method: 'POST' | 'PATCH' | 'DELETE',
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   url: string,
   auth: { session: string; csrf: string },
   payload?: unknown
@@ -655,6 +655,56 @@ test('GET /api/admin/audit redacts a share_unlock_failure target (routes/public.
 
   const revokeRow = rows.find((r) => r.action === 'share_revoke')!;
   expect(revokeRow.target).toBe('42');
+});
+
+test('audit DTO resolves actor and user-target usernames, redacts secret targets', async () => {
+  const built = await makeApp();
+  const adminId = await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+
+  // A real user-management action → writes a user_create audit row with the new user's id as target.
+  const createRes = await adminReq(built, 'POST', '/api/admin/users', auth, {
+    username: 'newbie',
+    password: 'user-pass-123',
+    role: 'user',
+    display_name: 'المستخدم الجديد',
+  });
+  const newId = JSON.parse(createRes.body).id as number;
+
+  // A secret-target row (simulate a failed share unlock) inserted directly.
+  db!
+    .prepare('INSERT INTO audit_log(actor_id, action, target, detail, created_at) VALUES (NULL, ?, ?, NULL, ?)')
+    .run('share_unlock_failure', 'super-secret-token-value', NOW);
+
+  const res = await adminReq(built, 'GET', '/api/admin/audit', auth);
+  expect(res.statusCode).toBe(200);
+  const rows = JSON.parse(res.body) as Array<Record<string, unknown>>;
+
+  const createRow = rows.find((r) => r.action === 'user_create' && Number(r.target) === newId)!;
+  expect(createRow.actor_username).toBe('admin');
+  expect(createRow.actor_id).toBe(adminId);
+  expect(createRow.target_username).toBe('newbie');
+  expect(createRow.target_display_name).toBe('المستخدم الجديد');
+
+  const secretRow = rows.find((r) => r.action === 'share_unlock_failure')!;
+  expect(secretRow.actor_username).toBeNull();
+  expect(String(secretRow.target)).toMatch(/^redacted:/); // still redacted
+  expect(secretRow.target_username).toBeNull(); // never resolved
+});
+
+test('audit DTO leaves target_username null for a deleted user target', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+  // Audit row referencing a user id that does not exist.
+  db!
+    .prepare('INSERT INTO audit_log(actor_id, action, target, detail, created_at) VALUES (NULL, ?, ?, NULL, ?)')
+    .run('user_delete', '99999', NOW);
+  const res = await adminReq(built, 'GET', '/api/admin/audit', auth);
+  const rows = JSON.parse(res.body) as Array<Record<string, unknown>>;
+  const row = rows.find((r) => r.action === 'user_delete' && r.target === '99999')!;
+  expect(row.target_username).toBeNull();
+  expect(row.target_display_name).toBeNull();
 });
 
 // ---------------------------------------------------------------------------
