@@ -374,6 +374,65 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
     }
   }
 
+  /**
+   * Shared authz/resolve/open path for BOTH the GET and POST download routes —
+   * single-sourced so these two public, unauthenticated handlers can never
+   * drift apart. Runs, in order: `allow_download` (403), subtree resolution
+   * (403 on `ForbiddenError` — same shape as an out-of-subtree/unknown node, no
+   * existence oracle), file-kind + storage presence (403, same shape), then
+   * blob open (404 on a missing on-disk blob — reverse-orphan, never a 500).
+   * Returns the resolved `{ node, stream }`, or sends the error response and
+   * returns `null`. The caller owns the response tail
+   * (headers/`logShareAccess`/reserve/`send`), which differs between GET and
+   * POST — only the authz/resolve/open path is shared here.
+   */
+  async function resolveDownloadableFile(
+    req: FastifyRequest,
+    reply: FastifyReply,
+    share: Share
+  ): Promise<{ node: Node; stream: ReadStream } | null> {
+    if (!share.allow_download) {
+      reply.code(403).send({ error: 'forbidden' });
+      return null;
+    }
+
+    // Default to the shared node itself so a file share is downloadable
+    // without the recipient ever learning an internal node id.
+    const nodeParam = (req.query as { node?: string }).node ?? share.node_id;
+
+    let node: Node;
+    try {
+      node = resolveInSubtree(db, share, nodeParam);
+    } catch (e) {
+      if (e instanceof ForbiddenError) {
+        reply.code(403).send({ error: 'forbidden' });
+        return null;
+      }
+      throw e;
+    }
+
+    // A folder (or a storage-less row) isn't downloadable here — keep the
+    // shape identical to the out-of-subtree rejection (no existence oracle).
+    if (node.kind !== 'file' || !node.storage_path) {
+      reply.code(403).send({ error: 'forbidden' });
+      return null;
+    }
+
+    const stream = blobStore.readBlob(node.storage_path);
+    try {
+      await waitForOpen(stream);
+    } catch (e) {
+      // Row exists but its blob is gone from disk (reverse-orphan) -> 404, never 500.
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        reply.code(404).send({ error: 'not_found' });
+        return null;
+      }
+      throw e;
+    }
+
+    return { node, stream };
+  }
+
   // --- GET download (rate-limited per-IP AND per-token) --------------------
   await app.register(async function downloadScope(scope) {
     await scope.register(fastifyRateLimit, {
@@ -403,44 +462,9 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
         return;
       }
 
-      if (!share.allow_download) {
-        reply.code(403).send({ error: 'forbidden' });
-        return;
-      }
-
-      // Default to the shared node itself so a file share is downloadable
-      // without the recipient ever learning an internal node id.
-      const nodeParam = (req.query as { node?: string }).node ?? share.node_id;
-
-      let node: Node;
-      try {
-        node = resolveInSubtree(db, share, nodeParam);
-      } catch (e) {
-        if (e instanceof ForbiddenError) {
-          reply.code(403).send({ error: 'forbidden' });
-          return;
-        }
-        throw e;
-      }
-
-      // A folder (or a storage-less row) isn't downloadable here — keep the
-      // shape identical to the out-of-subtree rejection (no existence oracle).
-      if (node.kind !== 'file' || !node.storage_path) {
-        reply.code(403).send({ error: 'forbidden' });
-        return;
-      }
-
-      const stream = blobStore.readBlob(node.storage_path);
-      try {
-        await waitForOpen(stream);
-      } catch (e) {
-        // Row exists but its blob is gone from disk (reverse-orphan) -> 404, never 500.
-        if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-          reply.code(404).send({ error: 'not_found' });
-          return;
-        }
-        throw e;
-      }
+      const resolved = await resolveDownloadableFile(req, reply, share);
+      if (!resolved) return;
+      const { node, stream } = resolved;
 
       reply.header('Content-Disposition', buildContentDisposition(node.name));
       reply.header('X-Content-Type-Options', 'nosniff');
@@ -450,12 +474,6 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
 
       return reply.send(stream);
     });
-
-    // Release-only backstop. `onResponse` does NOT fire on a mid-stream abort
-    // (see `/zip`'s releaseZipSlot note), so the authoritative release +
-    // completion live in the per-request raw `'close'` handler below; this hook
-    // just idempotently frees a reservation on normal completions.
-    scope.addHook('onResponse', async (req) => releaseReservation(req));
 
     // Counted download. A limited share is spent ONLY through this POST (an
     // explicit human action), one completed transfer at a time, bounded by the
@@ -467,39 +485,9 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
       if (!share) return;
       if (!requireUnlocked(req, reply, share)) return;
 
-      if (!share.allow_download) {
-        reply.code(403).send({ error: 'forbidden' });
-        return;
-      }
-
-      const nodeParam = (req.query as { node?: string }).node ?? share.node_id;
-
-      let node: Node;
-      try {
-        node = resolveInSubtree(db, share, nodeParam);
-      } catch (e) {
-        if (e instanceof ForbiddenError) {
-          reply.code(403).send({ error: 'forbidden' });
-          return;
-        }
-        throw e;
-      }
-
-      if (node.kind !== 'file' || !node.storage_path) {
-        reply.code(403).send({ error: 'forbidden' });
-        return;
-      }
-
-      const stream = blobStore.readBlob(node.storage_path);
-      try {
-        await waitForOpen(stream);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-          reply.code(404).send({ error: 'not_found' });
-          return;
-        }
-        throw e;
-      }
+      const resolved = await resolveDownloadableFile(req, reply, share);
+      if (!resolved) return;
+      const { node, stream } = resolved;
 
       // --- Reserve (limited shares only). The DB read and `tryReserve` run
       //     with NO await between them, so they are atomic under Node's single
@@ -518,16 +506,26 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
         }
         reservationHolders.add(req);
         reservedShareId.set(req, share.id);
-        // Wire the release + counted completion BEFORE anything fallible below.
-        // The raw `'close'` event fires on BOTH a normal finish AND a mid-stream
-        // abort; only a fully-flushed body (`writableFinished`) counts. The
-        // guarded UPDATE (`download_count < download_limit`) lets exactly ONE
-        // completion cross the threshold, so `applyExhaustion` fires at most
-        // once per share even under concurrency (and is idempotent regardless).
+        // The raw `'close'` event is the SOLE release + count site (there is
+        // deliberately NO `onResponse` backstop). It fires on BOTH a normal
+        // finish AND a mid-stream abort, and the count already depends entirely
+        // on it firing — so releasing ONLY here keeps the reservation held
+        // until the count reflects the completion. Doing release-then-count
+        // together with NO `await` between makes the pair atomic: it closes the
+        // Fastify finish->close window in which an `onResponse`-time release
+        // would free the slot a tick BEFORE this UPDATE commits (while the DB
+        // count still read 0), letting a concurrent limit-1 request reserve
+        // against the stale count and over-deliver a second body. Only a
+        // fully-flushed SUCCESSFUL response (`writableFinished` && status < 400)
+        // counts — a thrown-error 500 that delivered no bytes (e.g. a late
+        // `logShareAccess`/`send` failure) must never burn the file. The guarded
+        // UPDATE (`download_count < download_limit`) lets exactly ONE completion
+        // cross the threshold, so `applyExhaustion` fires at most once per share
+        // even under concurrency (and is idempotent regardless).
         reply.raw.once('close', () => {
           try {
             releaseReservation(req);
-            if (reply.raw.writableFinished) {
+            if (reply.raw.writableFinished && reply.raw.statusCode < 400) {
               const upd = db
                 .prepare(
                   `UPDATE shares SET download_count = download_count + 1
