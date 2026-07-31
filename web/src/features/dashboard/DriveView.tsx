@@ -1,11 +1,19 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Modal from '../../components/Modal';
 import Button from '../../components/Button';
 import StatusChip from '../../components/StatusChip';
 import { useToast } from '../../components/Toast';
-import { FolderDossier, FileSheet } from '../../components/icons';
+import {
+  FolderDossier,
+  FileSheet,
+  Lock,
+  DownloadArrow,
+  CalendarStamp,
+  Copy,
+  ChevronEnter,
+} from '../../components/icons';
 import { ApiError } from '../../lib/api';
 import DashboardShell from './DashboardShell';
 import UploadDrop from './UploadDrop';
@@ -294,6 +302,17 @@ const ROW_ACTION =
 const ROW_ACTION_DANGER =
   'inline-flex items-center rounded-md border border-line px-2.5 py-1 font-body text-xs text-clay transition-colors hover:bg-paper focus-visible:bg-paper';
 
+/** A subtle status pill for a share's active lifecycle controls (password /
+ *  remaining downloads / expiry), shown under the status chip in the register. */
+function SharePill({ icon, label }: { icon: ReactNode; label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full border border-line bg-paper px-2 py-0.5 font-body text-[11px] text-ink-2">
+      <span className="inline-flex shrink-0">{icon}</span>
+      <bdi>{label}</bdi>
+    </span>
+  );
+}
+
 function NodeRow({
   node,
   share,
@@ -314,26 +333,54 @@ function NodeRow({
   onTrash: (node: NodeDto) => void;
 }) {
   const { t } = useTranslation();
+  const { toast } = useToast();
   const isFolder = node.kind === 'folder';
+
+  async function copyLink() {
+    if (!share) return;
+    try {
+      await navigator.clipboard.writeText(share.url);
+      toast({ kind: 'success', message: t('share.toast.copied') });
+    } catch {
+      toast({ kind: 'error', message: t('share.toast.copyFailed') });
+    }
+  }
+
+  // Remaining downloads for a capped share (never below 0).
+  const downloadsLeft =
+    share && share.download_limit != null
+      ? Math.max(0, share.download_limit - share.download_count)
+      : null;
 
   return (
     <tr className="border-b border-line last:border-b-0 hover:bg-paper">
       <td className="ps-3 pe-3 py-2">
-        <div className="flex items-center gap-2">
-          <span
-            data-testid={isFolder ? 'icon-folder' : 'icon-file'}
-            className="inline-flex shrink-0 text-ink-2"
+        {isFolder ? (
+          // A folder is a full-width click target — brass dossier icon, a bold
+          // name, and an always-visible "open" chevron so it clearly reads as
+          // navigable (not just teal text).
+          <button
+            type="button"
+            onClick={() => onOpen(node)}
+            title={t('dashboard.openFolder')}
+            className="group flex w-full items-center gap-2 rounded-md px-1 py-1 text-start transition-colors hover:bg-paper focus-visible:bg-paper"
           >
-            {isFolder ? <FolderDossier size={20} /> : <FileSheet size={20} />}
-          </span>
-          {isFolder ? (
-            <button type="button" onClick={() => onOpen(node)} className="text-start text-teal">
-              {node.name}
-            </button>
-          ) : (
+            <span data-testid="icon-folder" className="inline-flex shrink-0 text-brass">
+              <FolderDossier size={20} />
+            </span>
+            <span className="font-medium text-ink group-hover:text-teal">{node.name}</span>
+            <span className="ms-auto inline-flex shrink-0 text-ink-2 group-hover:text-teal">
+              <ChevronEnter size={16} />
+            </span>
+          </button>
+        ) : (
+          <div className="flex items-center gap-2 px-1 py-1">
+            <span data-testid="icon-file" className="inline-flex shrink-0 text-ink-2">
+              <FileSheet size={20} />
+            </span>
             <span className="text-ink">{node.name}</span>
-          )}
-        </div>
+          </div>
+        )}
       </td>
       <td className="ps-3 pe-3 py-2">
         <bdi dir="ltr" className="font-mono text-ink-2">
@@ -346,14 +393,43 @@ function NodeRow({
         </bdi>
       </td>
       <td className="ps-3 pe-3 py-2">
-        {/* Live share state (§4.6 / §4.4): the register's status/stamp column
-            carries the brass "shared" seal badge whenever a node is shared —
-            the purpose-built brass StatusChip variant (colour + label + glyph,
-            never colour alone). Granular active/stopped/expired state lives in
-            the ShareModal and the Shared register. An unshared node shows a
-            neutral placeholder. */}
+        {/* Live share state at a glance (§4.6 / §4.4): the GRANULAR status
+            (active/stopped/expired/exhausted) + a quick copy-link, then pills
+            for the lifecycle controls in force — password, remaining downloads,
+            expiry. An unshared node shows a neutral placeholder. */}
         {share ? (
-          <StatusChip status="shared" />
+          <div className="flex flex-col items-start gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <StatusChip status={share.status} />
+              <button
+                type="button"
+                onClick={copyLink}
+                className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-0.5 font-body text-xs text-teal transition-colors hover:bg-paper focus-visible:bg-paper"
+              >
+                <Copy size={13} />
+                {t('share.copy')}
+              </button>
+            </div>
+            {(share.has_password || share.expires_at != null || share.download_limit != null) && (
+              <div className="flex flex-wrap items-center gap-1">
+                {share.has_password && (
+                  <SharePill icon={<Lock size={12} />} label={t('dashboard.share.password')} />
+                )}
+                {share.download_limit != null && (
+                  <SharePill
+                    icon={<DownloadArrow size={12} />}
+                    label={t('dashboard.share.downloadsLeft', { n: downloadsLeft })}
+                  />
+                )}
+                {share.expires_at != null && (
+                  <SharePill
+                    icon={<CalendarStamp size={12} />}
+                    label={formatDate(share.expires_at)}
+                  />
+                )}
+              </div>
+            )}
+          </div>
         ) : (
           <span aria-hidden="true" className="text-ink-2">
             —

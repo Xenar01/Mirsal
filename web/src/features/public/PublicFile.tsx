@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { formatBytes } from '../dashboard/format';
 import { SealHeader } from './DispatchFrame';
 import { PrimaryButton, DownloadGlyph } from './controls';
+import { DownloadArrow } from '../../components/icons';
 import { downloadUrl, type PublicMeta } from './api';
 import { fileTypeLabel } from './format';
 
@@ -38,13 +39,15 @@ export default function PublicFile({ token, meta }: { token: string; meta: Publi
         )}
       </p>
 
-      {/* Static config label (never a live remaining count — no download oracle):
-          "one-time" for a cap of 1, otherwise "up to N". Absent when unlimited. */}
+      {/* Live remaining-downloads counter (the owner asked for a visible count).
+          A brass-tinted pill: "K remaining of N". Absent when unlimited. */}
       {meta.download_limit != null && (
-        <p className="font-body text-sm text-brass-ring">
-          {meta.download_limit === 1
-            ? t('public.limitOnce')
-            : t('public.limitN', { count: meta.download_limit })}
+        <p className="inline-flex items-center gap-2 rounded-full border border-line bg-paper px-3 py-1 font-body text-sm text-brass-ring">
+          <DownloadArrow size={16} />
+          {t('public.remaining', {
+            remaining: Math.max(0, meta.download_limit - meta.download_count),
+            limit: meta.download_limit,
+          })}
         </p>
       )}
 

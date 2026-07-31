@@ -24,6 +24,13 @@ import type { AdminUserDto } from './types';
  * the logged-in admin can't deactivate/demote/delete (disabled + a tooltip
  * reason). The server 409s are still handled gracefully (the guard is UX only).
  */
+// Compact chip-button styling for the user-row actions (matches the drive
+// register), so a row of actions reads as a toolbar of buttons, not bare text.
+const ADMIN_ACTION =
+  'inline-flex items-center rounded-md border border-line px-2.5 py-1 font-body text-xs text-teal transition-colors hover:bg-paper focus-visible:bg-paper';
+const ADMIN_ACTION_DANGER =
+  'inline-flex items-center rounded-md border border-line px-2.5 py-1 font-body text-xs text-clay transition-colors hover:bg-paper focus-visible:bg-paper';
+
 export default function UsersTable() {
   const { t } = useTranslation();
   const { user } = useAuth();
@@ -299,7 +306,7 @@ function UserRow({
                 guardBlocked={guard.blocked}
                 reasonId={reasonId}
                 pending={patch.isPending}
-                className="text-teal"
+                className={ADMIN_ACTION}
               >
                 {t('admin.users.action.deactivate')}
               </GuardedAction>
@@ -308,7 +315,7 @@ function UserRow({
                 type="button"
                 onClick={toggleActive}
                 disabled={patch.isPending}
-                className="text-teal disabled:opacity-50"
+                className={`${ADMIN_ACTION} disabled:opacity-50`}
               >
                 {t('admin.users.action.activate')}
               </button>
@@ -320,7 +327,7 @@ function UserRow({
                 guardBlocked={guard.blocked}
                 reasonId={reasonId}
                 pending={patch.isPending}
-                className="text-teal"
+                className={ADMIN_ACTION}
               >
                 {t('admin.users.action.demote')}
               </GuardedAction>
@@ -329,23 +336,23 @@ function UserRow({
                 type="button"
                 onClick={toggleRole}
                 disabled={patch.isPending}
-                className="text-teal disabled:opacity-50"
+                className={`${ADMIN_ACTION} disabled:opacity-50`}
               >
                 {t('admin.users.action.promote')}
               </button>
             )}
 
-            <button type="button" onClick={onReset} className="text-teal">
+            <button type="button" onClick={onReset} className={ADMIN_ACTION}>
               {t('admin.users.action.resetPassword')}
             </button>
-            <button type="button" onClick={onQuota} className="text-teal">
+            <button type="button" onClick={onQuota} className={ADMIN_ACTION}>
               {t('admin.users.action.quota')}
             </button>
             <GuardedAction
               onAct={onDelete}
               guardBlocked={guard.blocked}
               reasonId={reasonId}
-              className="text-clay"
+              className={ADMIN_ACTION_DANGER}
             >
               {t('admin.users.action.delete')}
             </GuardedAction>
