@@ -152,7 +152,7 @@ test('login: wrong password -> 401 invalid_credentials', async () => {
   expect(findCookie(res.cookies, 'mirsal_session')).toBeUndefined();
 });
 
-test('login: inactive user -> 401 invalid_credentials (generic, not a distinct reason)', async () => {
+test('login: inactive user with the CORRECT password -> 403 account_deactivated', async () => {
   const built = await makeApp();
   await seedUser('deactivated', 'pw', { isActive: 0 });
 
@@ -160,6 +160,21 @@ test('login: inactive user -> 401 invalid_credentials (generic, not a distinct r
     method: 'POST',
     url: '/api/auth/login',
     payload: { username: 'deactivated', password: 'pw' },
+  });
+
+  expect(res.statusCode).toBe(403);
+  expect(res.json()).toEqual({ error: 'account_deactivated' });
+  expect(findCookie(res.cookies, 'mirsal_session')).toBeUndefined();
+});
+
+test('login: inactive user with a WRONG password -> 401 generic (no deactivation oracle)', async () => {
+  const built = await makeApp();
+  await seedUser('deactivated', 'pw', { isActive: 0 });
+
+  const res = await built.inject({
+    method: 'POST',
+    url: '/api/auth/login',
+    payload: { username: 'deactivated', password: 'wrong' },
   });
 
   expect(res.statusCode).toBe(401);

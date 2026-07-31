@@ -191,16 +191,27 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
         )
         .get(username) as UserRow | undefined;
 
-      const isUsable = !!row && row.is_active === 1;
-      // Constant-work anti-enumeration: always run a real verify, against the
-      // dummy hash when there's no usable account, so timing can't reveal
-      // which of "no such user" / "inactive" / "wrong password" occurred.
+      const hasUser = !!row;
+      // Constant-work anti-enumeration: exactly one real argon2 verify per
+      // attempt. Use the REAL hash whenever the row exists (active OR inactive)
+      // so a correct password on an inactive account is detectable; the dummy
+      // hash only when there is no such user — so timing can't reveal which of
+      // "no such user" / "inactive" / "wrong password" occurred.
       const verified = await passwordService.verifyPassword(
-        isUsable ? row!.password_hash : dummyHash,
+        hasUser ? row!.password_hash : dummyHash,
         password
       );
 
-      if (!isUsable || !verified) {
+      // Disclose "deactivated" ONLY to a fully-correct username+password — a
+      // wrong password on an inactive account still gets the generic 401, so no
+      // one can probe which usernames exist.
+      if (hasUser && verified && row!.is_active !== 1) {
+        writeAudit(db, { actorId: row!.id, action: 'login_denied_inactive', target: username }, now);
+        reply.code(403).send({ error: 'account_deactivated' });
+        return;
+      }
+
+      if (!hasUser || !verified || row!.is_active !== 1) {
         writeAudit(db, { actorId: row?.id ?? null, action: 'login_failure', target: username }, now);
         reply.code(401).send({ error: 'invalid_credentials' });
         return;
