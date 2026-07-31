@@ -1071,6 +1071,20 @@ test('POST /download accepts a browser form submit (application/x-www-form-urlen
   expect(res.rawPayload.equals(content)).toBe(true);
 });
 
+test('public responses carry Cache-Control: no-store (share state is never cached)', async () => {
+  // Without this, a recipient's browser can cache the meta and keep showing a
+  // stale view — e.g. a stopped-then-restarted link stays "off" on reload.
+  const built = await makeApp();
+  const uid = await seedUser('cara', 'pw');
+  const { session, csrf } = await login(built, 'cara', 'pw');
+  const rootId = rootIdFor(uid);
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'c.txt', data: Buffer.from('x') });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+  const res = await built.inject({ method: 'GET', url: `/api/public/${share.token}` });
+  expect(res.statusCode).toBe(200);
+  expect(res.headers['cache-control']).toBe('no-store');
+});
+
 test('two concurrent POST /download on limit=1 -> statuses {200, 410}; count ends at 1', async () => {
   const built = await makeApp();
   const port = await listenOn(built);

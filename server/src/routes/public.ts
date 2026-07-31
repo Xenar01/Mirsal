@@ -137,6 +137,12 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
   // leaks in a Referer header to an off-site link the recipient clicks.
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('Referrer-Policy', 'no-referrer');
+    // Share state (live / stopped / expired / exhausted — and the meta itself)
+    // changes out from under a recipient, so their browser must never serve a
+    // cached view: a stopped-then-restarted link would otherwise stay "off" on
+    // reload, and an exhausted/expired one could keep appearing live. no-store
+    // forces every load to reflect the current server state.
+    reply.header('Cache-Control', 'no-store');
     return payload;
   });
 
