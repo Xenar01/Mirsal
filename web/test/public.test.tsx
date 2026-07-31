@@ -229,6 +229,33 @@ describe('SealedDispatch — public share page', () => {
     expect(screen.queryByText(/downloads remaining/)).not.toBeInTheDocument();
   });
 
+  test('a folder share shows the name + Download-all-as-ZIP and NO file listing (#10)', async () => {
+    setNavigatorLanguage('en-US');
+    const liveFolder = {
+      token: TOKEN,
+      kind: 'folder' as const,
+      name: 'Reports',
+      size_bytes: 4096,
+      isFolder: true,
+      allow_download: true,
+      download_limit: null as number | null,
+      download_count: 0,
+    };
+    const fetchMock = vi.fn(async () => jsonResponse(200, liveFolder));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { container } = renderPage();
+    await screen.findByText('A folder was sent to you via Mirsal');
+
+    // The folder name is shown and ZIP is the only content action.
+    expect(screen.getByText('Reports')).toBeInTheDocument();
+    expect(container.querySelector(`a[href="/api/public/${TOKEN}/zip"]`)).not.toBeNull();
+
+    // No /list request is ever made — contents stay hidden.
+    const listCalled = fetchMock.mock.calls.some((c) => String(c[0]).includes('/list'));
+    expect(listCalled).toBe(false);
+  });
+
   test('the download control POSTs to the counted /download endpoint (passive GETs cannot burn the cap)', async () => {
     setNavigatorLanguage('en-US');
     vi.stubGlobal(
