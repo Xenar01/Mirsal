@@ -27,6 +27,13 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
+  // The admin control panel (user management, all shares, audit) is admin-only —
+  // surface it in the rail so a super-admin can actually reach it.
+  const navItems =
+    user?.role === 'admin'
+      ? [...NAV_ITEMS, { to: '/admin', key: 'dashboard.nav.admin' }]
+      : NAV_ITEMS;
+
   async function onLogout() {
     try {
       await logout();
@@ -51,7 +58,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
         <aside className="flex shrink-0 flex-col gap-4 md:w-60 md:border-e md:border-line md:pe-4">
           <nav aria-label={t('dashboard.nav.label')}>
             <ul className="flex flex-col gap-1">
-              {NAV_ITEMS.map((item) => (
+              {navItems.map((item) => (
                 <li key={item.to}>
                   <NavLink
                     to={item.to}
