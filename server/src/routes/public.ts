@@ -347,6 +347,15 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
     if (!share) return;
     if (!requireUnlocked(req, reply, share)) return;
 
+    // #10: a folder share exposes ONLY the ZIP — its contents are never listed.
+    const listNode = db.prepare('SELECT kind FROM nodes WHERE id = @id').get({ id: share.node_id }) as
+      | { kind: string }
+      | undefined;
+    if (listNode?.kind === 'folder') {
+      reply.code(403).send({ error: 'forbidden' });
+      return;
+    }
+
     const pathParam = (req.query as { path?: string }).path;
     const folderId = pathParam ?? share.node_id;
 
@@ -403,6 +412,16 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
     share: Share
   ): Promise<{ node: Node; stream: ReadStream } | null> {
     if (!share.allow_download) {
+      reply.code(403).send({ error: 'forbidden' });
+      return null;
+    }
+
+    // #10: a folder share allows no per-file download (with or without ?node=) —
+    // only the ZIP. Constant-shape 403, identical to an out-of-subtree rejection.
+    const shareNode = db.prepare('SELECT kind FROM nodes WHERE id = @id').get({ id: share.node_id }) as
+      | { kind: string }
+      | undefined;
+    if (shareNode?.kind === 'folder') {
       reply.code(403).send({ error: 'forbidden' });
       return null;
     }
