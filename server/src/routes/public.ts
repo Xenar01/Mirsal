@@ -42,8 +42,13 @@ function toPublicNodeDto(node: Node): PublicNodeDto {
 
 /** Name of the short-lived, path-scoped cookie that marks a password share as unlocked. */
 const UNLOCK_COOKIE = 'mirsal_unlock';
-/** Unlock cookie lifetime (30 min) — a re-prompt after this is acceptable. */
-const UNLOCK_COOKIE_MAX_AGE_S = 1800;
+/**
+ * Unlock cookie server-side lifetime (10 min). A short transport bridge only —
+ * the client re-prompts on every fresh open (#11) by omitting this cookie until
+ * an in-session unlock; this bounds how long the cookie can authorize the
+ * download/list requests of a single page interaction.
+ */
+const UNLOCK_COOKIE_MAX_AGE_S = 600;
 
 /**
  * Per-token cap on `/unlock` attempts within the window — the tighter of the
@@ -329,12 +334,15 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
       // Bound to THIS verification's password_hash + issuedAt (see
       // `signUnlock`/`isUnlocked`) so a later password rotation/removal
       // invalidates it, and its lifetime is enforced server-side too.
+      // No `maxAge`/`expires` → a SESSION cookie (dropped when the browser
+      // session ends). Its lifetime is still enforced server-side via the signed
+      // issuedAt in `isUnlocked` (UNLOCK_COOKIE_MAX_AGE_S), independent of the
+      // client honoring any attribute.
       reply.setCookie(UNLOCK_COOKIE, unlockCookieValue(token, share.password_hash, now()), {
         httpOnly: true,
         secure: true,
         sameSite: 'lax',
         path: `/api/public/${token}`,
-        maxAge: UNLOCK_COOKIE_MAX_AGE_S,
       });
       reply.code(200).send({ ok: true });
     });
@@ -346,6 +354,15 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
     const share = loadLiveShare(reply, token);
     if (!share) return;
     if (!requireUnlocked(req, reply, share)) return;
+
+    // #10: a folder share exposes ONLY the ZIP — its contents are never listed.
+    const listNode = db.prepare('SELECT kind FROM nodes WHERE id = @id').get({ id: share.node_id }) as
+      | { kind: string }
+      | undefined;
+    if (listNode?.kind === 'folder') {
+      reply.code(403).send({ error: 'forbidden' });
+      return;
+    }
 
     const pathParam = (req.query as { path?: string }).path;
     const folderId = pathParam ?? share.node_id;
@@ -403,6 +420,16 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
     share: Share
   ): Promise<{ node: Node; stream: ReadStream } | null> {
     if (!share.allow_download) {
+      reply.code(403).send({ error: 'forbidden' });
+      return null;
+    }
+
+    // #10: a folder share allows no per-file download (with or without ?node=) —
+    // only the ZIP. Constant-shape 403, identical to an out-of-subtree rejection.
+    const shareNode = db.prepare('SELECT kind FROM nodes WHERE id = @id').get({ id: share.node_id }) as
+      | { kind: string }
+      | undefined;
+    if (shareNode?.kind === 'folder') {
       reply.code(403).send({ error: 'forbidden' });
       return null;
     }

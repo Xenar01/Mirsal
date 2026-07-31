@@ -60,6 +60,8 @@ interface UserRow {
   role: string;
   is_active: number;
   must_change_password: number;
+  quota_bytes: number | null;
+  used_bytes: number;
 }
 
 interface PublicUser {
@@ -68,6 +70,8 @@ interface PublicUser {
   role: string;
   mustChangePassword: boolean;
   rootNodeId: number;
+  quotaBytes: number | null;
+  usedBytes: number;
 }
 
 /**
@@ -79,7 +83,7 @@ interface PublicUser {
  * from.
  */
 function toPublicUser(
-  row: Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password'>,
+  row: Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password' | 'quota_bytes' | 'used_bytes'>,
   rootNodeId: number
 ): PublicUser {
   return {
@@ -88,6 +92,8 @@ function toPublicUser(
     role: row.role,
     mustChangePassword: !!row.must_change_password,
     rootNodeId,
+    quotaBytes: row.quota_bytes,
+    usedBytes: row.used_bytes,
   };
 }
 
@@ -180,21 +186,32 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
 
       const row = db
         .prepare(
-          `SELECT id, username, password_hash, role, is_active, must_change_password
+          `SELECT id, username, password_hash, role, is_active, must_change_password, quota_bytes, used_bytes
            FROM users WHERE username = ?`
         )
         .get(username) as UserRow | undefined;
 
-      const isUsable = !!row && row.is_active === 1;
-      // Constant-work anti-enumeration: always run a real verify, against the
-      // dummy hash when there's no usable account, so timing can't reveal
-      // which of "no such user" / "inactive" / "wrong password" occurred.
+      const hasUser = !!row;
+      // Constant-work anti-enumeration: exactly one real argon2 verify per
+      // attempt. Use the REAL hash whenever the row exists (active OR inactive)
+      // so a correct password on an inactive account is detectable; the dummy
+      // hash only when there is no such user — so timing can't reveal which of
+      // "no such user" / "inactive" / "wrong password" occurred.
       const verified = await passwordService.verifyPassword(
-        isUsable ? row!.password_hash : dummyHash,
+        hasUser ? row!.password_hash : dummyHash,
         password
       );
 
-      if (!isUsable || !verified) {
+      // Disclose "deactivated" ONLY to a fully-correct username+password — a
+      // wrong password on an inactive account still gets the generic 401, so no
+      // one can probe which usernames exist.
+      if (hasUser && verified && row!.is_active !== 1) {
+        writeAudit(db, { actorId: row!.id, action: 'login_denied_inactive', target: username }, now);
+        reply.code(403).send({ error: 'account_deactivated' });
+        return;
+      }
+
+      if (!hasUser || !verified || row!.is_active !== 1) {
         writeAudit(db, { actorId: row?.id ?? null, action: 'login_failure', target: username }, now);
         reply.code(401).send({ error: 'invalid_credentials' });
         return;
@@ -230,8 +247,10 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
     // Fresh read (not the session's cached snapshot) so role/flag changes
     // since login are reflected immediately.
     const row = db
-      .prepare(`SELECT id, username, role, must_change_password FROM users WHERE id = ?`)
-      .get(req.user!.id) as Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password'> | undefined;
+      .prepare(`SELECT id, username, role, must_change_password, quota_bytes, used_bytes FROM users WHERE id = ?`)
+      .get(req.user!.id) as
+      | Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password' | 'quota_bytes' | 'used_bytes'>
+      | undefined;
 
     if (!row) {
       reply.code(401).send();

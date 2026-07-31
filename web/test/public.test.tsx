@@ -229,6 +229,63 @@ describe('SealedDispatch — public share page', () => {
     expect(screen.queryByText(/downloads remaining/)).not.toBeInTheDocument();
   });
 
+  test('a password share re-prompts on every fresh open even if the unlock cookie is still valid (#11)', async () => {
+    setNavigatorLanguage('en-US');
+    // Simulate a STILL-VALID unlock cookie: the server would return live meta IF
+    // the cookie were sent. The client omits it until the user unlocks in-session,
+    // so the first meta (credentials:'omit') is 401 needsPassword -> gate shows.
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes('/unlock')) return jsonResponse(200, { ok: true });
+      if (init?.credentials === 'include') return jsonResponse(200, { ...liveFile, name: 'secret.txt' });
+      return jsonResponse(401, { needsPassword: true });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+
+    // Fresh open: gate shown despite a "valid cookie"; no metadata leaks.
+    expect(await screen.findByText('This file is password-protected.')).toBeInTheDocument();
+    expect(screen.queryByText('secret.txt')).not.toBeInTheDocument();
+
+    // Enter the password -> unlock -> reveal -> content.
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'right' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
+    expect(await screen.findByText('A file was sent to you via Mirsal')).toBeInTheDocument();
+    expect(screen.getByText('secret.txt')).toBeInTheDocument();
+
+    // The FIRST meta fetch omitted credentials — the mechanism that forces the re-prompt.
+    const firstMeta = fetchMock.mock.calls.find((c) => !String(c[0]).includes('/unlock'))!;
+    expect((firstMeta[1] as RequestInit).credentials).toBe('omit');
+  });
+
+  test('a folder share shows the name + Download-all-as-ZIP and NO file listing (#10)', async () => {
+    setNavigatorLanguage('en-US');
+    const liveFolder = {
+      token: TOKEN,
+      kind: 'folder' as const,
+      name: 'Reports',
+      size_bytes: 4096,
+      isFolder: true,
+      allow_download: true,
+      download_limit: null as number | null,
+      download_count: 0,
+    };
+    const fetchMock = vi.fn(async () => jsonResponse(200, liveFolder));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { container } = renderPage();
+    await screen.findByText('A folder was sent to you via Mirsal');
+
+    // The folder name is shown and ZIP is the only content action.
+    expect(screen.getByText('Reports')).toBeInTheDocument();
+    expect(container.querySelector(`a[href="/api/public/${TOKEN}/zip"]`)).not.toBeNull();
+
+    // No /list request is ever made — contents stay hidden.
+    const listCalled = fetchMock.mock.calls.some((c) => String(c[0]).includes('/list'));
+    expect(listCalled).toBe(false);
+  });
+
   test('the download control POSTs to the counted /download endpoint (passive GETs cannot burn the cap)', async () => {
     setNavigatorLanguage('en-US');
     vi.stubGlobal(

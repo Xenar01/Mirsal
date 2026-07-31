@@ -38,6 +38,8 @@ export default function LoginPage() {
         setError(t('login.error.rateLimited'));
       } else if (err instanceof ApiError && err.status === 401) {
         setError(t('login.error.invalidCredentials'));
+      } else if (err instanceof ApiError && err.status === 403) {
+        setError(t('login.error.deactivated'));
       } else {
         setError(t('login.error.generic'));
       }

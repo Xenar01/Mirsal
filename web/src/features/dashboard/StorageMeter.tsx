@@ -1,29 +1,28 @@
 import { useTranslation } from 'react-i18next';
-import { useNodes, useTrash, sumSizes } from './queries';
+import { useAuth } from '../auth/auth-context';
+import { useTrash, sumSizes } from './queries';
 import { formatBytes } from './format';
 
 /*
- * Storage meter (§3.2).
- *
- * The server exposes NO per-user quota to a non-admin (`GET /api/auth/me` is
- * id/username/role/mustChangePassword only; `quota_bytes`/`used_bytes` live
- * behind the admin routes). Per the J2 brief we therefore DERIVE "used" from
- * the root rollup — the root listing's folder sizes are already server-side
- * subtree rollups, so summing the root children's `size_bytes` is the whole
- * live tree — and show the Trash size separately (trashed bytes still count
- * until permanent delete, §3.2). The quota fraction is omitted rather than
- * invented. If a user-facing quota endpoint is added later, wire a labelled
- * bar here.
+ * Storage meter (§3.2). "Used" + the quota bar come from the authoritative,
+ * server-maintained figures on the session user (`GET /api/auth/me` now returns
+ * quotaBytes/usedBytes). used_bytes already includes trashed-but-not-purged
+ * bytes; the Trash sub-line is an informational breakdown from the trash
+ * listing. When quotaBytes is null the user has no quota and the bar is omitted.
  *
  * Numbers are mono ledger data, bidi-isolated LTR (§4.3/§4.5).
  */
 export default function StorageMeter() {
   const { t } = useTranslation();
-  const rootQuery = useNodes(null);
+  const { user } = useAuth();
   const trashQuery = useTrash();
-
-  const usedBytes = sumSizes(rootQuery.data);
   const trashBytes = sumSizes(trashQuery.data);
+
+  const usedBytes = user?.usedBytes ?? 0;
+  const quotaBytes = user?.quotaBytes ?? null;
+  const hasQuota = quotaBytes !== null;
+  const fraction = hasQuota ? (quotaBytes > 0 ? Math.min(1, usedBytes / quotaBytes) : 1) : 0;
+  const over = hasQuota && usedBytes > quotaBytes;
 
   return (
     <section aria-label={t('storage.title')} className="rounded-[10px] border border-line bg-surface p-3">
@@ -46,7 +45,29 @@ export default function StorageMeter() {
           </dd>
         </div>
       </dl>
-      <p className="mt-2 font-body text-xs text-ink-2">{t('storage.noQuota')}</p>
+      {hasQuota ? (
+        <div className="mt-2">
+          <div
+            role="progressbar"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={Math.round(fraction * 100)}
+            className="h-1.5 w-full overflow-hidden rounded-full border border-line bg-paper"
+          >
+            <div
+              className={`h-full ${over ? 'bg-clay' : 'bg-brass'}`}
+              style={{ width: `${fraction * 100}%` }}
+            />
+          </div>
+          <p className="mt-1 font-body text-xs text-ink-2">
+            <bdi dir="ltr" className="font-mono">
+              {formatBytes(usedBytes)} / {formatBytes(quotaBytes)}
+            </bdi>
+          </p>
+        </div>
+      ) : (
+        <p className="mt-2 font-body text-xs text-ink-2">{t('storage.noQuota')}</p>
+      )}
     </section>
   );
 }

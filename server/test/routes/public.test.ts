@@ -261,7 +261,7 @@ test('unknown token -> generic 404 (no oracle), still Referrer-Policy: no-referr
 // Folder share
 // ---------------------------------------------------------------------------
 
-test('folder share: list children, download a descendant; sibling-outside + moved-out -> 403 forbidden', async () => {
+test('folder share hides contents: /list and per-file /download are 403; only /zip + meta work (#10)', async () => {
   const built = await makeApp();
   const uid = await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
@@ -269,57 +269,30 @@ test('folder share: list children, download a descendant; sibling-outside + move
 
   const folder = await makeFolder(built, session, csrf, rootId, 'Album');
   const inside = await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'inside.txt', data: Buffer.from('IN') });
-  const sub = await makeFolder(built, session, csrf, folder.id, 'Sub');
-  const deep = await uploadFile(built, session, csrf, { parentId: sub.id, filename: 'deep.txt', data: Buffer.from('DEEP') });
-  const outside = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'outside.txt', data: Buffer.from('OUT') });
-  const mover = await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'mover.txt', data: Buffer.from('MOVE') });
-
   const share = await createShare(built, session, csrf, { node_id: folder.id });
 
-  // list top-level children of the shared folder
+  // meta still works — the recipient sees the folder name + isFolder.
+  const metaRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}` });
+  expect(metaRes.statusCode).toBe(200);
+  expect(metaRes.json()).toMatchObject({ isFolder: true, name: 'Album' });
+
+  // Listing is blocked — contents are never enumerable.
   const listRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}/list` });
-  expect(listRes.statusCode).toBe(200);
-  const list = listRes.json() as Array<{ id: number; kind: string; name: string }>;
-  expect(list.map((n) => n.name).sort()).toEqual(['Sub', 'inside.txt', 'mover.txt']);
-  // public DTO omits internal columns
-  for (const n of list) {
-    expect(n).not.toHaveProperty('storage_path');
-    expect(n).not.toHaveProperty('owner_id');
-    expect(n).not.toHaveProperty('auto_delete_at');
-  }
+  expect(listRes.statusCode).toBe(403);
+  expect(listRes.json()).toEqual({ error: 'forbidden' });
 
-  // download a descendant two levels deep
-  const deepRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}/download?node=${deep.id}` });
-  expect(deepRes.statusCode).toBe(200);
-  expect(deepRes.rawPayload.equals(Buffer.from('DEEP'))).toBe(true);
+  // Per-file download is blocked even for a real in-subtree file id.
+  const dlRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}/download?node=${inside.id}` });
+  expect(dlRes.statusCode).toBe(403);
+  expect(dlRes.json()).toEqual({ error: 'forbidden' });
 
-  // sibling outside the shared subtree -> 403 forbidden (constant shape)
-  const sibRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}/download?node=${outside.id}` });
-  expect(sibRes.statusCode).toBe(403);
-  expect(sibRes.json()).toEqual({ error: 'forbidden' });
+  // Default (no node) download is blocked too (the shared node is a folder).
+  const dlDefault = await built.inject({ method: 'GET', url: `/api/public/${share.token}/download` });
+  expect(dlDefault.statusCode).toBe(403);
 
-  // junk id -> same 403 forbidden shape (no existence oracle)
-  const junkRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}/download?node=999999` });
-  expect(junkRes.statusCode).toBe(403);
-  expect(junkRes.json()).toEqual({ error: 'forbidden' });
-
-  // move a node OUT of the shared folder, then request it -> 403
-  const moveRes = await built.inject({
-    method: 'PATCH',
-    url: `/api/nodes/${mover.id}`,
-    cookies: { mirsal_session: session },
-    headers: { 'x-csrf-token': csrf },
-    payload: { parent_id: rootId },
-  });
-  expect(moveRes.statusCode).toBe(200);
-
-  const movedRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}/download?node=${mover.id}` });
-  expect(movedRes.statusCode).toBe(403);
-  expect(movedRes.json()).toEqual({ error: 'forbidden' });
-
-  // sanity: `inside` still downloads fine
-  const insideRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}/download?node=${inside.id}` });
-  expect(insideRes.statusCode).toBe(200);
+  // The ZIP (download-all) remains the ONLY content path.
+  const zipRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}/zip` });
+  expect(zipRes.statusCode).toBe(200);
 });
 
 test('folder share: /zip streams a zip of the subtree with real entries', async () => {
@@ -691,11 +664,11 @@ test('unlock cookie lifetime is enforced server-side, not only via the Max-Age a
   // `built.inject` replays whatever cookie value is given regardless of any
   // Max-Age attribute — a real browser would have already stopped sending
   // this cookie, but nothing here does that for us. Advance the server's own
-  // clock (independent of the cookie value) past the 1800s lifetime and
+  // clock (independent of the cookie value) past the 600s lifetime and
   // confirm the SAME cookie is now rejected — i.e. expiry is enforced by the
   // route reading its own signed issuedAt, not merely by trusting the client
   // to have honored Max-Age.
-  mockNow = NOW + 1800 * 1000 + 1;
+  mockNow = NOW + 600 * 1000 + 1;
   const expiredRes = await built.inject({
     method: 'GET',
     url: `/api/public/${share.token}`,
@@ -703,6 +676,29 @@ test('unlock cookie lifetime is enforced server-side, not only via the Max-Age a
   });
   expect(expiredRes.statusCode).toBe(401);
   expect(expiredRes.json()).toEqual({ needsPassword: true });
+});
+
+test('unlock cookie is a session cookie (no Max-Age / Expires) so it dies with the browser session (#11)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 's.txt', data: Buffer.from('S') });
+  const share = await createShare(built, session, csrf, { node_id: file.id, password: 'pw2' });
+
+  const unlockRes = await built.inject({
+    method: 'POST',
+    url: `/api/public/${share.token}/unlock`,
+    payload: { password: 'pw2' },
+  });
+  expect(unlockRes.statusCode).toBe(200);
+
+  const setCookie = unlockRes.headers['set-cookie'];
+  const raw = Array.isArray(setCookie) ? setCookie.join('\n') : String(setCookie);
+  const line = raw.split('\n').find((l) => l.startsWith('mirsal_unlock='));
+  expect(line).toBeDefined();
+  expect(line!.toLowerCase()).not.toContain('max-age');
+  expect(line!.toLowerCase()).not.toContain('expires');
 });
 
 test('public /zip is rate-limited (per-IP), bounding repeated full-subtree archiver runs', async () => {
