@@ -86,4 +86,23 @@ describe('LoginPage — client-side validation', () => {
     expect(init.method).toBe('POST');
     expect(JSON.parse(init.body as string)).toEqual({ username: 'admin', password: 'secret-pw-12' });
   });
+
+  test('a 403 account_deactivated response shows the deactivated message', async () => {
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      if (String(url).endsWith('/auth/login')) {
+        return jsonResponse(403, { error: 'account_deactivated' });
+      }
+      return jsonResponse(401);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await renderLogin(fetchMock);
+
+    fireEvent.change(screen.getByLabelText(i18n.t('login.username')), { target: { value: 'x' } });
+    fireEvent.change(screen.getByLabelText(i18n.t('login.password')), { target: { value: 'y' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('login.submit') }));
+    });
+
+    expect(screen.getByRole('alert')).toHaveTextContent(i18n.t('login.error.deactivated'));
+  });
 });
