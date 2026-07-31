@@ -123,6 +123,29 @@ const V1_SHARES = `CREATE TABLE shares(
   expires_at INTEGER, allow_download INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL, revoked_at INTEGER)`;
 
+/**
+ * The `users` table as it existed at the v1 baseline (unchanged by the v2
+ * shares-columns migration). These v1/v2 fixtures build a DB with only a
+ * `shares` table by design (to test that migration in isolation), but a
+ * cumulative migrate() run now also applies the v3 step, which ALTERs
+ * `users` — so that table must exist here too, just as it always does on a
+ * real v1 DB.
+ */
+const V1_USERS = `CREATE TABLE users(
+  id INTEGER PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('admin','user')),
+  quota_bytes INTEGER,
+  used_bytes INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
+  root_node_id INTEGER,
+  trash_node_id INTEGER,
+  created_by INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL)`;
+
 function cols(db: Database.Database): string[] {
   return (db.prepare(`PRAGMA table_info(shares)`).all() as { name: string }[]).map((r) => r.name);
 }
@@ -131,24 +154,26 @@ describe('migrate v2 download-limit columns', () => {
   it('adds the 3 columns to a v1 DB and records version 2', () => {
     const db = new Database(':memory:');
     db.exec(V1_SHARES);
+    db.exec(V1_USERS);
     db.exec('CREATE TABLE schema_version(version INTEGER NOT NULL, applied_at INTEGER NOT NULL)');
     db.prepare('INSERT INTO schema_version(version, applied_at) VALUES (1, 0)').run();
     migrate(db);
     expect(cols(db)).toEqual(expect.arrayContaining(['download_limit', 'download_count', 'on_exhaust']));
-    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(2);
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
   });
 
   it('a fresh DB has the columns and lands at version 2', () => {
     const db = new Database(':memory:');
     migrate(db);
     expect(cols(db)).toEqual(expect.arrayContaining(['download_limit', 'download_count', 'on_exhaust']));
-    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(2);
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
   });
 
   it('fresh and upgraded shares schemas converge (identical table_info)', () => {
     const fresh = new Database(':memory:'); migrate(fresh);
     const upgraded = new Database(':memory:');
     upgraded.exec(V1_SHARES);
+    upgraded.exec(V1_USERS);
     upgraded.exec('CREATE TABLE schema_version(version INTEGER NOT NULL, applied_at INTEGER NOT NULL)');
     upgraded.prepare('INSERT INTO schema_version(version, applied_at) VALUES (1, 0)').run();
     migrate(upgraded);
@@ -166,8 +191,66 @@ describe('migrate v2 download-limit columns', () => {
   it('tables present but no version row → runs the ALTERs (not the fresh path)', () => {
     const db = new Database(':memory:');
     db.exec(V1_SHARES); // tables exist, but no schema_version rows
+    db.exec(V1_USERS);
     migrate(db);
     expect(cols(db)).toEqual(expect.arrayContaining(['download_limit']));
-    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(2);
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
+  });
+});
+
+/** The exact pre-v3 `users` DDL (v2 baseline), used to simulate an old DB for the display_name migration. */
+const V2_USERS = `CREATE TABLE users(
+  id INTEGER PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  role TEXT NOT NULL CHECK(role IN ('admin','user')),
+  quota_bytes INTEGER,
+  used_bytes INTEGER NOT NULL DEFAULT 0,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
+  root_node_id INTEGER,
+  trash_node_id INTEGER,
+  created_by INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL)`;
+
+function userCols(db: Database.Database): string[] {
+  return (db.prepare(`PRAGMA table_info(users)`).all() as { name: string }[]).map((r) => r.name);
+}
+
+describe('migrate v3 users.display_name column', () => {
+  it('a fresh DB has display_name and lands at version 3', () => {
+    const db = new Database(':memory:');
+    migrate(db);
+    expect(userCols(db)).toContain('display_name');
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
+  });
+
+  it('adds display_name to a v2 DB and records version 3', () => {
+    const db = new Database(':memory:');
+    db.exec(V2_USERS);
+    db.exec('CREATE TABLE schema_version(version INTEGER NOT NULL, applied_at INTEGER NOT NULL)');
+    db.prepare('INSERT INTO schema_version(version, applied_at) VALUES (2, 0)').run();
+    migrate(db);
+    expect(userCols(db)).toContain('display_name');
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
+  });
+
+  it('fresh and upgraded users schemas converge (identical table_info)', () => {
+    const fresh = new Database(':memory:'); migrate(fresh);
+    const upgraded = new Database(':memory:');
+    upgraded.exec(V2_USERS);
+    upgraded.exec('CREATE TABLE schema_version(version INTEGER NOT NULL, applied_at INTEGER NOT NULL)');
+    upgraded.prepare('INSERT INTO schema_version(version, applied_at) VALUES (2, 0)').run();
+    migrate(upgraded);
+    expect(fresh.prepare('PRAGMA table_info(users)').all()).toEqual(
+      upgraded.prepare('PRAGMA table_info(users)').all()
+    );
+  });
+
+  it('is idempotent across repeated boots at v3', () => {
+    const db = new Database(':memory:'); migrate(db);
+    expect(() => { migrate(db); migrate(db); }).not.toThrow();
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
   });
 });
