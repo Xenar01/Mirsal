@@ -98,6 +98,14 @@ export function deleteUser(id: number): Promise<{ ok: true }> {
   return apiDelete<{ ok: true }>(`/admin/users/${id}`);
 }
 
+/**
+ * Wipes a user's drive (all files/folders, including trash) and cancels their
+ * shares, but keeps the account. Returns the refreshed row (used_bytes: 0).
+ */
+export function clearUserSpace(id: number): Promise<AdminUserDto> {
+  return apiPost<AdminUserDto>(`/admin/users/${id}/clear`, {});
+}
+
 // --- Shares ----------------------------------------------------------------
 
 export function listShares(): Promise<AdminShareDto[]> {

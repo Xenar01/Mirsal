@@ -6,7 +6,7 @@ import { Stamp, Pause } from '../../components/icons';
 import { useToast } from '../../components/Toast';
 import { useAuth } from '../auth/auth-context';
 import { formatBytes, formatDate } from '../dashboard/format';
-import { useAdminUsers, usePatchUser, useResetPassword, useDeleteUser } from './queries';
+import { useAdminUsers, usePatchUser, useResetPassword, useDeleteUser, useClearUserSpace } from './queries';
 import { loweringGuard } from './guards';
 import { adminErrorCode } from './api';
 import CreateUserModal from './CreateUserModal';
@@ -46,6 +46,7 @@ export default function UsersTable() {
   const [quotaTarget, setQuotaTarget] = useState<AdminUserDto | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminUserDto | null>(null);
   const [labelTarget, setLabelTarget] = useState<AdminUserDto | null>(null);
+  const [clearTarget, setClearTarget] = useState<AdminUserDto | null>(null);
 
   return (
     <div className="flex flex-col gap-4">
@@ -113,6 +114,7 @@ export default function UsersTable() {
                     onQuota={() => setQuotaTarget(row)}
                     onDelete={() => setDeleteTarget(row)}
                     onLabel={() => setLabelTarget(row)}
+                    onClearSpace={() => setClearTarget(row)}
                   />
                 ))}
               </tbody>
@@ -126,6 +128,7 @@ export default function UsersTable() {
       {quotaTarget && <QuotaModal user={quotaTarget} onClose={() => setQuotaTarget(null)} />}
       {deleteTarget && <DeleteUserModal user={deleteTarget} onClose={() => setDeleteTarget(null)} />}
       {labelTarget && <LabelModal user={labelTarget} onClose={() => setLabelTarget(null)} />}
+      {clearTarget && <ClearSpaceModal user={clearTarget} onClose={() => setClearTarget(null)} />}
     </div>
   );
 }
@@ -245,6 +248,7 @@ function UserRow({
   onQuota,
   onDelete,
   onLabel,
+  onClearSpace,
 }: {
   row: AdminUserDto;
   users: AdminUserDto[];
@@ -253,6 +257,7 @@ function UserRow({
   onQuota: () => void;
   onDelete: () => void;
   onLabel: () => void;
+  onClearSpace: () => void;
 }) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -397,6 +402,11 @@ function UserRow({
             >
               {t('admin.users.action.delete')}
             </GuardedAction>
+            {/* Clearing space wipes files/shares but keeps the account, so it is
+                NOT subject to the last-admin / self guard (unlike delete). */}
+            <button type="button" onClick={onClearSpace} className={ADMIN_ACTION_DANGER}>
+              {t('admin.users.action.clearSpace')}
+            </button>
           </div>
 
           {/* The guard reason is shown as VISIBLE text (discoverable to mouse
@@ -633,6 +643,49 @@ function DeleteUserModal({ user, onClose }: { user: AdminUserDto; onClose: () =>
     >
       <p className="font-body text-sm text-ink">
         {t('admin.delete.body', { username: user.username })}
+      </p>
+    </Modal>
+  );
+}
+
+/* ── Clear user space (destructive confirm) ───────────────────────────── */
+
+function ClearSpaceModal({ user, onClose }: { user: AdminUserDto; onClose: () => void }) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const clear = useClearUserSpace();
+
+  function confirm() {
+    clear.mutate(user.id, {
+      onSuccess: () => {
+        toast({ kind: 'success', message: t('admin.users.toast.cleared') });
+        onClose();
+      },
+      onError: () => {
+        toast({ kind: 'error', message: t('admin.clearSpace.error') });
+        onClose();
+      },
+    });
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={t('admin.clearSpace.title')}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant="danger" onClick={confirm} disabled={clear.isPending}>
+            {t('admin.clearSpace.confirm')}
+          </Button>
+        </>
+      }
+    >
+      <p className="font-body text-sm text-ink">
+        {t('admin.clearSpace.body', { username: user.username })}
       </p>
     </Modal>
   );

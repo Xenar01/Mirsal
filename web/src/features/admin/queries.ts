@@ -58,6 +58,16 @@ export function useDeleteUser() {
   });
 }
 
+export function useClearUserSpace() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => adminApi.clearUserSpace(id),
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: usersKey });
+    },
+  });
+}
+
 export function useAdminShares() {
   return useQuery({ queryKey: sharesKey, queryFn: adminApi.listShares });
 }

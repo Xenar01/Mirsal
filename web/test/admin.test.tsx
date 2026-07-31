@@ -363,6 +363,23 @@ describe('Admin — total-space summary (Task 6)', () => {
   });
 });
 
+describe('Admin — clear user space (Task 8)', () => {
+  test('clear-space confirm calls POST /clear and refreshes the row', async () => {
+    const { calls } = stubFetch({
+      users: [mkUser({ id: 2, username: 'victim', used_bytes: 5 * 1024 * 1024, quota_bytes: 10 * 1024 * 1024 })],
+      overrides: { 'POST /api/admin/users/2/clear': [200, mkUser({ id: 2, username: 'victim', used_bytes: 0 })] },
+    });
+    await renderAdmin({});
+
+    fireEvent.click(within(await screen.findByTestId('user-row-2')).getByText(t('admin.users.action.clearSpace')));
+    await act(async () => {
+      fireEvent.click(screen.getByText(t('admin.clearSpace.confirm')));
+    });
+    const call = calls.find((c) => c.method === 'POST' && c.path === '/api/admin/users/2/clear');
+    expect(call).toBeTruthy();
+  });
+});
+
 describe('Admin — SharesTable force-revoke (§3.1)', () => {
   test('force-revoking a share issues DELETE /api/admin/shares/:id', async () => {
     const shares = [
