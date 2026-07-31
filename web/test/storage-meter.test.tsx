@@ -10,9 +10,10 @@ vi.mock('../src/features/dashboard/queries', () => ({
   sumSizes: () => mockTrashBytes,
 }));
 
+// StorageMeter reads the session user's quota/used via the `useMe` query.
 let mockUser: unknown = null;
-vi.mock('../src/features/auth/auth-context', () => ({
-  useAuth: () => ({ user: mockUser }),
+vi.mock('../src/features/auth/queries', () => ({
+  useMe: () => ({ data: mockUser }),
 }));
 
 import StorageMeter from '../src/features/dashboard/StorageMeter';

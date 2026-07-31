@@ -9,6 +9,7 @@
  */
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import * as nodesApi from './api';
+import { meKey } from '../auth/queries';
 import type { NodeDto } from './types';
 
 export const nodesKey = (parentId: number | null) => ['nodes', parentId ?? 'root'] as const;
@@ -18,6 +19,10 @@ export const trashKey = ['trash'] as const;
 function invalidateNodes(client: QueryClient): void {
   void client.invalidateQueries({ queryKey: ['nodes'] });
   void client.invalidateQueries({ queryKey: trashKey });
+  // The storage meter reads used_bytes via the ['auth','me'] query (`useMe`);
+  // a mutation that changes used_bytes (upload/permanent-delete) must refresh
+  // it too, or the meter would stay frozen until a tab-focus/page reload.
+  void client.invalidateQueries({ queryKey: meKey });
 }
 
 export function useNodes(parentId: number | null) {

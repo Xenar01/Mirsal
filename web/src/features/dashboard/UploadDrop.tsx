@@ -6,6 +6,7 @@ import { Close } from '../../components/icons';
 import { uploadFile, nodeErrorCode } from './api';
 import { MAX_FILE_BYTES } from './format';
 import { trashKey } from './queries';
+import { meKey } from '../auth/queries';
 
 /*
  * UploadDrop (§3.2 / §4.9).
@@ -82,6 +83,8 @@ export default function UploadDrop({ parentId }: UploadDropProps) {
         patchItem(id, { status: 'done', progress: 1 });
         void client.invalidateQueries({ queryKey: ['nodes'] });
         void client.invalidateQueries({ queryKey: trashKey });
+        // Refresh the storage meter — an upload just grew used_bytes.
+        void client.invalidateQueries({ queryKey: meKey });
       })
       .catch((err) => {
         patchItem(id, { status: 'error', message: messageForError(err) });
