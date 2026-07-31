@@ -22,6 +22,7 @@ interface AdminUser {
   used_bytes: number;
   must_change_password: number;
   created_at: number;
+  display_name: string | null;
 }
 
 function mkUser(over: Partial<AdminUser> & { id: number; username: string }): AdminUser {
@@ -32,6 +33,7 @@ function mkUser(over: Partial<AdminUser> & { id: number; username: string }): Ad
     used_bytes: 0,
     must_change_password: 0,
     created_at: NOW,
+    display_name: null,
     ...over,
   };
 }
@@ -206,6 +208,26 @@ describe('Admin — CreateUserModal validation (§3.1)', () => {
     expect(body.password.length).toBeGreaterThanOrEqual(8);
   });
 
+  test('a display name is sent as display_name in the POST body', async () => {
+    const { calls } = stubFetch({ users: [] });
+    await renderAdmin({ users: [] });
+
+    const username = await openCreate();
+    fireEvent.change(username, { target: { value: 'sara' } });
+    fireEvent.change(screen.getByLabelText(t('admin.create.nameLabel')), {
+      target: { value: 'سارة' },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: t('admin.create.submit') }));
+    });
+
+    const posts = createPosts(calls);
+    expect(posts).toHaveLength(1);
+    const body = posts[0].body as { display_name?: string };
+    expect(body.display_name).toBe('سارة');
+  });
+
   test('a 409 username_taken keeps the form and shows an inline error', async () => {
     stubFetch({
       users: [],
@@ -305,6 +327,23 @@ describe('Admin — last-admin / self guards (§3.1)', () => {
     expect(deactivate).toBeEnabled();
     expect(deactivate).not.toHaveAttribute('aria-disabled', 'true');
     expect(within(row2).queryByText(t('admin.guard.lastAdmin'))).toBeNull();
+  });
+});
+
+describe('Admin — display name (Task 3)', () => {
+  test('the users table shows the display-name column value and a placeholder when null', async () => {
+    const users = [
+      mkUser({ id: 2, username: 'ahmed', display_name: 'أحمد الموظف' }),
+      mkUser({ id: 3, username: 'noname', display_name: null }),
+    ];
+    stubFetch({ users });
+    await renderAdmin({ users });
+
+    expect(await screen.findByText(t('admin.users.col.name'))).toBeInTheDocument();
+    expect(screen.getByText('أحمد الموظف')).toBeInTheDocument();
+
+    const noNameRow = await screen.findByTestId('user-row-3');
+    expect(within(noNameRow).getByText(t('admin.users.noName'))).toBeInTheDocument();
   });
 });
 

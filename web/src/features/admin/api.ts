@@ -33,6 +33,8 @@ export interface CreateUserVars {
   role: 'admin' | 'user';
   /** Omitted/null => unlimited quota. */
   quotaBytes?: number | null;
+  /** Free-text label; omit for none. */
+  displayName?: string | null;
 }
 
 export function createUser(vars: CreateUserVars): Promise<AdminUserDto> {
@@ -44,6 +46,9 @@ export function createUser(vars: CreateUserVars): Promise<AdminUserDto> {
   if (vars.quotaBytes !== undefined && vars.quotaBytes !== null) {
     body.quota_bytes = vars.quotaBytes;
   }
+  if (vars.displayName !== undefined) {
+    body.display_name = vars.displayName;
+  }
   return apiPost<AdminUserDto>('/admin/users', body);
 }
 
@@ -53,6 +58,8 @@ export interface PatchUserVars {
   role?: 'admin' | 'user';
   /** number sets a quota; null = unlimited; omit = unchanged. */
   quotaBytes?: number | null;
+  /** string sets a label; null clears it; omit = unchanged. */
+  displayName?: string | null;
 }
 
 export function patchUser(vars: PatchUserVars): Promise<AdminUserDto> {
@@ -60,6 +67,7 @@ export function patchUser(vars: PatchUserVars): Promise<AdminUserDto> {
   if (vars.isActive !== undefined) body.is_active = vars.isActive;
   if (vars.role !== undefined) body.role = vars.role;
   if (vars.quotaBytes !== undefined) body.quota_bytes = vars.quotaBytes;
+  if (vars.displayName !== undefined) body.display_name = vars.displayName;
   return apiPatch<AdminUserDto>(`/admin/users/${vars.id}`, body);
 }
 

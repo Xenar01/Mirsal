@@ -19,6 +19,7 @@ export interface AdminUserDto {
   used_bytes: number;
   must_change_password: 0 | 1;
   created_at: number;
+  display_name: string | null;
 }
 
 /**
