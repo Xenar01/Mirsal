@@ -60,6 +60,8 @@ interface UserRow {
   role: string;
   is_active: number;
   must_change_password: number;
+  quota_bytes: number | null;
+  used_bytes: number;
 }
 
 interface PublicUser {
@@ -68,6 +70,8 @@ interface PublicUser {
   role: string;
   mustChangePassword: boolean;
   rootNodeId: number;
+  quotaBytes: number | null;
+  usedBytes: number;
 }
 
 /**
@@ -79,7 +83,7 @@ interface PublicUser {
  * from.
  */
 function toPublicUser(
-  row: Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password'>,
+  row: Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password' | 'quota_bytes' | 'used_bytes'>,
   rootNodeId: number
 ): PublicUser {
   return {
@@ -88,6 +92,8 @@ function toPublicUser(
     role: row.role,
     mustChangePassword: !!row.must_change_password,
     rootNodeId,
+    quotaBytes: row.quota_bytes,
+    usedBytes: row.used_bytes,
   };
 }
 
@@ -180,7 +186,7 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
 
       const row = db
         .prepare(
-          `SELECT id, username, password_hash, role, is_active, must_change_password
+          `SELECT id, username, password_hash, role, is_active, must_change_password, quota_bytes, used_bytes
            FROM users WHERE username = ?`
         )
         .get(username) as UserRow | undefined;
@@ -230,8 +236,10 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
     // Fresh read (not the session's cached snapshot) so role/flag changes
     // since login are reflected immediately.
     const row = db
-      .prepare(`SELECT id, username, role, must_change_password FROM users WHERE id = ?`)
-      .get(req.user!.id) as Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password'> | undefined;
+      .prepare(`SELECT id, username, role, must_change_password, quota_bytes, used_bytes FROM users WHERE id = ?`)
+      .get(req.user!.id) as
+      | Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password' | 'quota_bytes' | 'used_bytes'>
+      | undefined;
 
     if (!row) {
       reply.code(401).send();

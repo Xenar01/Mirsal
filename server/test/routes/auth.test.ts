@@ -521,3 +521,29 @@ test('GET /me: returns the same rootNodeId as login for the same user', async ()
   const meBody = me.json() as { rootNodeId: number };
   expect(meBody.rootNodeId).toBe(loginRoot);
 });
+
+test('login + /me expose quotaBytes and usedBytes (a set quota is visible to the user)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('quotaed', 'pw', { role: 'user' });
+  db!.prepare('UPDATE users SET quota_bytes = 1000, used_bytes = 250 WHERE id = ?').run(uid);
+
+  const res = await login(built, 'quotaed', 'pw');
+  expect(res.statusCode).toBe(200);
+  const user = (res.body as { user: { quotaBytes: number | null; usedBytes: number } }).user;
+  expect(user.quotaBytes).toBe(1000);
+  expect(user.usedBytes).toBe(250);
+
+  const me = await built.inject({
+    method: 'GET',
+    url: '/api/auth/me',
+    cookies: { mirsal_session: res.session! },
+  });
+  expect(me.json()).toMatchObject({ quotaBytes: 1000, usedBytes: 250 });
+});
+
+test('login: a user with no quota reports quotaBytes null', async () => {
+  const built = await makeApp();
+  await seedUser('nolimit', 'pw', { role: 'user' });
+  const res = await login(built, 'nolimit', 'pw');
+  expect((res.body as { user: { quotaBytes: number | null } }).user.quotaBytes).toBeNull();
+});
