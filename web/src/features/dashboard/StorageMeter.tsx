@@ -1,27 +1,29 @@
 import { useTranslation } from 'react-i18next';
-import { useAuth } from '../auth/auth-context';
+import { useMe } from '../auth/queries';
 import { useTrash, sumSizes } from './queries';
 import { formatBytes } from './format';
 
 /*
  * Storage meter (§3.2). "Used" + the quota bar come from the authoritative,
  * server-maintained figures on the session user (`GET /api/auth/me` returns
- * quotaBytes/usedBytes). used_bytes already INCLUDES trashed-but-not-purged
- * bytes, so the trash figure is shown as "of which in trash" (a portion of
- * used, never an additive second total) with a hint that emptying the trash
- * frees the space. When quotaBytes is null the user has no quota and the bar is
- * omitted.
+ * quotaBytes/usedBytes), read via the live `['auth','me']` query (`useMe`) so
+ * the meter refreshes on tab-focus and after uploads/deletes WITHOUT a full
+ * page reload — the auth context alone only re-pulls /me at bootstrap.
+ * used_bytes already INCLUDES trashed-but-not-purged bytes, so the trash figure
+ * is shown as "of which in trash" (a portion of used, never an additive second
+ * total) with a hint that emptying the trash frees the space. When quotaBytes
+ * is null the user has no quota and the bar is omitted.
  *
  * Numbers are mono ledger data, bidi-isolated LTR (§4.3/§4.5).
  */
 export default function StorageMeter() {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { data: me } = useMe();
   const trashQuery = useTrash();
   const trashBytes = sumSizes(trashQuery.data);
 
-  const usedBytes = user?.usedBytes ?? 0;
-  const quotaBytes = user?.quotaBytes ?? null;
+  const usedBytes = me?.usedBytes ?? 0;
+  const quotaBytes = me?.quotaBytes ?? null;
   const hasQuota = quotaBytes !== null;
   const fraction = hasQuota ? (quotaBytes > 0 ? Math.min(1, usedBytes / quotaBytes) : 1) : 0;
   const over = hasQuota && usedBytes > quotaBytes;
