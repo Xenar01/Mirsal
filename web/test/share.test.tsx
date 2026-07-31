@@ -98,6 +98,16 @@ function renderModal(node: NodeDto) {
   );
 }
 
+/**
+ * The wizard's published step keeps the management sections (password / expiry
+ * / download-limit) behind an explicit "Edit settings" toggle. Reveal them.
+ */
+async function openEditSettings() {
+  fireEvent.click(
+    await screen.findByRole('button', { name: i18n.t('share.wizard.editSettings') })
+  );
+}
+
 function renderAutoDelete(node: NodeDto) {
   const client = makeQueryClient();
   return render(
@@ -166,6 +176,7 @@ describe('ShareModal — expiry picker (§3.3 / §4.5)', () => {
   test('a PAST Damascus datetime shows an inline error and does NOT PATCH the share', async () => {
     const fetchMock = stubFetch({ '/api/shares': [mkShare()], '/api/auth/me': USER });
     renderModal(mkNode());
+    await openEditSettings();
 
     const input = (await screen.findByLabelText(
       i18n.t('share.expiry.label')
@@ -188,6 +199,7 @@ describe('ShareModal — expiry picker (§3.3 / §4.5)', () => {
       '/api/auth/me': USER,
     });
     renderModal(mkNode());
+    await openEditSettings();
 
     const input = (await screen.findByLabelText(
       i18n.t('share.expiry.label')
@@ -383,6 +395,7 @@ describe('ShareModal — download limit (creator console, §4 / §9)', () => {
       '/api/auth/me': USER,
     });
     renderModal(mkNode()); // file node
+    await openEditSettings();
 
     expect(await screen.findByText(i18n.t('share.downloadLimit.unlimited'))).toBeInTheDocument();
 
@@ -410,6 +423,7 @@ describe('ShareModal — download limit (creator console, §4 / §9)', () => {
   test('the destructive delete warning shows by default and disappears when Stop is chosen', async () => {
     stubFetch({ '/api/shares': [mkShare()], '/api/auth/me': USER });
     renderModal(mkNode());
+    await openEditSettings();
 
     // on_exhaust defaults to 'delete' ⇒ the trash-after-last-download warning is visible up front.
     expect(
@@ -424,8 +438,9 @@ describe('ShareModal — download limit (creator console, §4 / §9)', () => {
   test('the section is ABSENT for a folder share (v1 = single-file shares only)', async () => {
     stubFetch({ '/api/shares': [mkShare()], '/api/auth/me': USER });
     renderModal(mkNode({ kind: 'folder' }));
+    await openEditSettings();
 
-    // The modal has loaded (the expiry section always renders) …
+    // The modal has loaded (the expiry section renders under Edit settings) …
     expect(await screen.findByText(i18n.t('share.expiry.heading'))).toBeInTheDocument();
     // … but the per-file download-limit console is not offered for a folder.
     expect(screen.queryByText(i18n.t('share.downloadLimit.heading'))).toBeNull();

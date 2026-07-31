@@ -1046,6 +1046,45 @@ test('POST /download on a limited share (limit=2) streams the file and counts it
   expect((await built.inject({ method: 'GET', url: `/api/public/${share.token}` })).statusCode).toBe(200);
 }, 30_000);
 
+test('POST /download accepts a browser form submit (application/x-www-form-urlencoded), not 415', async () => {
+  // Regression guard: the recipient page triggers the download with a
+  // <form method="post"> submit, which sends `application/x-www-form-urlencoded`
+  // (empty body — the token is in the URL). Fastify has no default parser for
+  // that media type, so it 415'd the request before the handler ran.
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const content = Buffer.from('form-post-download-bytes');
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'f.txt', data: content });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+
+  const res = await built.inject({
+    method: 'POST',
+    url: `/api/public/${share.token}/download`,
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    payload: '',
+  });
+
+  expect(res.statusCode).not.toBe(415);
+  expect(res.statusCode).toBe(200);
+  expect(res.rawPayload.equals(content)).toBe(true);
+});
+
+test('public responses carry Cache-Control: no-store (share state is never cached)', async () => {
+  // Without this, a recipient's browser can cache the meta and keep showing a
+  // stale view — e.g. a stopped-then-restarted link stays "off" on reload.
+  const built = await makeApp();
+  const uid = await seedUser('cara', 'pw');
+  const { session, csrf } = await login(built, 'cara', 'pw');
+  const rootId = rootIdFor(uid);
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'c.txt', data: Buffer.from('x') });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+  const res = await built.inject({ method: 'GET', url: `/api/public/${share.token}` });
+  expect(res.statusCode).toBe(200);
+  expect(res.headers['cache-control']).toBe('no-store');
+});
+
 test('two concurrent POST /download on limit=1 -> statuses {200, 410}; count ends at 1', async () => {
   const built = await makeApp();
   const port = await listenOn(built);

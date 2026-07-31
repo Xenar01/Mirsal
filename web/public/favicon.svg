@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" role="img" aria-label="مِرسال">
+  <!-- Mirsal brass seal (ختم), mirroring the in-app Seal: brass body, brass-ring
+       outline, ink Kufic "م" monogram. Self-contained colours read on both a
+       light and a dark browser tab bar. -->
+  <circle cx="16" cy="16" r="14.5" fill="#C0913C" stroke="#7A5A20" stroke-width="2.5"/>
+  <text x="16" y="16" text-anchor="middle" dominant-baseline="central"
+        font-family="'Cairo','Segoe UI',system-ui,-apple-system,sans-serif"
+        font-weight="700" font-size="18" fill="#0F1C2E">م</text>
+</svg>

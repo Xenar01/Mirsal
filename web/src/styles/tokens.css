@@ -54,9 +54,11 @@
   --type-2xl: 2.25rem;
   --type-3xl: 3rem;
 
-  /* Font families (§4.2) — self-hosted via @fontsource, see styles/fonts.ts */
-  --font-display: "Reem Kufi", system-ui, sans-serif;
-  --font-body: "IBM Plex Sans Arabic", system-ui, sans-serif;
+  /* Font families (§4.2) — self-hosted via @fontsource, see styles/fonts.ts.
+     Cairo is the primary Arabic face for both display and body (the common,
+     familiar Arabic-web look); IBM Plex Mono stays for data/tokens. */
+  --font-display: "Cairo", system-ui, sans-serif;
+  --font-body: "Cairo", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
 }
 

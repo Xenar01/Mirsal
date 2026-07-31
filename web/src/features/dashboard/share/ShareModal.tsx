@@ -30,66 +30,218 @@ export default function ShareModal({ node, onClose }: { node: NodeDto; onClose: 
   const { t } = useTranslation();
   const { data, isPending, isError } = useShares();
   const share = Array.isArray(data) ? data.find((s) => s.node_id === node.id) ?? null : null;
-  // The stamp is the dispatch MOMENT — it fires only when a share is created in
+  // The stamp is the dispatch MOMENT — it fires only when a link is PUBLISHED in
   // this session, never on every reopen of an already-shared node (§4.4).
-  const [justCreated, setJustCreated] = useState(false);
+  const [justPublished, setJustPublished] = useState(false);
+
+  let body;
+  if (share) {
+    // Step 2 — the published link.
+    body = <PublishedStep share={share} stamp={justPublished} nodeKind={node.kind} />;
+  } else if (justPublished || isPending) {
+    // Just published (awaiting the shares refetch) or the first load — hold a
+    // neutral state so the configure form doesn't flash back and reset.
+    body = <p className="font-body text-sm text-ink-2">{t('share.loading')}</p>;
+  } else if (isError) {
+    // A failed GET /api/shares is NOT proof the node is unshared — surface the
+    // error rather than offering "publish" and risking a duplicate.
+    body = (
+      <p role="alert" className="font-body text-sm text-clay">
+        {t('share.error')}
+      </p>
+    );
+  } else {
+    // Step 1 — configure the link before it exists.
+    body = (
+      <ConfigureStep
+        nodeId={node.id}
+        nodeKind={node.kind}
+        onPublished={() => setJustPublished(true)}
+      />
+    );
+  }
 
   return (
     <Modal open onClose={onClose} title={t('share.title')}>
       <div className="flex flex-col gap-4">
         <p className="font-body text-sm text-ink">{node.name}</p>
-        {isPending && !share ? (
-          <p className="font-body text-sm text-ink-2">{t('share.loading')}</p>
-        ) : share ? (
-          <ShareManage share={share} stamp={justCreated} nodeKind={node.kind} />
-        ) : isError ? (
-          // A failed GET /api/shares is NOT proof the node is unshared — surface
-          // the error rather than offering "create" and risking a duplicate.
-          <p role="alert" className="font-body text-sm text-clay">
-            {t('share.error')}
-          </p>
-        ) : (
-          <CreateShare nodeId={node.id} onCreated={() => setJustCreated(true)} />
-        )}
+        {body}
       </div>
     </Modal>
   );
 }
 
-/* ── Not yet shared: a single create action + the stamp moment ─────────── */
+/* ── Step 1 — configure the link, THEN publish it ──────────────────────── */
 
-function CreateShare({ nodeId, onCreated }: { nodeId: number; onCreated: () => void }) {
+function ConfigureStep({
+  nodeId,
+  nodeKind,
+  onPublished,
+}: {
+  nodeId: number;
+  nodeKind: NodeDto['kind'];
+  onPublished: () => void;
+}) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const create = useCreateShare();
+  const patch = usePatchShare();
+  const isFile = nodeKind === 'file';
+  const pwId = useId();
+  const expId = useId();
+  const limId = useId();
+  const [password, setPassword] = useState('');
+  const [expiry, setExpiry] = useState('');
+  const [limit, setLimit] = useState('');
+  const [mode, setMode] = useState<'delete' | 'stop'>('delete');
+  const [error, setError] = useState<string | null>(null);
+  const busy = create.isPending || patch.isPending;
 
-  function onCreate() {
-    create.mutate(
-      { nodeId },
-      {
-        onSuccess: () => {
-          onCreated();
-          toast({ kind: 'success', message: t('share.toast.created') });
-        },
-        onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
+  // Publish = create the link, then apply the collected config in one PATCH.
+  async function publish(event?: FormEvent) {
+    event?.preventDefault();
+    const cfg: {
+      password?: string;
+      expiresAt?: number;
+      downloadLimit?: number;
+      onExhaust?: 'delete' | 'stop';
+    } = {};
+    if (password.trim()) cfg.password = password.trim();
+    if (expiry) {
+      const utcMs = damascusInputToUtcMs(expiry);
+      if (utcMs === null) {
+        setError(t('share.expiry.invalid'));
+        return;
       }
-    );
+      if (utcMs <= Date.now()) {
+        setError(t('share.expiry.past'));
+        return;
+      }
+      cfg.expiresAt = utcMs;
+    }
+    if (isFile && limit.trim()) {
+      const n = Number(limit);
+      if (!Number.isInteger(n) || n < 1) {
+        setError(t('share.downloadLimit.invalid'));
+        return;
+      }
+      cfg.downloadLimit = n;
+      cfg.onExhaust = mode;
+    }
+    setError(null);
+    try {
+      const created = await create.mutateAsync({ nodeId });
+      if (Object.keys(cfg).length > 0) {
+        await patch.mutateAsync({ id: created.id, ...cfg });
+      }
+      toast({ kind: 'success', message: t('share.toast.created') });
+      onPublished();
+    } catch {
+      toast({ kind: 'error', message: t('share.toast.error') });
+    }
   }
 
   return (
-    <div className="flex flex-col items-center gap-3 text-center">
-      <Seal size="dispatch" />
-      <p className="font-body text-sm text-ink-2">{t('share.notSharedIntro')}</p>
-      <Button variant="primary" onClick={onCreate} disabled={create.isPending}>
-        {t('share.create')}
+    <form onSubmit={publish} className="flex flex-col gap-5">
+      <div className="flex flex-col items-center gap-2 text-center">
+        <Seal size="dispatch" />
+        <p className="font-body text-sm text-ink-2">{t('share.wizard.configureIntro')}</p>
+      </div>
+
+      <section className="flex flex-col gap-2 border-t border-line pt-4">
+        <h3 className="font-display text-sm text-ink">{t('share.password.heading')}</h3>
+        <label htmlFor={pwId} className="font-body text-sm text-ink-2">
+          {t('share.password.label')}
+        </label>
+        <input
+          id={pwId}
+          type="password"
+          autoComplete="new-password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          className="w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-body text-sm text-ink"
+        />
+        <p className="font-body text-xs text-ink-2">{t('share.wizard.optional')}</p>
+      </section>
+
+      <section className="flex flex-col gap-2 border-t border-line pt-4">
+        <h3 className="font-display text-sm text-ink">{t('share.expiry.heading')}</h3>
+        <label htmlFor={expId} className="font-body text-sm text-ink-2">
+          {t('share.expiry.label')}
+        </label>
+        <input
+          id={expId}
+          type="datetime-local"
+          value={expiry}
+          onChange={(e) => setExpiry(e.target.value)}
+          className="w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-mono text-sm text-ink"
+        />
+        <p className="font-body text-xs text-ink-2">{t('share.wizard.optional')}</p>
+      </section>
+
+      {isFile && (
+        <section className="flex flex-col gap-2 border-t border-line pt-4">
+          <h3 className="font-display text-sm text-ink">{t('share.downloadLimit.heading')}</h3>
+          <label htmlFor={limId} className="font-body text-sm text-ink-2">
+            {t('share.downloadLimit.label')}
+          </label>
+          <input
+            id={limId}
+            type="number"
+            min={1}
+            inputMode="numeric"
+            value={limit}
+            onChange={(e) => setLimit(e.target.value)}
+            className="w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-mono text-sm text-ink"
+          />
+          <fieldset className="flex flex-col gap-1">
+            <legend className="font-body text-sm text-ink-2">
+              {t('share.downloadLimit.onExhaust')}
+            </legend>
+            <label className="flex items-center gap-2 font-body text-sm text-ink">
+              <input
+                type="radio"
+                name="onExhaust"
+                checked={mode === 'delete'}
+                onChange={() => setMode('delete')}
+              />
+              {t('share.downloadLimit.modeDelete')}
+            </label>
+            <label className="flex items-center gap-2 font-body text-sm text-ink">
+              <input
+                type="radio"
+                name="onExhaust"
+                checked={mode === 'stop'}
+                onChange={() => setMode('stop')}
+              />
+              {t('share.downloadLimit.modeStop')}
+            </label>
+            {mode === 'delete' && (
+              <p role="note" className="font-body text-xs text-clay">
+                {t('share.downloadLimit.deleteWarning')}
+              </p>
+            )}
+          </fieldset>
+          <p className="font-body text-xs text-ink-2">{t('share.wizard.optional')}</p>
+        </section>
+      )}
+
+      {error !== null && (
+        <p role="alert" className="font-body text-sm text-clay">
+          {error}
+        </p>
+      )}
+
+      <Button variant="primary" type="submit" disabled={busy}>
+        {t('share.wizard.publish')}
       </Button>
-    </div>
+    </form>
   );
 }
 
-/* ── Shared: link, status, active toggle, password, expiry, revoke ─────── */
+/* ── Step 2 — the published link: copy, manage, edit, revoke ────────────── */
 
-function ShareManage({
+function PublishedStep({
   share,
   stamp,
   nodeKind,
@@ -101,6 +253,7 @@ function ShareManage({
   const { t } = useTranslation();
   const { toast } = useToast();
   const patch = usePatchShare();
+  const [editing, setEditing] = useState(false);
 
   function toggleActive() {
     const next = !share.is_active;
@@ -140,17 +293,18 @@ function ShareManage({
         <StatusChip status={share.status} />
       </div>
 
-      {/* Public link — mono, LTR bidi-isolated so it never scrambles (§4.3). */}
+      {/* Public link — mono, LTR bidi-isolated so it never scrambles (§4.3).
+          Copy is the primary action on the published step. */}
       <div className="flex flex-col gap-1">
         <span className="font-body text-sm text-ink-2">{t('share.linkLabel')}</span>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <bdi
             dir="ltr"
             className="min-w-0 grow overflow-x-auto rounded-lg border border-line bg-paper ps-2 pe-2 py-1 font-mono text-sm text-ink"
           >
             {share.url}
           </bdi>
-          <Button variant="secondary" onClick={copyLink}>
+          <Button variant="primary" onClick={copyLink}>
             <Copy size={16} />
             {t('share.copy')}
           </Button>
@@ -161,11 +315,25 @@ function ShareManage({
         <Button variant="secondary" onClick={toggleActive} disabled={patch.isPending}>
           {share.is_active ? t('share.stop') : t('share.start')}
         </Button>
+        <Button
+          variant="ghost"
+          onClick={() => setEditing((v) => !v)}
+          aria-expanded={editing}
+        >
+          {t('share.wizard.editSettings')}
+        </Button>
       </div>
 
-      <PasswordSection share={share} />
-      <ExpirySection share={share} />
-      <DownloadLimitSection share={share} nodeKind={nodeKind} />
+      {/* Settings live behind an explicit toggle so the published step stays
+          focused on the link + copy (the two-page wizard's second page). */}
+      {editing && (
+        <>
+          <PasswordSection share={share} />
+          <ExpirySection share={share} />
+          <DownloadLimitSection share={share} nodeKind={nodeKind} />
+        </>
+      )}
+
       <RevokeSection share={share} />
     </div>
   );

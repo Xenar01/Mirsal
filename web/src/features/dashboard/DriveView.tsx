@@ -283,6 +283,17 @@ function Register({
   );
 }
 
+/**
+ * File-row action controls. Compact bordered chips (not bare coloured text) so
+ * a row of actions reads as a toolbar of buttons — teal accent for the normal
+ * actions, clay text for the destructive Trash. A hairline border makes each
+ * read as a button at rest; hover tints to paper.
+ */
+const ROW_ACTION =
+  'inline-flex items-center rounded-md border border-line px-2.5 py-1 font-body text-xs text-teal transition-colors hover:bg-paper focus-visible:bg-paper';
+const ROW_ACTION_DANGER =
+  'inline-flex items-center rounded-md border border-line px-2.5 py-1 font-body text-xs text-clay transition-colors hover:bg-paper focus-visible:bg-paper';
+
 function NodeRow({
   node,
   share,
@@ -350,25 +361,25 @@ function NodeRow({
         )}
       </td>
       <td className="ps-3 pe-3 py-2">
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
           {!isFolder && (
-            <a href={downloadUrl(node.id)} className="text-teal">
+            <a href={downloadUrl(node.id)} className={ROW_ACTION}>
               {t('dashboard.action.download')}
             </a>
           )}
-          <button type="button" onClick={() => onShare(node)} className="text-teal">
+          <button type="button" onClick={() => onShare(node)} className={ROW_ACTION}>
             {t('dashboard.action.share')}
           </button>
-          <button type="button" onClick={() => onAutoDelete(node)} className="text-teal">
+          <button type="button" onClick={() => onAutoDelete(node)} className={ROW_ACTION}>
             {t('dashboard.action.autoDelete')}
           </button>
-          <button type="button" onClick={() => onRename(node)} className="text-teal">
+          <button type="button" onClick={() => onRename(node)} className={ROW_ACTION}>
             {t('dashboard.action.rename')}
           </button>
-          <button type="button" onClick={() => onMove(node)} className="text-teal">
+          <button type="button" onClick={() => onMove(node)} className={ROW_ACTION}>
             {t('dashboard.action.move')}
           </button>
-          <button type="button" onClick={() => onTrash(node)} className="text-clay">
+          <button type="button" onClick={() => onTrash(node)} className={ROW_ACTION_DANGER}>
             {t('dashboard.action.trash')}
           </button>
         </div>

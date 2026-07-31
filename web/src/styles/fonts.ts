@@ -6,14 +6,13 @@
  * imported.
  */
 
-// Reem Kufi — display/brand (§4.2: weights 500, 700)
-import '@fontsource/reem-kufi/500.css';
-import '@fontsource/reem-kufi/700.css';
-
-// IBM Plex Sans Arabic — body/UI, AR+Latin (§4.2: weights 400, 500, 600)
-import '@fontsource/ibm-plex-sans-arabic/400.css';
-import '@fontsource/ibm-plex-sans-arabic/500.css';
-import '@fontsource/ibm-plex-sans-arabic/600.css';
+// Cairo — the app's primary Arabic face for BOTH display/brand and body/UI
+// (AR + Latin), the familiar modern Arabic-web look. Weights: 400/500 body,
+// 600/700 headings, wordmark, and the brass Seal.
+import '@fontsource/cairo/400.css';
+import '@fontsource/cairo/500.css';
+import '@fontsource/cairo/600.css';
+import '@fontsource/cairo/700.css';
 
 // IBM Plex Mono — data/tokens, ASCII only (§4.2: weights 400, 500)
 import '@fontsource/ibm-plex-mono/400.css';

@@ -137,6 +137,12 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
   // leaks in a Referer header to an off-site link the recipient clicks.
   app.addHook('onSend', async (_req, reply, payload) => {
     reply.header('Referrer-Policy', 'no-referrer');
+    // Share state (live / stopped / expired / exhausted — and the meta itself)
+    // changes out from under a recipient, so their browser must never serve a
+    // cached view: a stopped-then-restarted link would otherwise stay "off" on
+    // reload, and an exhausted/expired one could keep appearing live. no-store
+    // forces every load to reflect the current server state.
+    reply.header('Cache-Control', 'no-store');
     return payload;
   });
 
@@ -447,6 +453,19 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
       hook: 'preHandler',
       keyGenerator: (req) => (req.params as { token?: string }).token ?? '',
     });
+
+    // The recipient triggers the counted download with a <form method="post">
+    // submit (so a passive GET can't burn the cap). A browser posts that form as
+    // `application/x-www-form-urlencoded` with an empty body — but Fastify has no
+    // default parser for that media type and would reject it with 415 *before*
+    // the handler runs. The token is in the URL and the body is never read, so
+    // register a no-op parser (bounded, drained, ignored) for this download
+    // scope only. Any other content type still 415s as before.
+    scope.addContentTypeParser(
+      'application/x-www-form-urlencoded',
+      { parseAs: 'string', bodyLimit: 1024 },
+      (_req, _body, done) => done(null, undefined)
+    );
 
     scope.get('/api/public/:token/download', async (req, reply) => {
       const { token } = req.params as { token: string };
