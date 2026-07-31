@@ -5,6 +5,8 @@
     "framingFolder": "A folder was sent to you via Mirsal",
     "download": "Download",
     "downloadAll": "Download all as ZIP",
+    "limitOnce": "One-time download",
+    "limitN": "Up to {{count}} downloads",
     "notFound": "This link doesn't exist.",
     "stopped": "The sender turned this link off.",
     "expired": "This link expired on {{date}}.",

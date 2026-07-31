@@ -27,6 +27,7 @@ const liveFile = {
   size_bytes: 2048,
   isFolder: false,
   allow_download: true,
+  download_limit: null as number | null,
 };
 
 function renderPage() {
@@ -135,14 +136,21 @@ describe('SealedDispatch — public share page', () => {
     const { container } = renderPage();
     await screen.findByText('A file was sent to you via Mirsal');
 
-    const download = container.querySelector('a[data-variant="primary"]') as HTMLAnchorElement | null;
+    // Download is now a POST-form submit button (a passive GET can't burn a capped
+    // share) — but it still wears the exact §4.1 primary recipe.
+    const download = container.querySelector('button[data-variant="primary"]') as HTMLButtonElement | null;
     expect(download).not.toBeNull();
-    // Same-origin anchor navigation (cookie rides along; browser handles the file).
-    expect(download).toHaveAttribute('href', `/api/public/${TOKEN}/download`);
+    expect(download).toHaveAttribute('type', 'submit');
+    // The submit posts to the counted download endpoint; the unlock cookie rides along.
+    const form = download!.closest('form');
+    expect(form).toHaveAttribute('method', 'post');
+    expect(form).toHaveAttribute('action', `/api/public/${TOKEN}/download`);
     // §4.1 contrast contract: brass FILL + --brass-ink label (never white-on-brass / brass-as-text).
     expect(download!.className).toContain('bg-brass');
     expect(download!.className).toContain('text-brass-ink');
     expect(download!.textContent).toContain('Download');
+    // No bare GET download anchor remains on a file share.
+    expect(container.querySelector('a[data-variant="primary"]')).toBeNull();
   });
 
   test('password gate: pre-unlock reveals no name/size; a wrong password shows attempts-remaining from the header, then a correct one unlocks and re-fetches', async () => {
@@ -185,5 +193,64 @@ describe('SealedDispatch — public share page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Unlock' }));
     expect(await screen.findByText('A file was sent to you via Mirsal')).toBeInTheDocument();
     expect(screen.getByText('secret.txt')).toBeInTheDocument();
+  });
+
+  test('a limited file shows the STATIC one-time / up-to-N label; an unlimited one shows none', async () => {
+    setNavigatorLanguage('en-US');
+
+    // download_limit === 1 → the "one-time download" copy.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: 1 }))
+    );
+    const once = renderPage();
+    expect(await screen.findByText('One-time download')).toBeInTheDocument();
+    once.unmount();
+    vi.unstubAllGlobals();
+
+    // download_limit === 3 → the "up to 3 downloads" copy (never the one-time copy).
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: 3 }))
+    );
+    const many = renderPage();
+    expect(await screen.findByText('Up to 3 downloads')).toBeInTheDocument();
+    expect(screen.queryByText('One-time download')).not.toBeInTheDocument();
+    many.unmount();
+    vi.unstubAllGlobals();
+
+    // download_limit === null (unlimited) → no static limit label at all. It is a
+    // STATIC config label, never a live remaining-count (no download oracle).
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: null }))
+    );
+    renderPage();
+    await screen.findByText('A file was sent to you via Mirsal');
+    expect(screen.queryByText('One-time download')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Up to \d+ downloads/)).not.toBeInTheDocument();
+  });
+
+  test('the download control POSTs to the counted /download endpoint (passive GETs cannot burn the cap)', async () => {
+    setNavigatorLanguage('en-US');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: 1 }))
+    );
+
+    const { container } = renderPage();
+    await screen.findByText('A file was sent to you via Mirsal');
+
+    // The control is a POST <form> pointed at the counted download endpoint —
+    // a bare GET (unfurler / scanner / prefetch) must not be able to trigger it.
+    const form = container.querySelector('form') as HTMLFormElement | null;
+    expect(form).not.toBeNull();
+    expect(form!.getAttribute('method')).toBe('post');
+    expect(form!.getAttribute('action')).toBe(`/api/public/${TOKEN}/download`);
+    // The submit lives inside that form; no GET download anchor remains.
+    const submit = form!.querySelector('button[type="submit"]') as HTMLButtonElement | null;
+    expect(submit).not.toBeNull();
+    expect(submit!.textContent).toContain('Download');
+    expect(container.querySelector('a[data-variant="primary"]')).toBeNull();
   });
 });
