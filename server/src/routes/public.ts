@@ -270,9 +270,14 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
       size_bytes: node.size_bytes,
       isFolder: node.kind === 'folder',
       allow_download: !!share.allow_download,
-      // Static config (not a live count) — drives the recipient's
-      // "one-time / up to N" label. `null` for an unlimited share.
+      // The per-download cap (null = unlimited) and how many downloads have
+      // completed. Together they drive the recipient's live "N of M — K
+      // remaining" counter. NOTE: exposing the live count makes it a
+      // delivery-confirmation signal (a recipient can tell others downloaded) —
+      // consciously accepted here because the owner wants the counter visible on
+      // this internal tool (supersedes the original static-label anti-oracle stance).
       download_limit: share.download_limit,
+      download_count: share.download_limit == null ? 0 : share.download_count,
     });
   });
 

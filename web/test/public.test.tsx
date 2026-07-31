@@ -28,6 +28,7 @@ const liveFile = {
   isFolder: false,
   allow_download: true,
   download_limit: null as number | null,
+  download_count: 0,
 };
 
 function renderPage() {
@@ -195,40 +196,37 @@ describe('SealedDispatch — public share page', () => {
     expect(screen.getByText('secret.txt')).toBeInTheDocument();
   });
 
-  test('a limited file shows the STATIC one-time / up-to-N label; an unlimited one shows none', async () => {
+  test('a limited file shows a live "N of M remaining" counter; an unlimited one shows none', async () => {
     setNavigatorLanguage('en-US');
 
-    // download_limit === 1 → the "one-time download" copy.
+    // limit 1, 0 used → 1 remaining.
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: 1 }))
+      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: 1, download_count: 0 }))
     );
-    const once = renderPage();
-    expect(await screen.findByText('One-time download')).toBeInTheDocument();
-    once.unmount();
+    const a = renderPage();
+    expect(await screen.findByText('1 of 1 downloads remaining')).toBeInTheDocument();
+    a.unmount();
     vi.unstubAllGlobals();
 
-    // download_limit === 3 → the "up to 3 downloads" copy (never the one-time copy).
+    // limit 3, 1 used → 2 remaining.
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: 3 }))
+      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: 3, download_count: 1 }))
     );
-    const many = renderPage();
-    expect(await screen.findByText('Up to 3 downloads')).toBeInTheDocument();
-    expect(screen.queryByText('One-time download')).not.toBeInTheDocument();
-    many.unmount();
+    const b = renderPage();
+    expect(await screen.findByText('2 of 3 downloads remaining')).toBeInTheDocument();
+    b.unmount();
     vi.unstubAllGlobals();
 
-    // download_limit === null (unlimited) → no static limit label at all. It is a
-    // STATIC config label, never a live remaining-count (no download oracle).
+    // unlimited → no counter at all.
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: null }))
+      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: null, download_count: 0 }))
     );
     renderPage();
     await screen.findByText('A file was sent to you via Mirsal');
-    expect(screen.queryByText('One-time download')).not.toBeInTheDocument();
-    expect(screen.queryByText(/Up to \d+ downloads/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/downloads remaining/)).not.toBeInTheDocument();
   });
 
   test('the download control POSTs to the counted /download endpoint (passive GETs cannot burn the cap)', async () => {

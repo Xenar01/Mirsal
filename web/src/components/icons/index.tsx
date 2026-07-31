@@ -66,6 +66,37 @@ export function FolderDossier(props: IconProps) {
   );
 }
 
+/** Chevron pointing toward the inline-start (RTL: left) — "open this folder".
+ *  Drawn pointing left; in an LTR context flip with `-scale-x-100` if needed. */
+export function ChevronEnter(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="m14 6-6 6 6 6" />
+    </IconBase>
+  );
+}
+
+/** Padlock — marks a password-protected share. */
+export function Lock(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <rect x="5" y="10.5" width="14" height="9.5" rx="2" />
+      <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+    </IconBase>
+  );
+}
+
+/** Downward tray arrow — marks a per-download cap / remaining downloads. */
+export function DownloadArrow(props: IconProps) {
+  return (
+    <IconBase {...props}>
+      <path d="M12 4v10" />
+      <path d="m8 10.5 4 4 4-4" />
+      <path d="M5 19.5h14" />
+    </IconBase>
+  );
+}
+
 /** Seal / send: a sealed envelope with a wax seal at the corner (= share). */
 export function SealSend(props: IconProps) {
   return (

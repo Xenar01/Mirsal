@@ -163,7 +163,7 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     expect(size.className).toMatch(/font-mono/);
   });
 
-  test('the status/stamp column shows the brass "shared" seal badge for a shared node, not its granular status (§4.6 / §4.4)', async () => {
+  test('the status column shows the GRANULAR share status + a quick copy-link for a shared node (§4.6 / §4.4)', async () => {
     const nodes: NodeDto[] = [
       {
         id: 6,
@@ -201,11 +201,14 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     renderDrive(['/']);
 
     const register = await screen.findByRole('table');
-    // The purpose-built brass "shared" variant carries the column.
-    expect(within(register).getByText(i18n.t('status.shared'))).toBeInTheDocument();
-    // The granular 'active' label is NOT rendered here (it belongs to the
-    // ShareModal + the Shared register, not the drive column).
-    expect(within(register).queryByText(i18n.t('status.active'))).toBeNull();
+    // The drive column now shows the GRANULAR share status at a glance (active
+    // here) + a quick copy-link, so the owner sees real state without opening
+    // the modal — not the generic "shared" seal.
+    expect(within(register).getByText(i18n.t('status.active'))).toBeInTheDocument();
+    expect(within(register).queryByText(i18n.t('status.shared'))).toBeNull();
+    expect(
+      within(register).getByRole('button', { name: i18n.t('share.copy') })
+    ).toBeInTheDocument();
   });
 
   test('an empty root shows the authored empty-state copy verbatim (§4.9)', async () => {

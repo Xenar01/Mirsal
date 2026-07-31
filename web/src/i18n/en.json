@@ -7,6 +7,7 @@
     "downloadAll": "Download all as ZIP",
     "limitOnce": "One-time download",
     "limitN": "Up to {{count}} downloads",
+    "remaining": "{{remaining}} of {{limit}} downloads remaining",
     "notFound": "This link doesn't exist.",
     "stopped": "The sender turned this link off.",
     "expired": "This link expired on {{date}}.",
