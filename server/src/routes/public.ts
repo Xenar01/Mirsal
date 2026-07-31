@@ -16,6 +16,8 @@ import { ForbiddenError, listPublic, resolveInSubtree } from '../shares/resolver
 import { listChildren, type Node } from '../nodes/tree.js';
 import type { Share } from '../shares/shares.js';
 import { buildContentDisposition } from '../util/content-disposition.js';
+import { createReservations } from '../shares/download-reservations.js';
+import { applyExhaustion } from '../shares/exhaustion.js';
 
 export interface PublicRouteDeps {
   db: Database.Database;
@@ -262,6 +264,9 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
       size_bytes: node.size_bytes,
       isFolder: node.kind === 'folder',
       allow_download: !!share.allow_download,
+      // Static config (not a live count) — drives the recipient's
+      // "one-time / up to N" label. `null` for an unlimited share.
+      download_limit: share.download_limit,
     });
   });
 
@@ -346,6 +351,29 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
     }
   });
 
+  // --- Per-file download-limit reservation state (counted POST /download) --
+  // Created EXACTLY ONCE per plugin registration (here, in the publicRoutes
+  // function body — the same lexical level as the `/zip` `activeZipCount`
+  // below), so every in-flight download of a share consults the SAME registry.
+  // The concurrency bound is only meaningful if it is shared across requests: a
+  // per-request map would see itself empty every time and silently defeat the
+  // cap. The POST route and its release backstop close over this instance.
+  const reservations = createReservations();
+  const reservationHolders = new WeakSet<FastifyRequest>();
+  const reservedShareId = new WeakMap<FastifyRequest, number>();
+  /**
+   * Releases a request's in-flight reservation AT MOST ONCE (idempotent via the
+   * WeakSet membership check), so wiring it to BOTH the raw-response `'close'`
+   * event (fires on normal finish AND mid-stream abort) and the `onResponse`
+   * backstop can never double-release. Mirrors the `/zip` `releaseZipSlot`.
+   */
+  function releaseReservation(req: FastifyRequest): void {
+    if (reservationHolders.delete(req)) {
+      const sid = reservedShareId.get(req);
+      if (sid !== undefined) reservations.release(sid);
+    }
+  }
+
   // --- GET download (rate-limited per-IP AND per-token) --------------------
   await app.register(async function downloadScope(scope) {
     await scope.register(fastifyRateLimit, {
@@ -366,6 +394,14 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
       const share = loadLiveShare(reply, token);
       if (!share) return;
       if (!requireUnlocked(req, reply, share)) return;
+
+      // A limited share must be downloaded via POST (an explicit human action);
+      // a passive GET can neither burn nor bypass the cap. Unlimited shares
+      // (`download_limit === null`) keep the streaming behavior unchanged.
+      if (share.download_limit !== null) {
+        reply.code(405).send({ error: 'method_not_allowed' });
+        return;
+      }
 
       if (!share.allow_download) {
         reply.code(403).send({ error: 'forbidden' });
@@ -404,6 +440,116 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
           return;
         }
         throw e;
+      }
+
+      reply.header('Content-Disposition', buildContentDisposition(node.name));
+      reply.header('X-Content-Type-Options', 'nosniff');
+      reply.header('Content-Type', node.mime_type ?? 'application/octet-stream');
+
+      logShareAccess(share.id, req);
+
+      return reply.send(stream);
+    });
+
+    // Release-only backstop. `onResponse` does NOT fire on a mid-stream abort
+    // (see `/zip`'s releaseZipSlot note), so the authoritative release +
+    // completion live in the per-request raw `'close'` handler below; this hook
+    // just idempotently frees a reservation on normal completions.
+    scope.addHook('onResponse', async (req) => releaseReservation(req));
+
+    // Counted download. A limited share is spent ONLY through this POST (an
+    // explicit human action), one completed transfer at a time, bounded by the
+    // in-memory reservation registry so `completed + in-flight` can never
+    // exceed the limit even under concurrent requests.
+    scope.post('/api/public/:token/download', async (req, reply) => {
+      const { token } = req.params as { token: string };
+      const share = loadLiveShare(reply, token);
+      if (!share) return;
+      if (!requireUnlocked(req, reply, share)) return;
+
+      if (!share.allow_download) {
+        reply.code(403).send({ error: 'forbidden' });
+        return;
+      }
+
+      const nodeParam = (req.query as { node?: string }).node ?? share.node_id;
+
+      let node: Node;
+      try {
+        node = resolveInSubtree(db, share, nodeParam);
+      } catch (e) {
+        if (e instanceof ForbiddenError) {
+          reply.code(403).send({ error: 'forbidden' });
+          return;
+        }
+        throw e;
+      }
+
+      if (node.kind !== 'file' || !node.storage_path) {
+        reply.code(403).send({ error: 'forbidden' });
+        return;
+      }
+
+      const stream = blobStore.readBlob(node.storage_path);
+      try {
+        await waitForOpen(stream);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+          reply.code(404).send({ error: 'not_found' });
+          return;
+        }
+        throw e;
+      }
+
+      // --- Reserve (limited shares only). The DB read and `tryReserve` run
+      //     with NO await between them, so they are atomic under Node's single
+      //     thread: `completed + in-flight` can never exceed the limit. ---
+      if (share.download_limit !== null) {
+        const completed = (
+          db.prepare('SELECT download_count FROM shares WHERE id = @id').get({ id: share.id }) as {
+            download_count: number;
+          }
+        ).download_count;
+        if (!reservations.tryReserve(share.id, completed, share.download_limit)) {
+          stream.destroy();
+          // Byte-identical to a stopped share — never a "live-but-reserved" oracle.
+          reply.code(410).send({ error: 'gone', reason: 'stopped', expires_at: share.expires_at });
+          return;
+        }
+        reservationHolders.add(req);
+        reservedShareId.set(req, share.id);
+        // Wire the release + counted completion BEFORE anything fallible below.
+        // The raw `'close'` event fires on BOTH a normal finish AND a mid-stream
+        // abort; only a fully-flushed body (`writableFinished`) counts. The
+        // guarded UPDATE (`download_count < download_limit`) lets exactly ONE
+        // completion cross the threshold, so `applyExhaustion` fires at most
+        // once per share even under concurrency (and is idempotent regardless).
+        reply.raw.once('close', () => {
+          try {
+            releaseReservation(req);
+            if (reply.raw.writableFinished) {
+              const upd = db
+                .prepare(
+                  `UPDATE shares SET download_count = download_count + 1
+                   WHERE id = @id AND download_limit IS NOT NULL AND download_count < download_limit
+                   RETURNING id, owner_id, node_id, on_exhaust, download_limit, download_count`
+                )
+                .get({ id: share.id }) as
+                | {
+                    id: number;
+                    owner_id: number;
+                    node_id: number;
+                    on_exhaust: 'stop' | 'delete';
+                    download_limit: number;
+                    download_count: number;
+                  }
+                | undefined;
+              if (upd && upd.download_count === upd.download_limit) applyExhaustion(db, upd, now);
+            }
+          } catch (err) {
+            req.log.error({ err }, 'download completion handler failed');
+          }
+        });
       }
 
       reply.header('Content-Disposition', buildContentDisposition(node.name));
