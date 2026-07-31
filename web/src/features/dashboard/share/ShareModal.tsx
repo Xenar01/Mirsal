@@ -26,6 +26,37 @@ import type { ShareDto } from './types';
  * An expired link is guided back to life by setting a new future expiry (or
  * clearing it) — merely restarting won't un-expire it (§3.3).
  */
+/* A compact 2-step progress header for the share wizard: Configure → Link. */
+function WizardSteps({ current }: { current: 1 | 2 }) {
+  const { t } = useTranslation();
+  const labels = [t('share.wizard.step1'), t('share.wizard.step2')];
+  return (
+    <ol className="flex items-center justify-center gap-2">
+      {labels.map((label, i) => {
+        const n = i + 1;
+        const active = n === current;
+        return (
+          <li key={n} className="flex items-center gap-2">
+            <span
+              aria-current={active ? 'step' : undefined}
+              className={[
+                'inline-flex h-6 w-6 items-center justify-center rounded-full font-body text-xs font-medium transition-colors',
+                active ? 'bg-brass text-brass-ink' : 'border border-line bg-paper text-ink-2',
+              ].join(' ')}
+            >
+              {n}
+            </span>
+            <span className={['font-body text-xs', active ? 'text-ink' : 'text-ink-2'].join(' ')}>
+              {label}
+            </span>
+            {n === 1 && <span aria-hidden="true" className="mx-1 h-px w-8 bg-line" />}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 export default function ShareModal({ node, onClose }: { node: NodeDto; onClose: () => void }) {
   const { t } = useTranslation();
   const { data, isPending, isError } = useShares();
@@ -143,6 +174,7 @@ function ConfigureStep({
 
   return (
     <form onSubmit={publish} className="flex flex-col gap-5">
+      <WizardSteps current={1} />
       <div className="flex flex-col items-center gap-2 text-center">
         <Seal size="dispatch" />
         <p className="font-body text-sm text-ink-2">{t('share.wizard.configureIntro')}</p>
@@ -232,9 +264,13 @@ function ConfigureStep({
         </p>
       )}
 
-      <Button variant="primary" type="submit" disabled={busy}>
-        {t('share.wizard.publish')}
-      </Button>
+      {/* Sticky action bar — Publish stays pinned to the modal's bottom edge so
+          it's reachable without scrolling, however long the config form gets. */}
+      <div className="sticky bottom-0 -mx-6 -mb-5 mt-1 border-t border-line bg-surface px-6 pb-5 pt-3">
+        <Button variant="primary" type="submit" disabled={busy} className="w-full">
+          {t('share.wizard.publish')}
+        </Button>
+      </div>
     </form>
   );
 }
@@ -288,6 +324,7 @@ function PublishedStep({
 
   return (
     <div className="flex flex-col gap-5">
+      <WizardSteps current={2} />
       <div className="flex flex-col items-center gap-2">
         <Seal size="dispatch" stamp={stamp} />
         <StatusChip status={share.status} />
