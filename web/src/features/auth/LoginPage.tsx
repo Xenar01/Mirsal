@@ -3,12 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from './auth-context';
 import { ApiError } from '../../lib/api';
+import AuthCard from './AuthCard';
+import Button from '../../components/Button';
 
 /**
  * Sign-in form. Client-validates that both fields are non-empty (no network
- * call otherwise), then delegates to `useAuth().login`. Minimal markup —
- * Phase J styles it; labels are tied to inputs and the focus ring comes from
- * I1's base styles.
+ * call otherwise), then delegates to `useAuth().login`. Presented in the
+ * sealed-dispatch AuthCard; labels are tied to inputs and the focus ring comes
+ * from the global :focus-visible base style.
  */
 export default function LoginPage() {
   const { t } = useTranslation();
@@ -44,35 +46,48 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="min-h-dvh bg-paper text-ink">
-      <h1 className="font-display">{t('login.title')}</h1>
-      <form onSubmit={onSubmit} noValidate>
-        <label htmlFor="login-username">{t('login.username')}</label>
-        <input
-          id="login-username"
-          name="username"
-          type="text"
-          autoComplete="username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-        />
+    <AuthCard title={t('login.title')}>
+      <form onSubmit={onSubmit} noValidate className="flex w-full flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="login-username" className="font-body text-sm text-ink-2">
+            {t('login.username')}
+          </label>
+          <input
+            id="login-username"
+            name="username"
+            type="text"
+            autoComplete="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            className="w-full rounded-lg border border-line bg-paper px-3 py-2 font-body text-sm text-ink"
+          />
+        </div>
 
-        <label htmlFor="login-password">{t('login.password')}</label>
-        <input
-          id="login-password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="login-password" className="font-body text-sm text-ink-2">
+            {t('login.password')}
+          </label>
+          <input
+            id="login-password"
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            className="w-full rounded-lg border border-line bg-paper px-3 py-2 font-body text-sm text-ink"
+          />
+        </div>
 
-        {error !== null && <p role="alert">{error}</p>}
+        {error !== null && (
+          <p role="alert" className="font-body text-sm text-clay">
+            {error}
+          </p>
+        )}
 
-        <button type="submit" disabled={submitting}>
+        <Button type="submit" disabled={submitting} className="mt-1 w-full">
           {t('login.submit')}
-        </button>
+        </Button>
       </form>
-    </main>
+    </AuthCard>
   );
 }
