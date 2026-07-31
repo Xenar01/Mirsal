@@ -664,11 +664,11 @@ test('unlock cookie lifetime is enforced server-side, not only via the Max-Age a
   // `built.inject` replays whatever cookie value is given regardless of any
   // Max-Age attribute — a real browser would have already stopped sending
   // this cookie, but nothing here does that for us. Advance the server's own
-  // clock (independent of the cookie value) past the 1800s lifetime and
+  // clock (independent of the cookie value) past the 600s lifetime and
   // confirm the SAME cookie is now rejected — i.e. expiry is enforced by the
   // route reading its own signed issuedAt, not merely by trusting the client
   // to have honored Max-Age.
-  mockNow = NOW + 1800 * 1000 + 1;
+  mockNow = NOW + 600 * 1000 + 1;
   const expiredRes = await built.inject({
     method: 'GET',
     url: `/api/public/${share.token}`,
@@ -676,6 +676,29 @@ test('unlock cookie lifetime is enforced server-side, not only via the Max-Age a
   });
   expect(expiredRes.statusCode).toBe(401);
   expect(expiredRes.json()).toEqual({ needsPassword: true });
+});
+
+test('unlock cookie is a session cookie (no Max-Age / Expires) so it dies with the browser session (#11)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 's.txt', data: Buffer.from('S') });
+  const share = await createShare(built, session, csrf, { node_id: file.id, password: 'pw2' });
+
+  const unlockRes = await built.inject({
+    method: 'POST',
+    url: `/api/public/${share.token}/unlock`,
+    payload: { password: 'pw2' },
+  });
+  expect(unlockRes.statusCode).toBe(200);
+
+  const setCookie = unlockRes.headers['set-cookie'];
+  const raw = Array.isArray(setCookie) ? setCookie.join('\n') : String(setCookie);
+  const line = raw.split('\n').find((l) => l.startsWith('mirsal_unlock='));
+  expect(line).toBeDefined();
+  expect(line!.toLowerCase()).not.toContain('max-age');
+  expect(line!.toLowerCase()).not.toContain('expires');
 });
 
 test('public /zip is rate-limited (per-IP), bounding repeated full-subtree archiver runs', async () => {
