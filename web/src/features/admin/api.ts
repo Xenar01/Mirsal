@@ -21,6 +21,20 @@ export const MIN_PASSWORD_LEN = 8;
 /** Default page size for the audit log (server default + max 500). */
 export const AUDIT_PAGE_SIZE = 100;
 
+/**
+ * Client mirror of the server's user-target audit actions (admin.ts). Used only
+ * to decide whether an *unresolved* target id should show a "(deleted user)"
+ * hint vs. be rendered as a plain value. Server remains the source of truth.
+ */
+export const USER_TARGET_ACTIONS = new Set([
+  'user_create',
+  'user_update',
+  'user_delete',
+  'user_password_reset',
+  'user_nodes_view',
+  'user_clear_space',
+]);
+
 // --- Users -----------------------------------------------------------------
 
 export function listUsers(): Promise<AdminUserDto[]> {

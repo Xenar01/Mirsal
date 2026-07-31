@@ -407,4 +407,33 @@ describe('Admin — AuditLog (§3.1)', () => {
     // A null actor renders as the system label, not a blank.
     expect(screen.getByText(t('admin.audit.system'))).toBeInTheDocument();
   });
+
+  test('renders resolved actor and target names, not raw ids (Task 5)', async () => {
+    const audit = [
+      {
+        id: 1,
+        actor_id: 1,
+        action: 'user_create',
+        target: '2',
+        detail: null,
+        created_at: NOW,
+        actor_username: 'admin',
+        actor_display_name: null,
+        target_username: 'newbie',
+        target_display_name: 'المستخدم الجديد',
+      },
+    ];
+    stubFetch({ audit });
+    await renderAdmin({ audit });
+
+    fireEvent.click(await screen.findByRole('tab', { name: t('admin.tabs.audit') }));
+
+    // Scope to the audit table: the header also shows the logged-in
+    // username ("admin"), so an unscoped query would be ambiguous.
+    const table = await screen.findByRole('table');
+    expect(within(table).getByText('admin')).toBeInTheDocument();
+    expect(within(table).getByText('المستخدم الجديد')).toBeInTheDocument();
+    // The raw numeric target id must not appear once resolved.
+    expect(within(table).queryByText('2')).toBeNull();
+  });
 });

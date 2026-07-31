@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import Button from '../../components/Button';
 import { formatDate } from '../dashboard/format';
 import { useAudit } from './queries';
-import { AUDIT_PAGE_SIZE } from './api';
+import { AUDIT_PAGE_SIZE, USER_TARGET_ACTIONS } from './api';
 import type { AuditRowDto } from './types';
 
 /*
@@ -66,9 +66,13 @@ export default function AuditLog() {
                   <td className="ps-3 pe-3 py-2">
                     {entry.actor_id === null ? (
                       <span className="text-ink-2">{t('admin.audit.system')}</span>
+                    ) : entry.actor_display_name || entry.actor_username ? (
+                      <span className="font-body text-ink">
+                        {entry.actor_display_name || entry.actor_username}
+                      </span>
                     ) : (
                       <bdi dir="ltr" className="font-mono text-ink">
-                        {entry.actor_id}
+                        {`#${entry.actor_id}`}
                       </bdi>
                     )}
                   </td>
@@ -76,6 +80,14 @@ export default function AuditLog() {
                   <td className="ps-3 pe-3 py-2">
                     {entry.target === null ? (
                       <span className="text-ink-2">—</span>
+                    ) : entry.target_display_name || entry.target_username ? (
+                      <span className="font-body text-ink-2">
+                        {entry.target_display_name || entry.target_username}
+                      </span>
+                    ) : USER_TARGET_ACTIONS.has(entry.action) ? (
+                      <bdi dir="ltr" className="font-mono text-ink-2 break-all">
+                        {`#${entry.target} ${t('admin.audit.deleted')}`}
+                      </bdi>
                     ) : (
                       <bdi dir="ltr" className="font-mono text-ink-2 break-all">
                         {entry.target}

@@ -295,6 +295,7 @@
         "target": "الهدف"
       },
       "system": "النظام",
+      "deleted": "(محذوف)",
       "prev": "السابق",
       "next": "التالي",
       "page": "صفحة {{page}}",
@@ -307,6 +308,7 @@
         "user_delete": "حذف مستخدم",
         "user_password_reset": "إعادة تعيين كلمة مرور",
         "user_nodes_view": "استعراض بنية مستخدم",
+        "user_clear_space": "تفريغ مساحة مستخدم",
         "share_revoke": "إلغاء رابط مشاركة",
         "share_unlock_failure": "فشل فتح رابط",
         "upload": "رفع ملف",

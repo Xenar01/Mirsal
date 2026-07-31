@@ -50,6 +50,10 @@ export interface AuditRowDto {
   target: string | null;
   detail: string | null;
   created_at: number;
+  actor_username: string | null;
+  actor_display_name: string | null;
+  target_username: string | null;
+  target_display_name: string | null;
 }
 
 /** Coerces the server's raw 0/1 INTEGER flags to a boolean. */
