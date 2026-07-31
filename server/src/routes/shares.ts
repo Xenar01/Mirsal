@@ -36,7 +36,10 @@ interface ShareDto {
   expires_at: number | null;
   allow_download: boolean;
   created_at: number;
-  status: 'active' | 'stopped' | 'expired';
+  status: 'active' | 'stopped' | 'expired' | 'exhausted';
+  download_limit: number | null;
+  download_count: number;
+  on_exhaust: 'stop' | 'delete';
   url: string;
 }
 
@@ -51,6 +54,10 @@ function toShareDto(share: Share, publicBaseUrl: string, nowMs: number): ShareDt
     allow_download: !!share.allow_download,
     created_at: share.created_at,
     status: ownerStatus(share, nowMs),
+    download_limit: share.download_limit,
+    // Unlimited shares always report 0 (the stored count is meaningless when NULL).
+    download_count: share.download_limit == null ? 0 : share.download_count,
+    on_exhaust: share.on_exhaust,
     url: `${publicBaseUrl}/s/${share.token}`,
   };
 }
@@ -82,10 +89,19 @@ const patchShareSchema = z
     password: z.string().min(1).nullable().optional(),
     // Tri-state: absent = unchanged, null = never-expires, number = new deadline.
     expires_at: z.number().int().nullable().optional(),
+    // Tri-state: absent = unchanged, null = unlimited, 1..1_000_000 = new budget.
+    download_limit: z.number().int().min(1).max(1_000_000).nullable().optional(),
+    on_exhaust: z.enum(['stop', 'delete']).optional(),
   })
-  .refine((v) => v.is_active !== undefined || v.password !== undefined || v.expires_at !== undefined, {
-    message: 'at least one field is required',
-  });
+  .refine(
+    (v) =>
+      v.is_active !== undefined ||
+      v.password !== undefined ||
+      v.expires_at !== undefined ||
+      v.download_limit !== undefined ||
+      v.on_exhaust !== undefined,
+    { message: 'at least one field is required' }
+  );
 
 /**
  * Owner-scoped share management. Every handler runs behind
@@ -150,14 +166,37 @@ export default async function sharesRoutes(app: FastifyInstance, deps: SharesRou
       return;
     }
 
+    const uid = req.user!.id;
+
+    // A download limit only makes sense on a file share (a folder share is a
+    // browsable subtree, not a single countable download) — reject before
+    // touching the row. Owner-scoped like every other lookup here, so a
+    // missing/foreign share is a plain 404 (no oracle), same as elsewhere.
+    if (parsed.data.download_limit !== undefined) {
+      const row = db
+        .prepare(
+          'SELECT n.kind AS kind FROM shares s JOIN nodes n ON n.id = s.node_id WHERE s.id = @id AND s.owner_id = @uid'
+        )
+        .get({ id, uid }) as { kind: string } | undefined;
+      if (!row) {
+        reply.code(404).send({ error: 'not_found' });
+        return;
+      }
+      if (row.kind !== 'file') {
+        reply.code(400).send({ code: 'not_a_file' });
+        return;
+      }
+    }
+
     // Only forward the keys that were actually present, so setShareState's
     // tri-state (undefined = leave alone) is preserved exactly.
     const patch: SetShareStatePatch = {};
     if (parsed.data.is_active !== undefined) patch.isActive = parsed.data.is_active;
     if (parsed.data.password !== undefined) patch.password = parsed.data.password;
     if (parsed.data.expires_at !== undefined) patch.expiresAt = parsed.data.expires_at;
+    if (parsed.data.download_limit !== undefined) patch.downloadLimit = parsed.data.download_limit;
+    if (parsed.data.on_exhaust !== undefined) patch.onExhaust = parsed.data.on_exhaust;
 
-    const uid = req.user!.id;
     const updated = await setShareState(db, uid, id, patch);
     if (!updated) {
       reply.code(404).send({ error: 'not_found' });

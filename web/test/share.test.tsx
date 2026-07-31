@@ -62,6 +62,9 @@ function mkShare(over: Partial<ShareDto> = {}): ShareDto {
     allow_download: true,
     created_at: NOW,
     status: 'active',
+    download_limit: null,
+    download_count: 0,
+    on_exhaust: 'delete',
     url: 'https://project4.system.mow.gov.sy/s/Tok3nAbc',
     ...over,
   };
@@ -369,5 +372,73 @@ describe('AutoDeleteMenu — warns before enabling (§3.4)', () => {
 
     expect(screen.getByText(i18n.t('autoDelete.past'))).toBeInTheDocument();
     expect(patchedPath(fetchMock, '/api/nodes/')).toBe(false);
+  });
+});
+
+describe('ShareModal — download limit (creator console, §4 / §9)', () => {
+  test('a file share shows the Unlimited state and applies a numeric cap as a camel→snake PATCH', async () => {
+    const fetchMock = stubFetch({
+      '/api/shares': [mkShare()], // download_limit null ⇒ unlimited
+      'PATCH /api/shares/1': mkShare({ download_limit: 3, on_exhaust: 'delete' }),
+      '/api/auth/me': USER,
+    });
+    renderModal(mkNode()); // file node
+
+    expect(await screen.findByText(i18n.t('share.downloadLimit.unlimited'))).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(i18n.t('share.downloadLimit.label')), {
+      target: { value: '3' },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('share.downloadLimit.apply') }));
+    });
+
+    const patch = fetchMock.mock.calls.find(([u, init]) => {
+      const path = String(u).split('?')[0];
+      const method = ((init as RequestInit | undefined)?.method ?? 'GET').toUpperCase();
+      return method === 'PATCH' && path === '/api/shares/1';
+    });
+    expect(patch).toBeDefined();
+    // Default terminal action is the fixture's on_exhaust: 'delete'; the web→api
+    // mapping (Task 7) is camelCase → snake_case.
+    expect(JSON.parse(String((patch![1] as RequestInit).body))).toEqual({
+      download_limit: 3,
+      on_exhaust: 'delete',
+    });
+  });
+
+  test('the destructive delete warning shows by default and disappears when Stop is chosen', async () => {
+    stubFetch({ '/api/shares': [mkShare()], '/api/auth/me': USER });
+    renderModal(mkNode());
+
+    // on_exhaust defaults to 'delete' ⇒ the trash-after-last-download warning is visible up front.
+    expect(
+      await screen.findByText(i18n.t('share.downloadLimit.deleteWarning'))
+    ).toBeInTheDocument();
+
+    // Choosing "stop the link" instead removes the destructive consequence.
+    fireEvent.click(screen.getByLabelText(i18n.t('share.downloadLimit.modeStop')));
+    expect(screen.queryByText(i18n.t('share.downloadLimit.deleteWarning'))).toBeNull();
+  });
+
+  test('the section is ABSENT for a folder share (v1 = single-file shares only)', async () => {
+    stubFetch({ '/api/shares': [mkShare()], '/api/auth/me': USER });
+    renderModal(mkNode({ kind: 'folder' }));
+
+    // The modal has loaded (the expiry section always renders) …
+    expect(await screen.findByText(i18n.t('share.expiry.heading'))).toBeInTheDocument();
+    // … but the per-file download-limit console is not offered for a folder.
+    expect(screen.queryByText(i18n.t('share.downloadLimit.heading'))).toBeNull();
+  });
+
+  test('StatusChip shows a distinct exhausted label once a cap is reached', async () => {
+    stubFetch({
+      '/api/shares': [mkShare({ status: 'exhausted', download_limit: 1, download_count: 1 })],
+      '/api/auth/me': USER,
+    });
+    renderModal(mkNode());
+
+    // Verbatim Arabic (like the §4.9 empty-state test) so a missing translation is a real failure.
+    expect(await screen.findByText('نُفِدت التنزيلات')).toBeInTheDocument();
   });
 });

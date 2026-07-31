@@ -81,6 +81,8 @@ interface AdminShareRow {
   expires_at: number | null;
   allow_download: number;
   created_at: number;
+  download_limit: number | null;
+  download_count: number;
   owner_username: string;
   owner_is_active: number;
   node_name: string | null;
@@ -435,6 +437,7 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
         `SELECT s.id AS id, s.node_id AS node_id, s.owner_id AS owner_id,
                 s.password_hash AS password_hash, s.is_active AS is_active, s.expires_at AS expires_at,
                 s.allow_download AS allow_download, s.created_at AS created_at,
+                s.download_limit AS download_limit, s.download_count AS download_count,
                 u.username AS owner_username, u.is_active AS owner_is_active, n.name AS node_name
          FROM shares s
          JOIN users u ON u.id = s.owner_id

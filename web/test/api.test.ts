@@ -1,5 +1,6 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import { apiGet, apiPost, ApiError } from '../src/lib/api';
+import { patchShare } from '../src/features/dashboard/share/api';
 
 /** Build a minimal same-shape Response the client can consume. */
 function jsonResponse(status: number, body?: unknown): Response {
@@ -110,5 +111,33 @@ describe('api client — typed errors', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(apiPost('/auth/logout')).resolves.toBeUndefined();
+  });
+});
+
+describe('patchShare — download-limit field mapping', () => {
+  test('maps downloadLimit/onExhaust to a snake_case PATCH body', async () => {
+    document.cookie = 'mirsal_csrf=t';
+    const fetchMock = vi.fn(async () => jsonResponse(200, { id: 1 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await patchShare({ id: 1, downloadLimit: 3, onExhaust: 'stop' });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(urlOf(fetchMock)).toBe('/api/shares/1');
+    const init = initOf(fetchMock);
+    expect(init.method).toBe('PATCH');
+    // Exact match also proves untouched fields (is_active/password/expires_at) are omitted.
+    expect(JSON.parse(init.body as string)).toEqual({ download_limit: 3, on_exhaust: 'stop' });
+  });
+
+  test('forwards a null downloadLimit (clear the cap) rather than dropping it', async () => {
+    document.cookie = 'mirsal_csrf=t';
+    const fetchMock = vi.fn(async () => jsonResponse(200, { id: 5 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await patchShare({ id: 5, downloadLimit: null });
+
+    const init = initOf(fetchMock);
+    expect(JSON.parse(init.body as string)).toEqual({ download_limit: null });
   });
 });

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import Seal from './Seal';
-import { Stamp, Pause, Hourglass } from './icons';
+import { Stamp, Pause, Hourglass, Depleted } from './icons';
 
 /*
  * StatusChip — status is NEVER colour-only (§4.4 / §3.3).
@@ -9,16 +9,17 @@ import { Stamp, Pause, Hourglass } from './icons';
  * Every status pairs THREE redundant cues — colour + an authored text label +
  * a distinct glyph — so it survives grayscale / colour-blindness.
  *
- *   active   emerald   "نشط"     stamp glyph
- *   stopped  ink-2     "موقوف"   pause glyph
- *   expired  clay      "منتهٍ"   hourglass glyph
- *   shared   brass     "مُشارَك"  the brass Seal badge (brass stays a FILL,
+ *   active    emerald  "نشط"     stamp glyph
+ *   stopped   ink-2    "موقوف"   pause glyph
+ *   expired   clay     "منتهٍ"   hourglass glyph
+ *   exhausted ink-2    "نُفِدت التنزيلات"  depleted (struck circle) glyph
+ *   shared    brass    "مُشارَك"  the brass Seal badge (brass stays a FILL,
  *                                 never a bare text/icon foreground — §4.1)
  *
  * Rendered as a hairline pill (border-line + bg-surface). Logical padding only.
  */
 
-export type ShareStatus = 'active' | 'stopped' | 'expired' | 'shared';
+export type ShareStatus = 'active' | 'stopped' | 'expired' | 'exhausted' | 'shared';
 
 const ICON_PX = 15;
 
@@ -27,6 +28,8 @@ const TONE: Record<Exclude<ShareStatus, 'shared'>, string> = {
   active: 'text-emerald',
   stopped: 'text-ink-2',
   expired: 'text-clay',
+  // A benign terminal state (the link did its job) — neutral ink, never an alarm colour.
+  exhausted: 'text-ink-2',
 };
 
 function glyphFor(status: ShareStatus): ReactNode {
@@ -37,6 +40,8 @@ function glyphFor(status: ShareStatus): ReactNode {
       return <Pause size={ICON_PX} />;
     case 'expired':
       return <Hourglass size={ICON_PX} />;
+    case 'exhausted':
+      return <Depleted size={ICON_PX} />;
     case 'shared':
       // The seal IS the icon here — keeps brass a fill, not a text foreground.
       return <Seal size="badge" />;

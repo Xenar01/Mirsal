@@ -14,6 +14,9 @@ export interface Share {
   allow_download: number;
   created_at: number;
   revoked_at: number | null;
+  download_limit: number | null;
+  download_count: number;
+  on_exhaust: 'stop' | 'delete';
 }
 
 export interface CreateShareOptions {
@@ -26,13 +29,15 @@ export interface CreateShareOptions {
 /**
  * Tri-state patch for {@link setShareState}: a key that is **omitted**
  * (`undefined`) leaves that column unchanged; an explicit `null` clears it
- * (`password_hash`/`expires_at` only — `isActive` is a plain boolean, no
- * null state); a value sets it.
+ * (`password_hash`/`expires_at`/`downloadLimit` only — `isActive` and
+ * `onExhaust` are plain non-null values, no null state); a value sets it.
  */
 export interface SetShareStatePatch {
   isActive?: boolean;
   password?: string | null;
   expiresAt?: number | null;
+  downloadLimit?: number | null;
+  onExhaust?: 'stop' | 'delete';
 }
 
 /**
@@ -97,9 +102,11 @@ export async function createShare(
  * UPDATE and the returned re-SELECT filter on `owner_id`, so a share owned
  * by a different user is left untouched and `undefined` is returned). Only
  * the keys present in `patch` are written — see {@link SetShareStatePatch}
- * for the tri-state semantics of `password`/`expiresAt`. A string
- * `password` is hashed via the shared `hashPassword` service before
- * storage. Returns the updated row, or `undefined` if no row matched.
+ * for the tri-state semantics of `password`/`expiresAt`/`downloadLimit`. A
+ * string `password` is hashed via the shared `hashPassword` service before
+ * storage. Setting or clearing `downloadLimit` also resets `download_count`
+ * to 0 in the same atomic UPDATE (a fresh budget starts the moment the limit
+ * changes). Returns the updated row, or `undefined` if no row matched.
  */
 export async function setShareState(
   db: Database.Database,
@@ -122,6 +129,15 @@ export async function setShareState(
     sets.push('expires_at = @expiresAt');
     params.expiresAt = patch.expiresAt;
   }
+  if (patch.downloadLimit !== undefined) {
+    // Setting (or clearing) the limit starts a fresh budget — one atomic UPDATE.
+    sets.push('download_limit = @downloadLimit', 'download_count = 0');
+    params.downloadLimit = patch.downloadLimit;
+  }
+  if (patch.onExhaust !== undefined) {
+    sets.push('on_exhaust = @onExhaust');
+    params.onExhaust = patch.onExhaust;
+  }
 
   if (sets.length > 0) {
     db.prepare(`UPDATE shares SET ${sets.join(', ')} WHERE id = @shareId AND owner_id = @ownerId`).run(
@@ -142,13 +158,16 @@ export function revokeShare(db: Database.Database, ownerId: number, shareId: num
 
 /**
  * Pure status derivation for a share row: `is_active = 0` → `'stopped'`
- * (checked first); else a past `expires_at` → `'expired'`; else `'active'`.
+ * (checked first); else an exhausted download limit (`download_limit` set
+ * and `download_count` has reached it) → `'exhausted'`; else a past
+ * `expires_at` → `'expired'`; else `'active'`.
  */
 export function ownerStatus(
-  share: Pick<Share, 'is_active' | 'expires_at'>,
+  share: Pick<Share, 'is_active' | 'expires_at' | 'download_limit' | 'download_count'>,
   now: number
-): 'active' | 'stopped' | 'expired' {
+): 'active' | 'stopped' | 'expired' | 'exhausted' {
   if (!share.is_active) return 'stopped';
+  if (share.download_limit != null && share.download_count >= share.download_limit) return 'exhausted';
   if (share.expires_at != null && share.expires_at < now) return 'expired';
   return 'active';
 }

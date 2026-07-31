@@ -77,6 +77,39 @@ docker compose up -d
 
 Encrypted share passwords are hashes, not recoverable — unaffected by restore.
 
+## Download limits (burn-after-download)
+
+A share creator can cap how many times a **single file** can be downloaded
+(default `1`); **folder shares are never capped**. When the cap is reached, the
+creator's chosen terminal action fires — **stop** the link (file stays) or
+**delete** the file (default). It composes with the other lifecycle controls
+(expiry, start/stop, password, auto-delete date).
+
+Operational notes:
+
+- **POST-only counting.** The counted download is `POST /api/public/:token/download`.
+  For a limited share, `GET /download` returns **`405`** — so a passive GET
+  (link-preview unfurlers, URL/AV scanners, browser prefetch) can neither burn
+  nor bypass the cap. **Unlimited** shares keep `GET /download` unchanged.
+- **Only completed downloads count.** `download_count` increments on delivery
+  completion, guarded so it can never exceed the limit. A mid-stream **abort
+  leaves the count untouched** and the link live — the recipient can retry.
+- **`delete` → Trash, not instant purge.** The file goes to Trash immediately
+  (link dies at once) and is **auto-purged after 24h** (recoverable until then,
+  via the existing scheduler; a restore clears `purge_after`). An owner who
+  restores within 24h keeps the file, but downloads stay blocked until they
+  raise or clear the limit.
+- **Audit trail.** Terminal actions write `audit_log` rows with `actor_id = NULL`
+  (system): `share_download_limit_deleted` (`{owner_id, node_id, limit}`) and
+  `share_download_limit_stopped` (`{owner_id, limit}`). Visible only via the
+  admin audit route — there is **no owner-facing "why did my file vanish" view**
+  in v1; the owner sees the file in Trash. This is the place to look if an
+  operator needs to explain an auto-deletion.
+- **Concurrency is per-process.** In-flight downloads are bounded by an in-memory
+  reservation map — authoritative because Mirsal runs as a single container.
+  It resets on restart (a crash can never strand a reservation); the durable
+  `download_count < download_limit` guard still caps *counted* completions.
+
 ## Troubleshooting
 
 - **`address already in use` on `up`** — something else holds `127.0.0.1:8084`.

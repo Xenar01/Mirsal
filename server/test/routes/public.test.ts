@@ -12,6 +12,8 @@ import { loadConfig } from '../../src/config.js';
 import { buildApp } from '../../src/app.js';
 import { createPasswordService } from '../../src/auth/passwords.js';
 import { ensureUserRoots } from '../../src/nodes/tree.js';
+import { EXHAUST_PURGE_GRACE_MS } from '../../src/shares/exhaustion.js';
+import { trashNode } from '../../src/nodes/trash.js';
 
 const NOW = 1_700_000_000_000;
 // Mutable so a single test can simulate time passing (server-side unlock-cookie
@@ -859,4 +861,422 @@ test('/zip concurrency slot is released on a mid-stream client abort (onResponse
   // Without the fix, the aborted downloads strand their slots permanently and
   // this stays 429 forever; with it, the slots are freed and /zip works again.
   expect(finalStatus).toBe(200);
+}, 30_000);
+
+// ---------------------------------------------------------------------------
+// Task 6 — counted POST /download, GET-405 for limited shares, meta.download_limit
+// ---------------------------------------------------------------------------
+
+/**
+ * Sets a share's download-limit fields directly against the DB. Deliberately
+ * decoupled from the Task-3 PATCH API so these tests only exercise the public
+ * endpoint under test (`on_exhaust` accepts 'stop' | 'delete').
+ */
+function setLimit(shareId: number, limit: number | null, onExhaust: 'stop' | 'delete'): void {
+  db!.prepare('UPDATE shares SET download_limit = @lim, on_exhaust = @oe WHERE id = @id').run({
+    lim: limit,
+    oe: onExhaust,
+    id: shareId,
+  });
+}
+
+/** Starts the app listening on an ephemeral loopback port and returns it. */
+async function listenOn(built: FastifyInstance): Promise<number> {
+  await built.listen({ host: '127.0.0.1', port: 0 });
+  const addr = built.server.address();
+  const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
+  expect(port).toBeGreaterThan(0);
+  return port;
+}
+
+/**
+ * Opens a real (non-inject) POST `/download` and reads it to completion. Sends
+ * NO content-type — an empty body with no content-type reaches the handler
+ * (whereas an empty `application/json` body would be rejected by Fastify).
+ */
+function fullPostDownload(port: number, token: string): Promise<{ statusCode: number; body: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      { host: '127.0.0.1', port, path: `/api/public/${token}/download`, method: 'POST', agent: false },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks) }));
+        res.on('error', reject);
+      }
+    );
+    request.on('error', reject);
+    request.end();
+  });
+}
+
+/**
+ * Opens a real POST `/download` and resolves `response` once the response
+ * headers arrive — at which point the handler has already taken its
+ * reservation and begun streaming — WITHOUT consuming the body. A large,
+ * ~incompressible payload therefore stays blocked on socket backpressure and
+ * the reservation stays held until {@link drainToEnd} reads it or the socket
+ * is destroyed. Mirrors `parkedZipRequest`, POST-flavoured.
+ */
+function parkedPostDownload(
+  port: number,
+  token: string
+): { request: http.ClientRequest; response: Promise<http.IncomingMessage>; closed: Promise<void> } {
+  let settled = false;
+  let resolveResp!: (r: http.IncomingMessage) => void;
+  let rejectResp!: (e: Error) => void;
+  let resolveClosed!: () => void;
+  const response = new Promise<http.IncomingMessage>((res, rej) => {
+    resolveResp = res;
+    rejectResp = rej;
+  });
+  const closed = new Promise<void>((res) => {
+    resolveClosed = res;
+  });
+
+  const request = http.request(
+    { host: '127.0.0.1', port, path: `/api/public/${token}/download`, method: 'POST', agent: false },
+    (res) => {
+      settled = true;
+      res.on('close', () => resolveClosed());
+      res.on('error', () => resolveClosed());
+      // Intentionally do NOT read res — leave the download parked mid-stream.
+      resolveResp(res);
+    }
+  );
+  request.on('error', (err) => {
+    if (!settled) {
+      settled = true;
+      rejectResp(err);
+    }
+    resolveClosed();
+  });
+  request.end();
+  return { request, response, closed };
+}
+
+/** Drains an already-open (parked) response to `end`, returning its collected body. */
+function drainToEnd(res: http.IncomingMessage): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    res.on('data', (c: Buffer) => chunks.push(c));
+    res.on('end', () => resolve(Buffer.concat(chunks)));
+    res.on('error', reject);
+  });
+}
+
+/**
+ * Polls `download_count` for `shareId` (the counted completion fires in the
+ * server's raw-response `'close'` handler, just AFTER the client sees `end`,
+ * so a short poll is needed). Returns the last-seen value once it hits
+ * `target` or the poll budget (~2s) is spent, so the caller's assertion prints
+ * the real value on failure.
+ */
+async function waitForCount(shareId: number, target: number): Promise<number> {
+  let last = -1;
+  for (let i = 0; i < 100; i++) {
+    last = (
+      db!.prepare('SELECT download_count FROM shares WHERE id = ?').get(shareId) as { download_count: number }
+    ).download_count;
+    if (last === target) return last;
+    await delay(20);
+  }
+  return last;
+}
+
+test('meta includes download_limit for a limited file share (and null when unlimited)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'lim.txt', data: Buffer.from('X') });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+
+  // Unlimited by default -> meta.download_limit is explicitly null.
+  const before = await built.inject({ method: 'GET', url: `/api/public/${share.token}` });
+  expect(before.statusCode).toBe(200);
+  expect(before.json().download_limit).toBeNull();
+
+  setLimit(share.id, 1, 'delete');
+  const after = await built.inject({ method: 'GET', url: `/api/public/${share.token}` });
+  expect(after.statusCode).toBe(200);
+  // Static config (drives the "one-time / up to N" label), not a live count.
+  expect(after.json().download_limit).toBe(1);
+});
+
+test('GET /download on a limited share -> 405 method_not_allowed', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'g.txt', data: Buffer.from('G') });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+  setLimit(share.id, 1, 'delete');
+
+  const res = await built.inject({ method: 'GET', url: `/api/public/${share.token}/download` });
+  expect(res.statusCode).toBe(405);
+  expect(res.json()).toEqual({ error: 'method_not_allowed' });
+  // The GET must not have counted anything.
+  expect(
+    (db!.prepare('SELECT download_count FROM shares WHERE id = ?').get(share.id) as { download_count: number })
+      .download_count
+  ).toBe(0);
+});
+
+test('POST /download on a limited share (limit=2) streams the file and counts it', async () => {
+  const built = await makeApp();
+  const port = await listenOn(built);
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const content = Buffer.from('counted-post-download-bytes');
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'p.txt', data: content });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+  setLimit(share.id, 2, 'delete');
+
+  const res = await fullPostDownload(port, share.token);
+  expect(res.statusCode).toBe(200);
+  expect(res.body.equals(content)).toBe(true);
+
+  expect(await waitForCount(share.id, 1)).toBe(1);
+  // 1 < 2 -> not exhausted: node untouched, link still live.
+  expect(
+    (db!.prepare('SELECT trashed_at FROM nodes WHERE id = ?').get(file.id) as { trashed_at: number | null }).trashed_at
+  ).toBeNull();
+  expect((await built.inject({ method: 'GET', url: `/api/public/${share.token}` })).statusCode).toBe(200);
+}, 30_000);
+
+test('two concurrent POST /download on limit=1 -> statuses {200, 410}; count ends at 1', async () => {
+  const built = await makeApp();
+  const port = await listenOn(built);
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  // Large + ~incompressible so the parked winner's body can't fully flush into
+  // socket buffers unread — its reservation stays held while the loser fires.
+  const big = crypto.randomBytes(32 * 1024 * 1024);
+  const file = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'big.bin',
+    data: big,
+    contentType: 'application/octet-stream',
+  });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+  setLimit(share.id, 1, 'delete');
+
+  // Winner: headers arrive (slot reserved), body parked (not consumed).
+  const winner = parkedPostDownload(port, share.token);
+  const winnerRes = await winner.response;
+  expect(winnerRes.statusCode).toBe(200);
+
+  // Loser fired to completion while the only slot is held -> 410, byte-identical
+  // to a stopped share (no "reserved"/"limit reached" oracle).
+  const loser = await fullPostDownload(port, share.token);
+  expect(loser.statusCode).toBe(410);
+  expect(JSON.parse(loser.body.toString())).toEqual({ error: 'gone', reason: 'stopped', expires_at: null });
+
+  // Winner still parked -> nothing counted yet.
+  expect(
+    (db!.prepare('SELECT download_count FROM shares WHERE id = ?').get(share.id) as { download_count: number })
+      .download_count
+  ).toBe(0);
+
+  // Drain the winner -> completion -> count reaches exactly 1 (atomic reserve
+  // guaranteed the {200,410} multiset, never {200,200}).
+  await drainToEnd(winnerRes);
+  await winner.closed;
+  expect(await waitForCount(share.id, 1)).toBe(1);
+}, 30_000);
+
+test('aborting a POST /download mid-stream leaves count unchanged (0) and the link live', async () => {
+  const built = await makeApp();
+  const port = await listenOn(built);
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const big = crypto.randomBytes(32 * 1024 * 1024);
+  const file = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'abort.bin',
+    data: big,
+    contentType: 'application/octet-stream',
+  });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+  // limit=2 so the later POST clearly reserves even if the aborted slot's
+  // release hasn't propagated yet (0 completed + <=1 in-flight < 2).
+  setLimit(share.id, 2, 'delete');
+
+  // Park, then abort mid-stream by destroying the client socket.
+  const parked = parkedPostDownload(port, share.token);
+  expect((await parked.response).statusCode).toBe(200);
+  parked.request.destroy();
+  await parked.closed;
+
+  // A mid-stream abort NEVER counts (server's writableFinished is false).
+  await delay(150);
+  expect(
+    (db!.prepare('SELECT download_count FROM shares WHERE id = ?').get(share.id) as { download_count: number })
+      .download_count
+  ).toBe(0);
+  // Link still live.
+  expect((await built.inject({ method: 'GET', url: `/api/public/${share.token}` })).statusCode).toBe(200);
+
+  // A later POST still succeeds and counts.
+  const later = await fullPostDownload(port, share.token);
+  expect(later.statusCode).toBe(200);
+  expect(later.body.length).toBe(big.length);
+  expect(await waitForCount(share.id, 1)).toBe(1);
+}, 30_000);
+
+test('delete-mode: the limit-th completed POST trashes the file and stamps purge_after', async () => {
+  const built = await makeApp();
+  const port = await listenOn(built);
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const content = Buffer.from('burn-after-reading');
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'burn.txt', data: content });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+  setLimit(share.id, 1, 'delete');
+
+  const res = await fullPostDownload(port, share.token);
+  expect(res.statusCode).toBe(200);
+  expect(res.body.equals(content)).toBe(true);
+
+  expect(await waitForCount(share.id, 1)).toBe(1);
+  const node = db!.prepare('SELECT trashed_at, purge_after FROM nodes WHERE id = ?').get(file.id) as {
+    trashed_at: number | null;
+    purge_after: number | null;
+  };
+  expect(node.trashed_at).not.toBeNull();
+  // Exact deterministic clock (app built with now: () => NOW).
+  expect(node.purge_after).toBe(NOW + EXHAUST_PURGE_GRACE_MS);
+}, 30_000);
+
+test('stop-mode: the limit-th completed POST sets is_active=0 and the link 410s after', async () => {
+  const built = await makeApp();
+  const port = await listenOn(built);
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const content = Buffer.from('one-shot-then-stop');
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'stop.txt', data: content });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+  setLimit(share.id, 1, 'stop');
+
+  const res = await fullPostDownload(port, share.token);
+  expect(res.statusCode).toBe(200);
+  expect(res.body.equals(content)).toBe(true);
+
+  expect(await waitForCount(share.id, 1)).toBe(1);
+  expect((db!.prepare('SELECT is_active FROM shares WHERE id = ?').get(share.id) as { is_active: number }).is_active).toBe(
+    0
+  );
+  // stop-mode leaves the file intact — only the share is turned off.
+  expect(
+    (db!.prepare('SELECT trashed_at FROM nodes WHERE id = ?').get(file.id) as { trashed_at: number | null }).trashed_at
+  ).toBeNull();
+  // The link 410s afterwards (indistinguishable from a manually-stopped share).
+  const after = await built.inject({ method: 'GET', url: `/api/public/${share.token}` });
+  expect(after.statusCode).toBe(410);
+  expect(after.json()).toEqual({ error: 'gone', reason: 'stopped', expires_at: null });
+}, 30_000);
+
+test('owner trashing the file mid-download does not crash on completion (delete-mode tolerated)', async () => {
+  const built = await makeApp();
+  const port = await listenOn(built);
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const big = crypto.randomBytes(32 * 1024 * 1024);
+  const file = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'race.bin',
+    data: big,
+    contentType: 'application/octet-stream',
+  });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+  setLimit(share.id, 1, 'delete');
+
+  const winner = parkedPostDownload(port, share.token);
+  const winnerRes = await winner.response;
+  expect(winnerRes.statusCode).toBe(200);
+
+  // Owner trashes the shared node WHILE the download streams. The blob on disk
+  // is untouched, so the in-flight stream still finishes; the completion
+  // handler's applyExhaustion must tolerate the already-trashed node.
+  trashNode(db!, uid, file.id, NOW);
+  expect(
+    (db!.prepare('SELECT trashed_at FROM nodes WHERE id = ?').get(file.id) as { trashed_at: number | null }).trashed_at
+  ).not.toBeNull();
+
+  await drainToEnd(winnerRes);
+  await winner.closed;
+
+  // Completion still counted (the guarded UPDATE ran) ...
+  expect(await waitForCount(share.id, 1)).toBe(1);
+  // ... and applyExhaustion took the tolerant early-return path: it did NOT
+  // stamp a fresh purge_after (trashNode leaves it NULL), i.e. no throw / no
+  // re-trash of the already-trashed node.
+  expect(
+    (db!.prepare('SELECT purge_after FROM nodes WHERE id = ?').get(file.id) as { purge_after: number | null })
+      .purge_after
+  ).toBeNull();
+  // Process still alive and serving (node gone -> ambiguous 404).
+  expect((await built.inject({ method: 'GET', url: `/api/public/${share.token}` })).statusCode).toBe(404);
+}, 30_000);
+
+test('unlimited file share: GET /download still streams (unchanged)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const content = Buffer.from('unlimited-get-still-works');
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'u.txt', data: content });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+  // No limit set -> download_limit stays null; GET behaviour is unchanged.
+
+  const dlRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}/download` });
+  expect(dlRes.statusCode).toBe(200);
+  expect(dlRes.rawPayload.equals(content)).toBe(true);
+  // No counter to touch on an unlimited share.
+  expect(
+    (db!.prepare('SELECT download_count FROM shares WHERE id = ?').get(share.id) as { download_count: number })
+      .download_count
+  ).toBe(0);
+});
+
+test('limit=2: two sequential completed POSTs reach the cap and exhaust (completed>0 at reserve)', async () => {
+  const built = await makeApp();
+  const port = await listenOn(built);
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+  const content = Buffer.from('two-then-burn');
+  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'seq.txt', data: content });
+  const share = await createShare(built, session, csrf, { node_id: file.id });
+  setLimit(share.id, 2, 'delete');
+
+  // First completed download: reserve saw completed=0 -> count reaches 1.
+  const first = await fullPostDownload(port, share.token);
+  expect(first.statusCode).toBe(200);
+  expect(first.body.equals(content)).toBe(true);
+  expect(await waitForCount(share.id, 1)).toBe(1);
+  expect(
+    (db!.prepare('SELECT trashed_at FROM nodes WHERE id = ?').get(file.id) as { trashed_at: number | null }).trashed_at
+  ).toBeNull();
+
+  // Second completed download: reserve reads completed=1 (1 < 2 -> reserves),
+  // streams to completion, count reaches 2 === limit -> exhaustion fires. This
+  // is the case where `completed` is nonzero at the reservation check.
+  const second = await fullPostDownload(port, share.token);
+  expect(second.statusCode).toBe(200);
+  expect(second.body.equals(content)).toBe(true);
+  expect(await waitForCount(share.id, 2)).toBe(2);
+  const node = db!.prepare('SELECT trashed_at, purge_after FROM nodes WHERE id = ?').get(file.id) as {
+    trashed_at: number | null;
+    purge_after: number | null;
+  };
+  expect(node.trashed_at).not.toBeNull();
+  expect(node.purge_after).toBe(NOW + EXHAUST_PURGE_GRACE_MS);
 }, 30_000);

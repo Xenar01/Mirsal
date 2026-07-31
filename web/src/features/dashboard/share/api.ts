@@ -39,6 +39,10 @@ export interface PatchShareVars {
   password?: string | null;
   /** number sets a new deadline; null = never-expires; omit = unchanged. */
   expiresAt?: number | null;
+  /** int ≥ 1 sets the per-file cap; null clears it (unlimited); omit = unchanged. */
+  downloadLimit?: number | null;
+  /** terminal action when the cap is reached ('stop' | 'delete'); omit = unchanged. */
+  onExhaust?: 'stop' | 'delete';
 }
 
 export function patchShare(vars: PatchShareVars): Promise<ShareDto> {
@@ -46,6 +50,8 @@ export function patchShare(vars: PatchShareVars): Promise<ShareDto> {
   if (vars.isActive !== undefined) body.is_active = vars.isActive;
   if (vars.password !== undefined) body.password = vars.password;
   if (vars.expiresAt !== undefined) body.expires_at = vars.expiresAt;
+  if (vars.downloadLimit !== undefined) body.download_limit = vars.downloadLimit;
+  if (vars.onExhaust !== undefined) body.on_exhaust = vars.onExhaust;
   return apiPatch<ShareDto>(`/shares/${vars.id}`, body);
 }
 
