@@ -744,6 +744,45 @@ test('GET /api/nodes/trash reports the real size of a trashed folder that contai
   expect(trashedDocs!.size_bytes).toBe(12); // 5 + 7, across two levels of trashed subtree
 });
 
+test('GET /api/nodes/trash lists only TOP-LEVEL trashed items, not files nested inside a trashed folder (no storage-meter double-count)', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  const folderRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { parent_id: rootId, name: 'Box' },
+  });
+  const folder = folderRes.json();
+  await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'inside.txt', data: Buffer.from('hello') }); // 5 bytes
+
+  // Trash the FOLDER — its child file is stamped trashed in the same operation.
+  await built.inject({
+    method: 'POST',
+    url: `/api/nodes/${folder.id}/trash`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+  });
+
+  const trashListRes = await built.inject({
+    method: 'GET',
+    url: '/api/nodes/trash',
+    cookies: { mirsal_session: session },
+  });
+  const trashList = trashListRes.json() as Array<{ id: number; name: string; kind: string; size_bytes: number }>;
+
+  // Only the folder is a top-level trash entry; the nested file must NOT appear
+  // as its own row (that is what double-counted the storage meter — the folder
+  // already rolls up its file's bytes).
+  expect(trashList.map((n) => n.name).sort()).toEqual(['Box']);
+  expect(trashList.find((n) => n.name === 'Box')!.size_bytes).toBe(5);
+  expect(trashList.some((n) => n.name === 'inside.txt')).toBe(false);
+});
+
 test('PATCH move+rename in one request never spuriously 409s on an intermediate-state collision (findings #2/#4)', async () => {
   const built = await makeApp();
   const uid = await seedUser('alice', 'pw');

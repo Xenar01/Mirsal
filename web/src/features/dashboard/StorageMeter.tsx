@@ -5,10 +5,12 @@ import { formatBytes } from './format';
 
 /*
  * Storage meter (§3.2). "Used" + the quota bar come from the authoritative,
- * server-maintained figures on the session user (`GET /api/auth/me` now returns
- * quotaBytes/usedBytes). used_bytes already includes trashed-but-not-purged
- * bytes; the Trash sub-line is an informational breakdown from the trash
- * listing. When quotaBytes is null the user has no quota and the bar is omitted.
+ * server-maintained figures on the session user (`GET /api/auth/me` returns
+ * quotaBytes/usedBytes). used_bytes already INCLUDES trashed-but-not-purged
+ * bytes, so the trash figure is shown as "of which in trash" (a portion of
+ * used, never an additive second total) with a hint that emptying the trash
+ * frees the space. When quotaBytes is null the user has no quota and the bar is
+ * omitted.
  *
  * Numbers are mono ledger data, bidi-isolated LTR (§4.3/§4.5).
  */
@@ -36,14 +38,6 @@ export default function StorageMeter() {
             </bdi>
           </dd>
         </div>
-        <div className="flex items-center justify-between gap-3">
-          <dt className="text-ink-2">{t('storage.trash')}</dt>
-          <dd className="text-ink-2">
-            <bdi dir="ltr" className="font-mono">
-              {formatBytes(trashBytes)}
-            </bdi>
-          </dd>
-        </div>
       </dl>
       {hasQuota ? (
         <div className="mt-2">
@@ -67,6 +61,17 @@ export default function StorageMeter() {
         </div>
       ) : (
         <p className="mt-2 font-body text-xs text-ink-2">{t('storage.noQuota')}</p>
+      )}
+      {trashBytes > 0 && (
+        <div className="mt-2 font-body text-xs text-ink-2">
+          <div className="flex items-center justify-between gap-3">
+            <span>{t('storage.ofWhichTrash')}</span>
+            <bdi dir="ltr" className="font-mono">
+              {formatBytes(trashBytes)}
+            </bdi>
+          </div>
+          <p className="mt-0.5 text-ink-2/80">{t('storage.emptyToFree')}</p>
+        </div>
       )}
     </section>
   );
