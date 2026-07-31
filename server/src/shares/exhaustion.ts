@@ -23,13 +23,21 @@ export interface ExhaustibleShare {
 export function applyExhaustion(db: Database.Database, share: ExhaustibleShare, now: Clock): void {
   if (share.on_exhaust === 'stop') {
     db.transaction(() => {
-      db.prepare('UPDATE shares SET is_active = 0 WHERE id = @id').run({ id: share.id });
-      writeAudit(db, {
-        actorId: null,
-        action: 'share_download_limit_stopped',
-        target: String(share.id),
-        detail: JSON.stringify({ owner_id: share.owner_id, limit: share.download_limit }),
-      }, now);
+      // Guard on is_active = 1 and only audit when this call actually flipped
+      // it: a second invocation on an already-stopped share does zero row
+      // changes and writes no duplicate audit row (true side-effect
+      // idempotency, not just converging state).
+      const info = db
+        .prepare('UPDATE shares SET is_active = 0 WHERE id = @id AND is_active = 1')
+        .run({ id: share.id });
+      if (info.changes === 1) {
+        writeAudit(db, {
+          actorId: null,
+          action: 'share_download_limit_stopped',
+          target: String(share.id),
+          detail: JSON.stringify({ owner_id: share.owner_id, limit: share.download_limit }),
+        }, now);
+      }
     })();
     return;
   }

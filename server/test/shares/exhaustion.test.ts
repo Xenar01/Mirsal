@@ -129,16 +129,19 @@ test('stop: sets is_active=0 and writes an audit row with actor_id NULL', () => 
   expect(node.purge_after).toBeNull();
 });
 
-test('stop: idempotent — re-invoking leaves is_active=0 and never throws', () => {
+test('stop: idempotent — re-invoking leaves is_active=0, never throws, and does not duplicate the audit row', () => {
   const uid = seedUser();
   const now = Date.now();
   const nodeId = seedFileNode(uid, now);
   const share = seedShare({ ownerId: uid, nodeId, onExhaust: 'stop', downloadLimit: 1 });
 
   expect(() => applyExhaustion(db!, share, () => now)).not.toThrow();
-  expect(() => applyExhaustion(db!, share, () => now + 1)).not.toThrow();
-
   expect(readShare(share.id).is_active).toBe(0);
+  expect(auditRows('share_download_limit_stopped').length).toBe(1);
+
+  expect(() => applyExhaustion(db!, share, () => now + 1)).not.toThrow();
+  expect(readShare(share.id).is_active).toBe(0);
+  expect(auditRows('share_download_limit_stopped').length).toBe(1);
 });
 
 // --- delete ---------------------------------------------------------------
