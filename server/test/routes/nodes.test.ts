@@ -938,7 +938,8 @@ test('POST /api/nodes/trash/empty permanently deletes all trashed nodes, frees q
     payload: { parent_id: rootId, name: 'Box' },
   });
   const folder = folderRes.json();
-  await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'inside.txt', data: Buffer.from('hello') }); // 5
+  const insideUp = await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'inside.txt', data: Buffer.from('hello') }); // 5
+  const insideId = insideUp.body.id as number;
   const looseUp = await uploadFile(built, session, csrf, {
     parentId: rootId,
     filename: 'loose.txt',
@@ -970,6 +971,10 @@ test('POST /api/nodes/trash/empty permanently deletes all trashed nodes, frees q
   const usedAfter = (db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number }).used_bytes;
   expect(usedAfter).toBe(6);
   expect(fs.existsSync(path.join(storageDir!, String(uid), String(liveId)))).toBe(true);
+
+  // Trashed blobs must be unlinked.
+  expect(fs.existsSync(path.join(storageDir!, String(uid), String(insideId)))).toBe(false);
+  expect(fs.existsSync(path.join(storageDir!, String(uid), String(looseUp.body.id)))).toBe(false);
 });
 
 test('POST /api/nodes/trash/empty is a no-op 200 on an already-empty trash', async () => {
@@ -999,7 +1004,8 @@ test('POST /api/nodes/trash/empty is owner-scoped — never touches another user
   await built.inject({ method: 'POST', url: `/api/nodes/${bobUp.body.id}/trash`, cookies: { mirsal_session: bob.session }, headers: { 'x-csrf-token': bob.csrf } });
 
   // Alice empties HER trash (empty) — Bob's trashed file must remain.
-  await built.inject({ method: 'POST', url: '/api/nodes/trash/empty', cookies: { mirsal_session: alice.session }, headers: { 'x-csrf-token': alice.csrf } });
+  const aliceEmptyRes = await built.inject({ method: 'POST', url: '/api/nodes/trash/empty', cookies: { mirsal_session: alice.session }, headers: { 'x-csrf-token': alice.csrf } });
+  expect(aliceEmptyRes.statusCode).toBe(200);
 
   const bobTrash = (await built.inject({ method: 'GET', url: '/api/nodes/trash', cookies: { mirsal_session: bob.session } })).json() as Array<{ id: number }>;
   expect(bobTrash.some((n) => n.id === bobUp.body.id)).toBe(true);

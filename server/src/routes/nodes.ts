@@ -624,6 +624,9 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
     }
 
     if (topLevel.length > 0) {
+      // Note: `empty_trash` is deliberately NOT in the admin audit view's
+      // `USER_TARGET_ACTIONS` allowlist, so its `target` (a count) is displayed
+      // verbatim and never mis-resolved to a username.
       writeAudit(db, { actorId: uid, action: 'empty_trash', target: String(topLevel.length) }, now);
     }
 
