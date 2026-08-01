@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <!-- PWA (§P1). The manifest <link> is injected by vite-plugin-pwa at build
+         time; these are the pieces it does not inject: the iOS home-screen icon
+         and a light/dark theme-color pair so the mobile browser chrome blends
+         with the app's paper (light) / dark surface backgrounds. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <meta name="theme-color" content="#F4F5F3" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#12212F" media="(prefers-color-scheme: dark)" />
     <title>مِرسال</title>
   </head>
   <body>
