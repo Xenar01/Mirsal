@@ -344,7 +344,8 @@
         "share_unlock_failure": "فشل فتح رابط",
         "upload": "رفع ملف",
         "download": "تنزيل ملف",
-        "permanent_delete": "حذف نهائي"
+        "permanent_delete": "حذف نهائي",
+        "empty_trash": "إفراغ سلة المهملات"
       }
     }
   },

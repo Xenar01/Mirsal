@@ -650,7 +650,6 @@ function NodeRow({
             checked={selected}
             onChange={() => onToggleSelect(node.id)}
           />
-          <span className="font-body text-xs text-ink-2">{t('dashboard.select.row')}</span>
         </div>
         {isFolder ? (
           <button
