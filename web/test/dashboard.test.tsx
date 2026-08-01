@@ -8,6 +8,7 @@ import i18n from '../src/i18n';
 import { AuthProvider } from '../src/features/auth/auth-context';
 import { ToastProvider } from '../src/components/Toast';
 import DriveView from '../src/features/dashboard/DriveView';
+import TrashView from '../src/features/dashboard/TrashView';
 import UploadDrop from '../src/features/dashboard/UploadDrop';
 import type { NodeDto } from '../src/features/dashboard/types';
 
@@ -54,6 +55,23 @@ function renderDrive(initialEntries: string[]) {
           <ToastProvider>
             <MemoryRouter initialEntries={initialEntries}>
               <DriveView />
+            </MemoryRouter>
+          </ToastProvider>
+        </AuthProvider>
+      </I18nextProvider>
+    </QueryClientProvider>
+  );
+}
+
+function renderTrash(initialEntries: string[]) {
+  const client = makeQueryClient();
+  return render(
+    <QueryClientProvider client={client}>
+      <I18nextProvider i18n={i18n}>
+        <AuthProvider>
+          <ToastProvider>
+            <MemoryRouter initialEntries={initialEntries}>
+              <TrashView />
             </MemoryRouter>
           </ToastProvider>
         </AuthProvider>
@@ -145,18 +163,22 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
 
     renderDrive(['/']);
 
+    // Scope to the register table — jsdom renders BOTH the desktop table and
+    // the (hidden below md, but still mounted) mobile card list, which repeats
+    // the same node name/icon, so unscoped queries would match twice.
+    const register = await screen.findByRole('table');
+
     // The Arabic folder name flows in the ambient RTL context — NOT wrapped in
     // an LTR bidi isolate.
-    const folderName = await screen.findByText('مستندات');
+    const folderName = within(register).getByText('مستندات');
     expect(folderName.closest('bdi')).toBeNull();
 
     // Folders carry the subject-grounded dossier icon (§4.7).
-    expect(screen.getByTestId('icon-folder')).toBeInTheDocument();
+    expect(within(register).getByTestId('icon-folder')).toBeInTheDocument();
 
     // The size is monospace ledger data, bidi-isolated LTR so it never
     // scrambles inside the Arabic row (§4.3 / §4.5). Scope to the register
     // table — the storage meter legitimately shows the same total elsewhere.
-    const register = screen.getByRole('table');
     const size = within(register).getByText('2 KB');
     expect(size.tagName).toBe('BDI');
     expect(size).toHaveAttribute('dir', 'ltr');
@@ -209,6 +231,31 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     expect(
       within(register).getByRole('button', { name: i18n.t('share.copy') })
     ).toBeInTheDocument();
+  });
+
+  test('the mobile card list renders the same node alongside the desktop table (§M2a two-layout pattern)', async () => {
+    const nodes: NodeDto[] = [
+      {
+        id: 6,
+        parent_id: 1,
+        kind: 'file',
+        name: 'تقرير.pdf',
+        size_bytes: 2048,
+        mime_type: 'application/pdf',
+        auto_delete_at: null,
+        created_at: NOW,
+        updated_at: NOW,
+      },
+    ];
+    stubFetch({ '/api/nodes': nodes, '/api/nodes/trash': [], '/api/auth/me': USER });
+
+    renderDrive(['/']);
+
+    // jsdom has no viewport, so both layouts mount; the `md:hidden` card list
+    // is present in the DOM with a stable per-node testid and shows the same
+    // name as the (CSS-hidden) desktop row.
+    const card = await screen.findByTestId('drive-card-6');
+    expect(within(card).getByText('تقرير.pdf')).toBeInTheDocument();
   });
 
   test('an empty root shows the authored empty-state copy verbatim (§4.9)', async () => {
@@ -308,9 +355,14 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     // Gate on the auth user being loaded (its username renders in the shell),
     // so the rootNodeId is in the auth context before we open the Move modal.
     await screen.findByText('sara');
-    await screen.findByText('تقرير.pdf');
 
-    fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.action.move') }));
+    // Scope to the register table — the mobile card list (mounted alongside
+    // the table in jsdom, hidden only via CSS) repeats the same node name and
+    // a same-labeled Move action, so unscoped queries would match twice.
+    const register = await screen.findByRole('table');
+    await within(register).findByText('تقرير.pdf');
+
+    fireEvent.click(within(register).getByRole('button', { name: i18n.t('dashboard.action.move') }));
 
     // The Move modal offers "root" (ملفاتي) as a destination — its id (3) came
     // from user.rootNodeId, since the root listing was never fetched here.
@@ -367,5 +419,46 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     });
 
     expect(await screen.findByText(i18n.t('dashboard.folder.conflict'))).toBeInTheDocument();
+  });
+});
+
+describe('TrashView — mobile card list (§M2b two-layout pattern)', () => {
+  test('the mobile card list renders the same trashed node alongside the desktop table', async () => {
+    const trashed: NodeDto[] = [
+      {
+        id: 9,
+        parent_id: null,
+        kind: 'file',
+        name: 'مسودة.docx',
+        size_bytes: 1024,
+        mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        auto_delete_at: null,
+        created_at: NOW,
+        updated_at: NOW,
+      },
+    ];
+    stubFetch({ '/api/nodes/trash': trashed, '/api/auth/me': USER });
+
+    renderTrash(['/trash']);
+
+    // jsdom has no viewport, so both layouts mount; the `md:hidden` card list
+    // is present in the DOM with a stable per-node testid and shows the same
+    // name as the (CSS-hidden) desktop row.
+    const card = await screen.findByTestId('trash-card-9');
+    expect(within(card).getByText('مسودة.docx')).toBeInTheDocument();
+  });
+});
+
+describe('DashboardShell — primary app nav (§M4)', () => {
+  test('renders the shared app-nav as links to My Files / Shared / Trash (below md a scrollable pill strip)', async () => {
+    stubFetch({ '/api/nodes': [], '/api/nodes/trash': [], '/api/auth/me': USER });
+    renderDrive(['/']);
+
+    const nav = await screen.findByRole('navigation', { name: i18n.t('dashboard.nav.label') });
+    expect(within(nav).getByRole('link', { name: i18n.t('dashboard.nav.myFiles') })).toHaveAttribute('href', '/');
+    expect(within(nav).getByRole('link', { name: i18n.t('dashboard.nav.shared') })).toHaveAttribute('href', '/shared');
+    expect(within(nav).getByRole('link', { name: i18n.t('dashboard.nav.trash') })).toHaveAttribute('href', '/trash');
+    // A non-admin never sees the Admin pill.
+    expect(within(nav).queryByRole('link', { name: i18n.t('dashboard.nav.admin') })).toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import { I18nextProvider } from 'react-i18next';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { registerSW } from 'virtual:pwa-register';
 import './styles/fonts';
 import './styles/index.css';
 import i18n, { dirForLang } from './i18n';
@@ -46,3 +47,11 @@ createRoot(rootElement).render(
     </QueryClientProvider>
   </StrictMode>
 );
+
+// Register the service worker (§P1). `virtual:pwa-register` is bundled into
+// this entry chunk (an external, same-origin module script) so it satisfies
+// the strict `script-src 'self'` CSP; `injectRegister: null` in vite.config
+// keeps any inline registration snippet out of index.html. `autoUpdate` ⇒ a
+// new deploy's SW installs and activates on the next load. No-op in dev (PWA
+// devOptions are disabled).
+registerSW({ immediate: true });

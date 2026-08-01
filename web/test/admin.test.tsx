@@ -340,7 +340,11 @@ describe('Admin — display name (Task 3)', () => {
     await renderAdmin({ users });
 
     expect(await screen.findByText(t('admin.users.col.name'))).toBeInTheDocument();
-    expect(screen.getByText('أحمد الموظف')).toBeInTheDocument();
+    // Scope to the desktop row: the mobile card list (mounted alongside the
+    // table in jsdom, hidden only via CSS) repeats the same display-name
+    // text, so an unscoped query would match twice (§M3 two-layout pattern).
+    const ahmedRow = await screen.findByTestId('user-row-2');
+    expect(within(ahmedRow).getByText('أحمد الموظف')).toBeInTheDocument();
 
     const noNameRow = await screen.findByTestId('user-row-3');
     expect(within(noNameRow).getByText(t('admin.users.noName'))).toBeInTheDocument();
@@ -380,6 +384,60 @@ describe('Admin — clear user space (Task 8)', () => {
   });
 });
 
+describe('Admin — mobile card lists (§M3 two-layout pattern)', () => {
+  test('the users mobile card list renders the same user alongside the desktop table', async () => {
+    const users = [mkUser({ id: 5, username: 'mobileuser', display_name: 'مستخدم الجوال' })];
+    stubFetch({ users });
+    await renderAdmin({ users });
+
+    // jsdom has no viewport, so both layouts mount; the `md:hidden` card list
+    // is present in the DOM with a stable per-user testid and shows the same
+    // identity as the (CSS-hidden) desktop row.
+    const card = await screen.findByTestId('user-card-5');
+    expect(within(card).getByText('mobileuser')).toBeInTheDocument();
+    expect(within(card).getByText('مستخدم الجوال')).toBeInTheDocument();
+  });
+
+  test('the shares mobile card list renders the same share alongside the desktop table', async () => {
+    const shares = [
+      {
+        id: 20,
+        node_id: 7,
+        owner_id: 2,
+        owner_username: 'mobileOwner',
+        owner_active: true,
+        node_name: 'عرض.pdf',
+        is_active: true,
+        has_password: false,
+        expires_at: null,
+        allow_download: true,
+        created_at: NOW,
+        status: 'active',
+      },
+    ];
+    stubFetch({ shares });
+    await renderAdmin({ shares });
+
+    fireEvent.click(await screen.findByRole('tab', { name: t('admin.tabs.shares') }));
+
+    const card = await screen.findByTestId('share-card-20');
+    expect(within(card).getByText('mobileOwner')).toBeInTheDocument();
+  });
+
+  test('the audit mobile card list renders the same entry alongside the desktop table', async () => {
+    const audit = [
+      { id: 7, actor_id: 1, action: 'user_create', target: '2', detail: null, created_at: NOW },
+    ];
+    stubFetch({ audit });
+    await renderAdmin({ audit });
+
+    fireEvent.click(await screen.findByRole('tab', { name: t('admin.tabs.audit') }));
+
+    const card = await screen.findByTestId('audit-card-7');
+    expect(within(card).getByText(t('admin.audit.action.user_create'))).toBeInTheDocument();
+  });
+});
+
 describe('Admin — SharesTable force-revoke (§3.1)', () => {
   test('force-revoking a share issues DELETE /api/admin/shares/:id', async () => {
     const shares = [
@@ -404,8 +462,12 @@ describe('Admin — SharesTable force-revoke (§3.1)', () => {
     // Switch to the shares tab.
     fireEvent.click(await screen.findByRole('tab', { name: t('admin.tabs.shares') }));
 
-    // Open the revoke confirm for the row, confirm it.
-    fireEvent.click(await screen.findByRole('button', { name: t('admin.shares.revoke') }));
+    // Open the revoke confirm for the row, confirm it. Scope to the desktop
+    // table: the mobile card list (mounted alongside it in jsdom, hidden only
+    // via CSS) repeats the same revoke button, so an unscoped query would
+    // match twice (§M3 two-layout pattern).
+    const table = await screen.findByRole('table');
+    fireEvent.click(within(table).getByRole('button', { name: t('admin.shares.revoke') }));
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: t('admin.shares.confirm.confirm') }));
     });
@@ -433,12 +495,17 @@ describe('Admin — AuditLog (§3.1)', () => {
 
     fireEvent.click(await screen.findByRole('tab', { name: t('admin.tabs.audit') }));
 
+    // Scope to the desktop table: the mobile card list (mounted alongside it
+    // in jsdom, hidden only via CSS) repeats the same action label / target /
+    // actor text, so unscoped queries would match twice (§M3 two-layout
+    // pattern).
+    const table = await screen.findByRole('table');
     // The friendly action label for a known action.
-    expect(await screen.findByText(t('admin.audit.action.user_create'))).toBeInTheDocument();
+    expect(await within(table).findByText(t('admin.audit.action.user_create'))).toBeInTheDocument();
     // The redacted secret target passes through verbatim (server already redacted it).
-    expect(screen.getByText('redacted:abcdef0123456789')).toBeInTheDocument();
+    expect(within(table).getByText('redacted:abcdef0123456789')).toBeInTheDocument();
     // A null actor renders as the system label, not a blank.
-    expect(screen.getByText(t('admin.audit.system'))).toBeInTheDocument();
+    expect(within(table).getByText(t('admin.audit.system'))).toBeInTheDocument();
   });
 
   test('renders resolved actor and target names, not raw ids (Task 5)', async () => {
@@ -468,5 +535,23 @@ describe('Admin — AuditLog (§3.1)', () => {
     expect(within(table).getByText('المستخدم الجديد')).toBeInTheDocument();
     // The raw numeric target id must not appear once resolved.
     expect(within(table).queryByText('2')).toBeNull();
+  });
+});
+
+describe('AdminPanel — mobile app nav strip (§M4)', () => {
+  test('renders the shared app-nav so a mobile admin can reach Files/Shared/Trash/Admin', async () => {
+    stubFetch({ users: [] });
+    await renderAdmin({ users: [] });
+
+    // The primary app nav (a `navigation` landmark) is now rendered inside the
+    // admin panel — below md it is a scrollable pill strip; here in jsdom it is
+    // always present so a mobile admin is never stranded on the metadata-only
+    // panel with no way back to their files.
+    const nav = await screen.findByRole('navigation', { name: t('dashboard.nav.label') });
+    expect(within(nav).getByRole('link', { name: t('dashboard.nav.myFiles') })).toHaveAttribute('href', '/');
+    expect(within(nav).getByRole('link', { name: t('dashboard.nav.shared') })).toHaveAttribute('href', '/shared');
+    expect(within(nav).getByRole('link', { name: t('dashboard.nav.trash') })).toHaveAttribute('href', '/trash');
+    // An admin also sees the Admin pill (current route).
+    expect(within(nav).getByRole('link', { name: t('dashboard.nav.admin') })).toBeInTheDocument();
   });
 });

@@ -96,7 +96,7 @@ export function ToastProvider({
           type="button"
           onClick={() => dismiss(item.id)}
           aria-label={t('common.close')}
-          className="inline-flex text-ink-2"
+          className="inline-flex min-h-10 min-w-10 items-center justify-center text-ink-2"
         >
           <Close size={18} />
         </button>
