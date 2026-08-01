@@ -9,10 +9,13 @@ import type { AuditRowDto } from './types';
 /*
  * AuditLog (§3.1) — the read-only audit register, paginated.
  *
- * Rows: timestamp (Damascus, mono/bidi), actor (id, or the system label for a
+ * Rows: timestamp (Damascus, mono/bidi), actor (resolved display-name or
+ * username, falling back to `#id` when unresolved, or the system label for a
  * null actor), a friendly Arabic action label (falling back to the raw machine
- * action for anything unmapped), and the target (a DB id or an already-redacted
- * secret — the server redacts token-valued targets before they leave the box).
+ * action for anything unmapped), and the target — for user-target actions this
+ * resolves to the target user's display-name/username (with a "(محذوف)" hint
+ * appended to `#id` when the user no longer resolves), otherwise the raw
+ * target as returned by the server (already redacted if it was a secret).
  * Read-only: no row actions. Prev/Next page through `['admin','audit', page]`.
  */
 export default function AuditLog() {

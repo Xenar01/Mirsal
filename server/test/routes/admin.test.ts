@@ -601,6 +601,65 @@ test('POST /users/:id/clear on an unknown user → 404', async () => {
   expect(res.statusCode).toBe(404);
 });
 
+test('POST /users/:id/clear only wipes the target user, leaving another user untouched', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const uidA = await seedUser('victimA', 'x', { role: 'user' });
+  const uidB = await seedUser('victimB', 'x', { role: 'user' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+
+  const rootsA = ensureUserRoots(db!, uidA, NOW);
+  const rootsB = ensureUserRoots(db!, uidB, NOW);
+
+  // Give each user a folder + a file inside it, plus a share on the file.
+  function seedDrive(uid: number, rootId: number, tag: string) {
+    const folderId = Number(
+      db!
+        .prepare(
+          `INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at) VALUES (?,?,?,?,?,?)`
+        )
+        .run(uid, rootId, 'folder', `Docs-${tag}`, NOW, NOW).lastInsertRowid
+    );
+    const fileId = Number(
+      db!
+        .prepare(
+          `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?,?)`
+        )
+        .run(uid, folderId, 'file', `a-${tag}.txt`, 5, `${uid}/blob-${tag}`, NOW, NOW).lastInsertRowid
+    );
+    db!
+      .prepare(
+        `INSERT INTO shares(node_id, owner_id, token, is_active, allow_download, created_at) VALUES (?,?,?,?,?,?)`
+      )
+      .run(fileId, uid, `tok-${tag}`, 1, 1, NOW);
+    db!.prepare('UPDATE users SET used_bytes = 5 WHERE id = ?').run(uid);
+    return { folderId, fileId };
+  }
+
+  seedDrive(uidA, rootsA.rootId, 'A');
+  seedDrive(uidB, rootsB.rootId, 'B');
+
+  const res = await adminReq(built, 'POST', `/api/admin/users/${uidA}/clear`, auth);
+  expect(res.statusCode).toBe(200);
+
+  // A's folder/file nodes are gone (anchors the contrast).
+  const remainingA = db!
+    .prepare(`SELECT COUNT(*) c FROM nodes WHERE owner_id = ? AND kind IN ('folder','file')`)
+    .get(uidA) as { c: number };
+  expect(remainingA.c).toBe(0);
+
+  // B's folder/file nodes, used_bytes, and share are all untouched.
+  const remainingB = db!
+    .prepare(`SELECT COUNT(*) c FROM nodes WHERE owner_id = ? AND kind IN ('folder','file')`)
+    .get(uidB) as { c: number };
+  expect(remainingB.c).toBe(2);
+  const userB = db!.prepare(`SELECT used_bytes FROM users WHERE id = ?`).get(uidB) as { used_bytes: number };
+  expect(userB.used_bytes).toBe(5);
+  const sharesB = db!.prepare(`SELECT COUNT(*) c FROM shares WHERE owner_id = ?`).get(uidB) as { c: number };
+  expect(sharesB.c).toBe(1);
+});
+
 // ---------------------------------------------------------------------------
 // Global shares list + force-revoke
 // ---------------------------------------------------------------------------

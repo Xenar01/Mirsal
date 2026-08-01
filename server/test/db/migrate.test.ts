@@ -151,7 +151,7 @@ function cols(db: Database.Database): string[] {
 }
 
 describe('migrate v2 download-limit columns', () => {
-  it('adds the 3 columns to a v1 DB and records version 2', () => {
+  it('adds the 3 columns to a v1 DB and records the latest version', () => {
     const db = new Database(':memory:');
     db.exec(V1_SHARES);
     db.exec(V1_USERS);
@@ -162,7 +162,7 @@ describe('migrate v2 download-limit columns', () => {
     expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
   });
 
-  it('a fresh DB has the columns and lands at version 2', () => {
+  it('a fresh DB has the columns and lands at the latest version', () => {
     const db = new Database(':memory:');
     migrate(db);
     expect(cols(db)).toEqual(expect.arrayContaining(['download_limit', 'download_count', 'on_exhaust']));
