@@ -145,18 +145,22 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
 
     renderDrive(['/']);
 
+    // Scope to the register table — jsdom renders BOTH the desktop table and
+    // the (hidden below md, but still mounted) mobile card list, which repeats
+    // the same node name/icon, so unscoped queries would match twice.
+    const register = await screen.findByRole('table');
+
     // The Arabic folder name flows in the ambient RTL context — NOT wrapped in
     // an LTR bidi isolate.
-    const folderName = await screen.findByText('مستندات');
+    const folderName = within(register).getByText('مستندات');
     expect(folderName.closest('bdi')).toBeNull();
 
     // Folders carry the subject-grounded dossier icon (§4.7).
-    expect(screen.getByTestId('icon-folder')).toBeInTheDocument();
+    expect(within(register).getByTestId('icon-folder')).toBeInTheDocument();
 
     // The size is monospace ledger data, bidi-isolated LTR so it never
     // scrambles inside the Arabic row (§4.3 / §4.5). Scope to the register
     // table — the storage meter legitimately shows the same total elsewhere.
-    const register = screen.getByRole('table');
     const size = within(register).getByText('2 KB');
     expect(size.tagName).toBe('BDI');
     expect(size).toHaveAttribute('dir', 'ltr');
@@ -209,6 +213,31 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     expect(
       within(register).getByRole('button', { name: i18n.t('share.copy') })
     ).toBeInTheDocument();
+  });
+
+  test('the mobile card list renders the same node alongside the desktop table (§M2a two-layout pattern)', async () => {
+    const nodes: NodeDto[] = [
+      {
+        id: 6,
+        parent_id: 1,
+        kind: 'file',
+        name: 'تقرير.pdf',
+        size_bytes: 2048,
+        mime_type: 'application/pdf',
+        auto_delete_at: null,
+        created_at: NOW,
+        updated_at: NOW,
+      },
+    ];
+    stubFetch({ '/api/nodes': nodes, '/api/nodes/trash': [], '/api/auth/me': USER });
+
+    renderDrive(['/']);
+
+    // jsdom has no viewport, so both layouts mount; the `md:hidden` card list
+    // is present in the DOM with a stable per-node testid and shows the same
+    // name as the (CSS-hidden) desktop row.
+    const card = await screen.findByTestId('drive-card-6');
+    expect(within(card).getByText('تقرير.pdf')).toBeInTheDocument();
   });
 
   test('an empty root shows the authored empty-state copy verbatim (§4.9)', async () => {
@@ -308,9 +337,14 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     // Gate on the auth user being loaded (its username renders in the shell),
     // so the rootNodeId is in the auth context before we open the Move modal.
     await screen.findByText('sara');
-    await screen.findByText('تقرير.pdf');
 
-    fireEvent.click(screen.getByRole('button', { name: i18n.t('dashboard.action.move') }));
+    // Scope to the register table — the mobile card list (mounted alongside
+    // the table in jsdom, hidden only via CSS) repeats the same node name and
+    // a same-labeled Move action, so unscoped queries would match twice.
+    const register = await screen.findByRole('table');
+    await within(register).findByText('تقرير.pdf');
+
+    fireEvent.click(within(register).getByRole('button', { name: i18n.t('dashboard.action.move') }));
 
     // The Move modal offers "root" (ملفاتي) as a destination — its id (3) came
     // from user.rootNodeId, since the root listing was never fetched here.

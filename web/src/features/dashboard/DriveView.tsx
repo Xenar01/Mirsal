@@ -258,36 +258,60 @@ function Register({
   }
 
   return (
-    <div className="overflow-x-auto rounded-[10px] border border-line bg-surface">
-      <table className="w-full border-collapse font-body text-sm">
-        <thead>
-          <tr className="border-b border-line text-ink-2">
-            <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.name')}</th>
-            <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.size')}</th>
-            <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.date')}</th>
-            <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.status')}</th>
-            <th className="ps-3 pe-3 py-2 text-start font-medium">
-              <span className="sr-only">{t('dashboard.col.actions')}</span>
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {nodes.map((node) => (
-            <NodeRow
-              key={node.id}
-              node={node}
-              share={shareByNode.get(node.id) ?? null}
-              onOpen={onOpen}
-              onRename={onRename}
-              onMove={onMove}
-              onShare={onShare}
-              onAutoDelete={onAutoDelete}
-              onTrash={onTrash}
-            />
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      {/* Desktop (≥ md): the register table, unchanged — only the wrapper
+          gained `hidden md:block` so it yields to the mobile card list below md. */}
+      <div className="hidden overflow-x-auto rounded-[10px] border border-line bg-surface md:block">
+        <table className="w-full border-collapse font-body text-sm">
+          <thead>
+            <tr className="border-b border-line text-ink-2">
+              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.name')}</th>
+              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.size')}</th>
+              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.date')}</th>
+              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.status')}</th>
+              <th className="ps-3 pe-3 py-2 text-start font-medium">
+                <span className="sr-only">{t('dashboard.col.actions')}</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {nodes.map((node) => (
+              <NodeRow
+                key={node.id}
+                variant="row"
+                node={node}
+                share={shareByNode.get(node.id) ?? null}
+                onOpen={onOpen}
+                onRename={onRename}
+                onMove={onMove}
+                onShare={onShare}
+                onAutoDelete={onAutoDelete}
+                onTrash={onTrash}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mobile (< md): the same nodes as a stacked card list — same data,
+          same handlers, same modals (see NodeRow's `variant` prop). */}
+      <div className="flex flex-col gap-3 md:hidden">
+        {nodes.map((node) => (
+          <NodeRow
+            key={node.id}
+            variant="card"
+            node={node}
+            share={shareByNode.get(node.id) ?? null}
+            onOpen={onOpen}
+            onRename={onRename}
+            onMove={onMove}
+            onShare={onShare}
+            onAutoDelete={onAutoDelete}
+            onTrash={onTrash}
+          />
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -313,9 +337,122 @@ function SharePill({ icon, label }: { icon: ReactNode; label: string }) {
   );
 }
 
+/**
+ * Live share state at a glance (§4.6 / §4.4): the GRANULAR status
+ * (active/stopped/expired/exhausted) + a quick copy-link, then pills for the
+ * lifecycle controls in force — password, remaining downloads, expiry.
+ * Shared verbatim between the desktop status cell and the mobile card's
+ * status row — the ONLY place this markup/logic is written.
+ */
+function ShareStatus({
+  share,
+  downloadsLeft,
+  onCopy,
+}: {
+  share: ShareDto;
+  downloadsLeft: number | null;
+  onCopy: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col items-start gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <StatusChip status={share.status} />
+        <button
+          type="button"
+          onClick={onCopy}
+          className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-0.5 font-body text-xs text-teal transition-colors hover:bg-paper focus-visible:bg-paper"
+        >
+          <Copy size={13} />
+          {t('share.copy')}
+        </button>
+      </div>
+      {(share.has_password || share.expires_at != null || share.download_limit != null) && (
+        <div className="flex flex-wrap items-center gap-1">
+          {share.has_password && (
+            <SharePill icon={<Lock size={12} />} label={t('dashboard.share.password')} />
+          )}
+          {share.download_limit != null && (
+            <SharePill
+              icon={<DownloadArrow size={12} />}
+              label={t('dashboard.share.downloadsLeft', { n: downloadsLeft })}
+            />
+          )}
+          {share.expires_at != null && (
+            <SharePill icon={<CalendarStamp size={12} />} label={formatDate(share.expires_at)} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The row's action chips (download/share/auto-delete/rename/move/trash — a
+ * subset applies per node kind). Shared verbatim between the desktop actions
+ * cell and the mobile card's action row — the ONLY place these six buttons
+ * (labels/handlers/hrefs) are written; the two callers differ only in the
+ * wrapping container's layout classes.
+ */
+function NodeActionButtons({
+  node,
+  isFolder,
+  onShare,
+  onAutoDelete,
+  onRename,
+  onMove,
+  onTrash,
+}: {
+  node: NodeDto;
+  isFolder: boolean;
+  onShare: (node: NodeDto) => void;
+  onAutoDelete: (node: NodeDto) => void;
+  onRename: (node: NodeDto) => void;
+  onMove: (node: NodeDto) => void;
+  onTrash: (node: NodeDto) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {!isFolder && (
+        <a href={downloadUrl(node.id)} className={ROW_ACTION}>
+          {t('dashboard.action.download')}
+        </a>
+      )}
+      <button type="button" onClick={() => onShare(node)} className={ROW_ACTION}>
+        {t('dashboard.action.share')}
+      </button>
+      <button type="button" onClick={() => onAutoDelete(node)} className={ROW_ACTION}>
+        {t('dashboard.action.autoDelete')}
+      </button>
+      <button type="button" onClick={() => onRename(node)} className={ROW_ACTION}>
+        {t('dashboard.action.rename')}
+      </button>
+      <button type="button" onClick={() => onMove(node)} className={ROW_ACTION}>
+        {t('dashboard.action.move')}
+      </button>
+      <button type="button" onClick={() => onTrash(node)} className={ROW_ACTION_DANGER}>
+        {t('dashboard.action.trash')}
+      </button>
+    </>
+  );
+}
+
+/**
+ * A node's per-node behavior (navigate/copy-link/derived flags) plus BOTH of
+ * its presentations. `variant` switches ONLY the returned JSX layout —
+ * `'row'` renders the desktop `<tr>` byte-identically to before this refactor,
+ * `'card'` renders the mobile card — while every handler, derived value, and
+ * the shared `ShareStatus`/`NodeActionButtons` sub-components above are the
+ * single code path both variants call. There is no separate hook because
+ * this component owns no modal state itself — every modal (rename/move/share/
+ * auto-delete) is opened by the callback props and rendered once by the
+ * `DriveView` parent, already shared by construction.
+ */
 function NodeRow({
   node,
   share,
+  variant = 'row',
   onOpen,
   onRename,
   onMove,
@@ -325,6 +462,7 @@ function NodeRow({
 }: {
   node: NodeDto;
   share: ShareDto | null;
+  variant?: 'row' | 'card';
   onOpen: (node: NodeDto) => void;
   onRename: (node: NodeDto) => void;
   onMove: (node: NodeDto) => void;
@@ -351,6 +489,69 @@ function NodeRow({
     share && share.download_limit != null
       ? Math.max(0, share.download_limit - share.download_count)
       : null;
+
+  if (variant === 'card') {
+    return (
+      <div
+        data-testid={`drive-card-${node.id}`}
+        className="rounded-[10px] border border-line bg-surface p-3"
+      >
+        {isFolder ? (
+          <button
+            type="button"
+            onClick={() => onOpen(node)}
+            title={t('dashboard.openFolder')}
+            className="group flex w-full items-center gap-2 rounded-md text-start"
+          >
+            <span data-testid="icon-folder" className="inline-flex shrink-0 text-brass">
+              <FolderDossier size={20} />
+            </span>
+            <span className="min-w-0 flex-1 truncate font-medium text-ink group-hover:text-teal">
+              {node.name}
+            </span>
+            <span className="inline-flex shrink-0 text-ink-2 group-hover:text-teal">
+              <ChevronEnter size={16} />
+            </span>
+          </button>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span data-testid="icon-file" className="inline-flex shrink-0 text-ink-2">
+              <FileSheet size={20} />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-ink">{node.name}</span>
+          </div>
+        )}
+
+        <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-ink-2">
+          <bdi dir="ltr" className="font-mono">
+            {formatBytes(node.size_bytes)}
+          </bdi>
+          <span aria-hidden="true">·</span>
+          <bdi dir="ltr" className="font-mono">
+            {formatDate(node.updated_at)}
+          </bdi>
+        </div>
+
+        {share && (
+          <div className="mt-2">
+            <ShareStatus share={share} downloadsLeft={downloadsLeft} onCopy={copyLink} />
+          </div>
+        )}
+
+        <div className="mt-2 flex flex-wrap gap-2">
+          <NodeActionButtons
+            node={node}
+            isFolder={isFolder}
+            onShare={onShare}
+            onAutoDelete={onAutoDelete}
+            onRename={onRename}
+            onMove={onMove}
+            onTrash={onTrash}
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <tr className="border-b border-line last:border-b-0 hover:bg-paper">
@@ -393,43 +594,8 @@ function NodeRow({
         </bdi>
       </td>
       <td className="ps-3 pe-3 py-2">
-        {/* Live share state at a glance (§4.6 / §4.4): the GRANULAR status
-            (active/stopped/expired/exhausted) + a quick copy-link, then pills
-            for the lifecycle controls in force — password, remaining downloads,
-            expiry. An unshared node shows a neutral placeholder. */}
         {share ? (
-          <div className="flex flex-col items-start gap-1.5">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <StatusChip status={share.status} />
-              <button
-                type="button"
-                onClick={copyLink}
-                className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-0.5 font-body text-xs text-teal transition-colors hover:bg-paper focus-visible:bg-paper"
-              >
-                <Copy size={13} />
-                {t('share.copy')}
-              </button>
-            </div>
-            {(share.has_password || share.expires_at != null || share.download_limit != null) && (
-              <div className="flex flex-wrap items-center gap-1">
-                {share.has_password && (
-                  <SharePill icon={<Lock size={12} />} label={t('dashboard.share.password')} />
-                )}
-                {share.download_limit != null && (
-                  <SharePill
-                    icon={<DownloadArrow size={12} />}
-                    label={t('dashboard.share.downloadsLeft', { n: downloadsLeft })}
-                  />
-                )}
-                {share.expires_at != null && (
-                  <SharePill
-                    icon={<CalendarStamp size={12} />}
-                    label={formatDate(share.expires_at)}
-                  />
-                )}
-              </div>
-            )}
-          </div>
+          <ShareStatus share={share} downloadsLeft={downloadsLeft} onCopy={copyLink} />
         ) : (
           <span aria-hidden="true" className="text-ink-2">
             —
@@ -438,26 +604,15 @@ function NodeRow({
       </td>
       <td className="ps-3 pe-3 py-2">
         <div className="flex flex-wrap items-center justify-end gap-1.5">
-          {!isFolder && (
-            <a href={downloadUrl(node.id)} className={ROW_ACTION}>
-              {t('dashboard.action.download')}
-            </a>
-          )}
-          <button type="button" onClick={() => onShare(node)} className={ROW_ACTION}>
-            {t('dashboard.action.share')}
-          </button>
-          <button type="button" onClick={() => onAutoDelete(node)} className={ROW_ACTION}>
-            {t('dashboard.action.autoDelete')}
-          </button>
-          <button type="button" onClick={() => onRename(node)} className={ROW_ACTION}>
-            {t('dashboard.action.rename')}
-          </button>
-          <button type="button" onClick={() => onMove(node)} className={ROW_ACTION}>
-            {t('dashboard.action.move')}
-          </button>
-          <button type="button" onClick={() => onTrash(node)} className={ROW_ACTION_DANGER}>
-            {t('dashboard.action.trash')}
-          </button>
+          <NodeActionButtons
+            node={node}
+            isFolder={isFolder}
+            onShare={onShare}
+            onAutoDelete={onAutoDelete}
+            onRename={onRename}
+            onMove={onMove}
+            onTrash={onTrash}
+          />
         </div>
       </td>
     </tr>
