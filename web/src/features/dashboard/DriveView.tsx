@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Modal from '../../components/Modal';
@@ -19,6 +19,7 @@ import DashboardShell from './DashboardShell';
 import UploadDrop from './UploadDrop';
 import { downloadUrl } from './api';
 import { formatBytes, formatDate } from './format';
+import { sortNodes, type SortKey, type SortState } from './sort';
 import { useNodes, useCreateFolder, useRenameNode, useMoveNode, useTrashNode } from './queries';
 import { useAuth } from '../auth/auth-context';
 import { useShares } from './share/queries';
@@ -242,6 +243,15 @@ function Register({
 }) {
   const { t } = useTranslation();
 
+  const [sort, setSort] = useState<SortState>({ key: 'name', dir: 'asc' });
+  const sorted = useMemo(() => sortNodes(nodes, sort), [nodes, sort]);
+
+  function onSortKey(key: SortKey) {
+    setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  }
+  const ariaSort = (key: SortKey): 'ascending' | 'descending' | 'none' =>
+    sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+
   if (isPending) {
     return <p className="font-body text-sm text-ink-2">{t('dashboard.loading')}</p>;
   }
@@ -265,9 +275,24 @@ function Register({
         <table className="w-full border-collapse font-body text-sm">
           <thead>
             <tr className="border-b border-line text-ink-2">
-              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.name')}</th>
-              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.size')}</th>
-              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.date')}</th>
+              <th aria-sort={ariaSort('name')} className="ps-3 pe-3 py-2 text-start font-medium">
+                <button type="button" onClick={() => onSortKey('name')} className="inline-flex items-center gap-1 hover:text-ink">
+                  {t('dashboard.col.name')}
+                  {sort.key === 'name' && <span aria-hidden="true">{sort.dir === 'asc' ? '↑' : '↓'}</span>}
+                </button>
+              </th>
+              <th aria-sort={ariaSort('size')} className="ps-3 pe-3 py-2 text-start font-medium">
+                <button type="button" onClick={() => onSortKey('size')} className="inline-flex items-center gap-1 hover:text-ink">
+                  {t('dashboard.col.size')}
+                  {sort.key === 'size' && <span aria-hidden="true">{sort.dir === 'asc' ? '↑' : '↓'}</span>}
+                </button>
+              </th>
+              <th aria-sort={ariaSort('date')} className="ps-3 pe-3 py-2 text-start font-medium">
+                <button type="button" onClick={() => onSortKey('date')} className="inline-flex items-center gap-1 hover:text-ink">
+                  {t('dashboard.col.date')}
+                  {sort.key === 'date' && <span aria-hidden="true">{sort.dir === 'asc' ? '↑' : '↓'}</span>}
+                </button>
+              </th>
               <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.status')}</th>
               <th className="ps-3 pe-3 py-2 text-start font-medium">
                 <span className="sr-only">{t('dashboard.col.actions')}</span>
@@ -275,7 +300,7 @@ function Register({
             </tr>
           </thead>
           <tbody>
-            {nodes.map((node) => (
+            {sorted.map((node) => (
               <NodeRow
                 key={node.id}
                 variant="row"
@@ -293,10 +318,34 @@ function Register({
         </table>
       </div>
 
-      {/* Mobile (< md): the same nodes as a stacked card list — same data,
-          same handlers, same modals (see NodeRow's `variant` prop). */}
+      {/* Mobile (< md): a compact sort control (no table header to click), then
+          the same nodes as a stacked card list — same data, same handlers,
+          same modals (see NodeRow's `variant` prop). */}
+      <div className="flex items-center gap-2 md:hidden">
+        <label htmlFor="mobile-sort-key" className="font-body text-xs text-ink-2">
+          {t('dashboard.sort.label')}
+        </label>
+        <select
+          id="mobile-sort-key"
+          value={sort.key}
+          onChange={(e) => setSort((s) => ({ key: e.target.value as SortKey, dir: s.dir }))}
+          className="rounded-md border border-line bg-surface ps-2 pe-2 py-1 font-body text-xs text-ink"
+        >
+          <option value="name">{t('dashboard.sort.byName')}</option>
+          <option value="size">{t('dashboard.sort.bySize')}</option>
+          <option value="date">{t('dashboard.sort.byDate')}</option>
+        </select>
+        <button
+          type="button"
+          aria-label={t('dashboard.sort.toggleDir')}
+          onClick={() => setSort((s) => ({ key: s.key, dir: s.dir === 'asc' ? 'desc' : 'asc' }))}
+          className="inline-flex min-h-10 items-center rounded-md border border-line px-2 py-1 font-body text-xs text-ink"
+        >
+          {sort.dir === 'asc' ? '↑' : '↓'}
+        </button>
+      </div>
       <div className="flex flex-col gap-3 md:hidden">
-        {nodes.map((node) => (
+        {sorted.map((node) => (
           <NodeRow
             key={node.id}
             variant="card"

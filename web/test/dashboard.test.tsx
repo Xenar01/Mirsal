@@ -11,6 +11,7 @@ import DriveView from '../src/features/dashboard/DriveView';
 import TrashView from '../src/features/dashboard/TrashView';
 import UploadDrop from '../src/features/dashboard/UploadDrop';
 import type { NodeDto } from '../src/features/dashboard/types';
+import { sortNodes, type SortState } from '../src/features/dashboard/sort';
 
 const USER = { id: 1, username: 'sara', role: 'user', mustChangePassword: false };
 const NOW = 1_750_000_000_000; // fixed epoch-ms
@@ -419,6 +420,62 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     });
 
     expect(await screen.findByText(i18n.t('dashboard.folder.conflict'))).toBeInTheDocument();
+  });
+
+  test('clicking the Size column header reorders the rows (folders stay first) (#7)', async () => {
+    const listing: NodeDto[] = [
+      { id: 1, parent_id: 9, kind: 'file', name: 'big.bin', size_bytes: 900, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 100 },
+      { id: 2, parent_id: 9, kind: 'file', name: 'small.txt', size_bytes: 10, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 200 },
+      { id: 3, parent_id: 9, kind: 'folder', name: 'Docs', size_bytes: 0, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 300 },
+    ];
+    stubFetch({ '/api/nodes': listing, '/api/shares': [] });
+    renderDrive(['/']);
+
+    // Scope to the register table — the mobile card list (mounted alongside
+    // the table in jsdom, hidden only via CSS) repeats the same node names,
+    // so an unscoped query would match twice.
+    const table = await screen.findByRole('table');
+    await within(table).findByText('big.bin');
+    const sizeHeaderBtn = within(table).getByRole('button', { name: /الحجم/ });
+    await act(async () => {
+      fireEvent.click(sizeHeaderBtn); // size asc
+    });
+
+    const nameCells = within(table).getAllByText(/big\.bin|small\.txt|Docs/).map((el) => el.textContent);
+    // Folder first, then files ascending by size: Docs, small.txt, big.bin
+    expect(nameCells).toEqual(['Docs', 'small.txt', 'big.bin']);
+  });
+});
+
+describe('sortNodes — folders first, then by key/direction (#7)', () => {
+  const mk = (id: number, kind: 'folder' | 'file', name: string, size: number, updated: number): NodeDto => ({
+    id, parent_id: 1, kind, name, size_bytes: size, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: updated,
+  });
+  const nodes: NodeDto[] = [
+    mk(1, 'file', 'banana', 30, 100),
+    mk(2, 'folder', 'Zebra', 0, 300),
+    mk(3, 'file', 'apple', 10, 200),
+    mk(4, 'folder', 'alpha', 0, 50),
+  ];
+
+  const names = (s: SortState) => sortNodes(nodes, s).map((n) => n.name);
+
+  test('name asc: folders (by name) before files (by name)', () => {
+    expect(names({ key: 'name', dir: 'asc' })).toEqual(['alpha', 'Zebra', 'apple', 'banana']);
+  });
+  test('name desc reverses within each group but keeps folders first', () => {
+    expect(names({ key: 'name', dir: 'desc' })).toEqual(['Zebra', 'alpha', 'banana', 'apple']);
+  });
+  test('size asc sorts files by size_bytes (folders still first)', () => {
+    expect(names({ key: 'size', dir: 'asc' }).slice(2)).toEqual(['apple', 'banana']); // 10 < 30
+  });
+  test('date desc sorts by updated_at newest-first within group', () => {
+    expect(names({ key: 'date', dir: 'desc' }).slice(2)).toEqual(['apple', 'banana']); // 200 > 100
+  });
+  test('returns a new array (does not mutate input order)', () => {
+    const before = nodes.map((n) => n.id);
+    sortNodes(nodes, { key: 'size', dir: 'desc' });
+    expect(nodes.map((n) => n.id)).toEqual(before);
   });
 });
 

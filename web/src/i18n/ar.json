@@ -85,6 +85,13 @@
       "autoDelete": "حذف تلقائي",
       "trash": "نقل إلى المهملات"
     },
+    "sort": {
+      "label": "ترتيب حسب",
+      "byName": "الاسم",
+      "bySize": "الحجم",
+      "byDate": "التاريخ",
+      "toggleDir": "عكس اتجاه الترتيب"
+    },
     "share": {
       "password": "بكلمة مرور",
       "downloadsLeft": "متبقٍ {{n}} تنزيل"
