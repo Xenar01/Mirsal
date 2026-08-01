@@ -445,6 +445,70 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     // Folder first, then files ascending by size: Docs, small.txt, big.bin
     expect(nameCells).toEqual(['Docs', 'small.txt', 'big.bin']);
   });
+
+  test('selecting rows shows a bulk bar; confirming bulk-trashes each selected id (#8)', async () => {
+    const listing: NodeDto[] = [
+      { id: 1, parent_id: 9, kind: 'file', name: 'a.txt', size_bytes: 5, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 100 },
+      { id: 2, parent_id: 9, kind: 'file', name: 'b.txt', size_bytes: 6, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 200 },
+    ];
+    const trashed: number[] = [];
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url).split('?')[0];
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (path === '/api/nodes' && method === 'GET') return jsonResponse(200, listing);
+      if (path === '/api/shares') return jsonResponse(200, []);
+      const m = path.match(/^\/api\/nodes\/(\d+)\/trash$/);
+      if (m && method === 'POST') { trashed.push(Number(m[1])); return jsonResponse(200, {}); }
+      return jsonResponse(200, {});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderDrive(['/']);
+    // Scope the initial wait to the table — jsdom mounts both the desktop
+    // table and the (CSS-hidden) mobile card list, which repeats the same
+    // node name, so an unscoped `findByText` would match twice.
+    await screen.findByRole('table');
+
+    // Select both rows via their per-row checkboxes.
+    const cbs = screen.getAllByRole('checkbox', { name: 'تحديد الصف' });
+    await act(async () => {
+      fireEvent.click(cbs[0]);
+      fireEvent.click(cbs[1]);
+    });
+
+    // Bulk bar appears with the count; confirm.
+    const bulkBtn = await screen.findByRole('button', { name: /نقل إلى المهملات \(2\)/ });
+    await act(async () => {
+      fireEvent.click(bulkBtn);
+    });
+    // Scope to the confirm dialog — its submit button shares the same label
+    // ("نقل") as each row's per-node "move" action button, so an unscoped
+    // query would match those too.
+    const dialog = await screen.findByRole('dialog');
+    const confirm = within(dialog).getByRole('button', { name: 'نقل' });
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+
+    expect(trashed.sort()).toEqual([1, 2]);
+  });
+
+  test('the select-all checkbox toggles every row in the current folder (#8)', async () => {
+    const listing: NodeDto[] = [
+      { id: 1, parent_id: 9, kind: 'file', name: 'a.txt', size_bytes: 5, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 100 },
+      { id: 2, parent_id: 9, kind: 'folder', name: 'Docs', size_bytes: 0, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 200 },
+    ];
+    stubFetch({ '/api/nodes': listing, '/api/shares': [] });
+    renderDrive(['/']);
+    await screen.findByRole('table');
+
+    const selectAll = screen.getByRole('checkbox', { name: 'تحديد الكل' });
+    await act(async () => {
+      fireEvent.click(selectAll);
+    });
+    // Bulk bar reflects both rows selected.
+    await screen.findByRole('button', { name: /نقل إلى المهملات \(2\)/ });
+  });
 });
 
 describe('sortNodes — folders first, then by key/direction (#7)', () => {

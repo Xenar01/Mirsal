@@ -94,6 +94,40 @@ export default function DriveView() {
   const [shareTarget, setShareTarget] = useState<NodeDto | null>(null);
   const [autoDeleteTarget, setAutoDeleteTarget] = useState<NodeDto | null>(null);
 
+  const [selected, setSelected] = useState<Set<number>>(() => new Set());
+  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+
+  // Selection is per-folder — clear it whenever the listing's parent changes
+  // (drill in / breadcrumb / back button all change parentId).
+  useEffect(() => {
+    setSelected(new Set());
+  }, [parentId]);
+
+  function toggleSelect(id: number) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function toggleSelectAll(ids: number[]) {
+    setSelected((prev) => (prev.size === ids.length ? new Set() : new Set(ids)));
+  }
+
+  async function runBulkTrash() {
+    const ids = [...selected];
+    try {
+      await Promise.all(ids.map((id) => trashMutation.mutateAsync(id)));
+      toast({ kind: 'success', message: t('dashboard.toast.bulkTrashed') });
+    } catch {
+      toast({ kind: 'error', message: t('dashboard.toast.bulkTrashFailed') });
+    } finally {
+      setSelected(new Set());
+      setBulkConfirmOpen(false);
+    }
+  }
+
   function openFolder(node: NodeDto) {
     navigate(`/?parent=${node.id}`, { state: { trail: [...trail, { id: node.id, name: node.name }] } });
   }
@@ -129,6 +163,11 @@ export default function DriveView() {
           isError={isError}
           nodes={children}
           shareByNode={shareByNode}
+          selected={selected}
+          onToggleSelect={toggleSelect}
+          onToggleSelectAll={toggleSelectAll}
+          onBulkTrash={() => setBulkConfirmOpen(true)}
+          onClearSelection={() => setSelected(new Set())}
           onOpen={openFolder}
           onRename={setRenameTarget}
           onMove={setMoveTarget}
@@ -161,6 +200,27 @@ export default function DriveView() {
       )}
       {autoDeleteTarget && (
         <AutoDeleteMenu node={autoDeleteTarget} onClose={() => setAutoDeleteTarget(null)} />
+      )}
+      {bulkConfirmOpen && (
+        <Modal
+          open
+          onClose={() => setBulkConfirmOpen(false)}
+          title={t('dashboard.select.confirmTitle')}
+          footer={
+            <>
+              <Button variant="secondary" onClick={() => setBulkConfirmOpen(false)}>
+                {t('common.cancel')}
+              </Button>
+              <Button variant="danger" onClick={runBulkTrash} disabled={trashMutation.isPending}>
+                {t('dashboard.select.confirmSubmit')}
+              </Button>
+            </>
+          }
+        >
+          <p className="font-body text-sm text-ink">
+            {t('dashboard.select.confirmBody', { n: selected.size })}
+          </p>
+        </Modal>
       )}
     </DashboardShell>
   );
@@ -223,6 +283,11 @@ function Register({
   isError,
   nodes,
   shareByNode,
+  selected,
+  onToggleSelect,
+  onToggleSelectAll,
+  onBulkTrash,
+  onClearSelection,
   onOpen,
   onRename,
   onMove,
@@ -234,6 +299,11 @@ function Register({
   isError: boolean;
   nodes: NodeDto[];
   shareByNode: Map<number, ShareDto>;
+  selected: Set<number>;
+  onToggleSelect: (id: number) => void;
+  onToggleSelectAll: (ids: number[]) => void;
+  onBulkTrash: () => void;
+  onClearSelection: () => void;
   onOpen: (node: NodeDto) => void;
   onRename: (node: NodeDto) => void;
   onMove: (node: NodeDto) => void;
@@ -245,6 +315,8 @@ function Register({
 
   const [sort, setSort] = useState<SortState>({ key: 'name', dir: 'asc' });
   const sorted = useMemo(() => sortNodes(nodes, sort), [nodes, sort]);
+  const allIds = sorted.map((n) => n.id);
+  const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
 
   function onSortKey(key: SortKey) {
     setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
@@ -269,12 +341,30 @@ function Register({
 
   return (
     <>
+      {selected.size > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-[10px] border border-line bg-paper px-3 py-2">
+          <Button variant="danger" onClick={onBulkTrash}>
+            {t('dashboard.select.bulkTrash', { n: selected.size })}
+          </Button>
+          <button type="button" onClick={onClearSelection} className="font-body text-sm text-teal">
+            {t('dashboard.select.cancel')}
+          </button>
+        </div>
+      )}
       {/* Desktop (≥ md): the register table, unchanged — only the wrapper
           gained `hidden md:block` so it yields to the mobile card list below md. */}
       <div className="hidden overflow-x-auto rounded-[10px] border border-line bg-surface md:block">
         <table className="w-full border-collapse font-body text-sm">
           <thead>
             <tr className="border-b border-line text-ink-2">
+              <th className="ps-3 pe-1 py-2 text-start font-medium">
+                <input
+                  type="checkbox"
+                  aria-label={t('dashboard.select.all')}
+                  checked={allSelected}
+                  onChange={() => onToggleSelectAll(allIds)}
+                />
+              </th>
               <th aria-sort={ariaSort('name')} className="ps-3 pe-3 py-2 text-start font-medium">
                 <button type="button" onClick={() => onSortKey('name')} className="inline-flex items-center gap-1 hover:text-ink">
                   {t('dashboard.col.name')}
@@ -306,6 +396,8 @@ function Register({
                 variant="row"
                 node={node}
                 share={shareByNode.get(node.id) ?? null}
+                selected={selected.has(node.id)}
+                onToggleSelect={onToggleSelect}
                 onOpen={onOpen}
                 onRename={onRename}
                 onMove={onMove}
@@ -351,6 +443,8 @@ function Register({
             variant="card"
             node={node}
             share={shareByNode.get(node.id) ?? null}
+            selected={selected.has(node.id)}
+            onToggleSelect={onToggleSelect}
             onOpen={onOpen}
             onRename={onRename}
             onMove={onMove}
@@ -502,6 +596,8 @@ function NodeRow({
   node,
   share,
   variant = 'row',
+  selected,
+  onToggleSelect,
   onOpen,
   onRename,
   onMove,
@@ -512,6 +608,8 @@ function NodeRow({
   node: NodeDto;
   share: ShareDto | null;
   variant?: 'row' | 'card';
+  selected: boolean;
+  onToggleSelect: (id: number) => void;
   onOpen: (node: NodeDto) => void;
   onRename: (node: NodeDto) => void;
   onMove: (node: NodeDto) => void;
@@ -545,6 +643,15 @@ function NodeRow({
         data-testid={`drive-card-${node.id}`}
         className="rounded-[10px] border border-line bg-surface p-3"
       >
+        <div className="mb-2 flex items-center gap-2">
+          <input
+            type="checkbox"
+            aria-label={t('dashboard.select.row')}
+            checked={selected}
+            onChange={() => onToggleSelect(node.id)}
+          />
+          <span className="font-body text-xs text-ink-2">{t('dashboard.select.row')}</span>
+        </div>
         {isFolder ? (
           <button
             type="button"
@@ -604,6 +711,14 @@ function NodeRow({
 
   return (
     <tr className="border-b border-line last:border-b-0 hover:bg-paper">
+      <td className="ps-3 pe-1 py-2 align-top">
+        <input
+          type="checkbox"
+          aria-label={t('dashboard.select.row')}
+          checked={selected}
+          onChange={() => onToggleSelect(node.id)}
+        />
+      </td>
       <td className="ps-3 pe-3 py-2">
         {isFolder ? (
           // A folder is a full-width click target — brass dossier icon, a bold
