@@ -51,57 +51,7 @@ export default function TrashView() {
         )}
 
         {!isPending && !isError && items.length > 0 && (
-          <div className="overflow-x-auto rounded-[10px] border border-line bg-surface">
-            <table className="w-full border-collapse font-body text-sm">
-              <thead>
-                <tr className="border-b border-line text-ink-2">
-                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.name')}</th>
-                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.size')}</th>
-                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.date')}</th>
-                  <th className="ps-3 pe-3 py-2 text-start font-medium">
-                    <span className="sr-only">{t('dashboard.col.actions')}</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((node) => (
-                  <tr key={node.id} className="border-b border-line last:border-b-0 hover:bg-paper">
-                    <td className="ps-3 pe-3 py-2">
-                      <div className="flex items-center gap-2">
-                        <span
-                          data-testid={node.kind === 'folder' ? 'icon-folder' : 'icon-file'}
-                          className="inline-flex shrink-0 text-ink-2"
-                        >
-                          {node.kind === 'folder' ? <FolderDossier size={20} /> : <FileSheet size={20} />}
-                        </span>
-                        <span className="text-ink">{node.name}</span>
-                      </div>
-                    </td>
-                    <td className="ps-3 pe-3 py-2">
-                      <bdi dir="ltr" className="font-mono text-ink-2">
-                        {formatBytes(node.size_bytes)}
-                      </bdi>
-                    </td>
-                    <td className="ps-3 pe-3 py-2">
-                      <bdi dir="ltr" className="font-mono text-ink-2">
-                        {formatDate(node.updated_at)}
-                      </bdi>
-                    </td>
-                    <td className="ps-3 pe-3 py-2">
-                      <div className="flex flex-wrap items-center justify-end gap-2">
-                        <button type="button" onClick={() => onRestore(node)} className="text-teal">
-                          {t('trash.restore')}
-                        </button>
-                        <button type="button" onClick={() => setDeleteTarget(node)} className="text-clay">
-                          {t('trash.deletePermanent')}
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <TrashList items={items} onRestore={onRestore} onDelete={setDeleteTarget} />
         )}
       </div>
 
@@ -109,6 +59,163 @@ export default function TrashView() {
         <ConfirmDeleteModal node={deleteTarget} onClose={() => setDeleteTarget(null)} />
       )}
     </DashboardShell>
+  );
+}
+
+/* ── List (desktop table ≥ md / mobile cards < md) ────────────────────── */
+
+/**
+ * The two-layout pattern (§M2a/§M2b): the desktop table (wrapper gains
+ * `hidden md:block`, the table itself byte-identical to before this refactor)
+ * and a sibling `md:hidden` stacked card list — same items, same handlers,
+ * both rendered by the shared `TrashRow` below so there is exactly one place
+ * each row's markup/logic is written.
+ */
+function TrashList({
+  items,
+  onRestore,
+  onDelete,
+}: {
+  items: NodeDto[];
+  onRestore: (node: NodeDto) => void;
+  onDelete: (node: NodeDto) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <div className="hidden overflow-x-auto rounded-[10px] border border-line bg-surface md:block">
+        <table className="w-full border-collapse font-body text-sm">
+          <thead>
+            <tr className="border-b border-line text-ink-2">
+              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.name')}</th>
+              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.size')}</th>
+              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('dashboard.col.date')}</th>
+              <th className="ps-3 pe-3 py-2 text-start font-medium">
+                <span className="sr-only">{t('dashboard.col.actions')}</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((node) => (
+              <TrashRow key={node.id} variant="row" node={node} onRestore={onRestore} onDelete={onDelete} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex flex-col gap-3 md:hidden">
+        {items.map((node) => (
+          <TrashRow key={node.id} variant="card" node={node} onRestore={onRestore} onDelete={onDelete} />
+        ))}
+      </div>
+    </>
+  );
+}
+
+/**
+ * The row's two actions (restore / delete-permanently). Shared verbatim
+ * between the desktop actions cell and the mobile card's action row — the
+ * ONLY place these buttons (labels/handlers/classes) are written.
+ */
+function TrashActionButtons({
+  node,
+  onRestore,
+  onDelete,
+}: {
+  node: NodeDto;
+  onRestore: (node: NodeDto) => void;
+  onDelete: (node: NodeDto) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <button type="button" onClick={() => onRestore(node)} className="text-teal">
+        {t('trash.restore')}
+      </button>
+      <button type="button" onClick={() => onDelete(node)} className="text-clay">
+        {t('trash.deletePermanent')}
+      </button>
+    </>
+  );
+}
+
+/**
+ * A single trashed node's BOTH presentations. `variant` switches only the
+ * returned JSX layout — `'row'` is the desktop `<tr>` byte-identical to
+ * before this refactor, `'card'` is the mobile card — while the icon/name,
+ * the meta line, and `TrashActionButtons` above are the single code path
+ * both variants call.
+ */
+function TrashRow({
+  node,
+  variant = 'row',
+  onRestore,
+  onDelete,
+}: {
+  node: NodeDto;
+  variant?: 'row' | 'card';
+  onRestore: (node: NodeDto) => void;
+  onDelete: (node: NodeDto) => void;
+}) {
+  const icon = node.kind === 'folder' ? <FolderDossier size={20} /> : <FileSheet size={20} />;
+  const testId = node.kind === 'folder' ? 'icon-folder' : 'icon-file';
+
+  if (variant === 'card') {
+    return (
+      <div
+        data-testid={`trash-card-${node.id}`}
+        className="rounded-[10px] border border-line bg-surface p-3"
+      >
+        <div className="flex items-center gap-2">
+          <span data-testid={testId} className="inline-flex shrink-0 text-ink-2">
+            {icon}
+          </span>
+          <span className="min-w-0 flex-1 truncate text-ink">{node.name}</span>
+        </div>
+
+        <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-ink-2">
+          <bdi dir="ltr" className="font-mono">
+            {formatBytes(node.size_bytes)}
+          </bdi>
+          <span aria-hidden="true">·</span>
+          <bdi dir="ltr" className="font-mono">
+            {formatDate(node.updated_at)}
+          </bdi>
+        </div>
+
+        <div className="mt-2 flex flex-wrap gap-2">
+          <TrashActionButtons node={node} onRestore={onRestore} onDelete={onDelete} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <tr className="border-b border-line last:border-b-0 hover:bg-paper">
+      <td className="ps-3 pe-3 py-2">
+        <div className="flex items-center gap-2">
+          <span data-testid={testId} className="inline-flex shrink-0 text-ink-2">
+            {icon}
+          </span>
+          <span className="text-ink">{node.name}</span>
+        </div>
+      </td>
+      <td className="ps-3 pe-3 py-2">
+        <bdi dir="ltr" className="font-mono text-ink-2">
+          {formatBytes(node.size_bytes)}
+        </bdi>
+      </td>
+      <td className="ps-3 pe-3 py-2">
+        <bdi dir="ltr" className="font-mono text-ink-2">
+          {formatDate(node.updated_at)}
+        </bdi>
+      </td>
+      <td className="ps-3 pe-3 py-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <TrashActionButtons node={node} onRestore={onRestore} onDelete={onDelete} />
+        </div>
+      </td>
+    </tr>
   );
 }
 

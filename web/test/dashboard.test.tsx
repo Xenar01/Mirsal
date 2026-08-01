@@ -8,6 +8,7 @@ import i18n from '../src/i18n';
 import { AuthProvider } from '../src/features/auth/auth-context';
 import { ToastProvider } from '../src/components/Toast';
 import DriveView from '../src/features/dashboard/DriveView';
+import TrashView from '../src/features/dashboard/TrashView';
 import UploadDrop from '../src/features/dashboard/UploadDrop';
 import type { NodeDto } from '../src/features/dashboard/types';
 
@@ -54,6 +55,23 @@ function renderDrive(initialEntries: string[]) {
           <ToastProvider>
             <MemoryRouter initialEntries={initialEntries}>
               <DriveView />
+            </MemoryRouter>
+          </ToastProvider>
+        </AuthProvider>
+      </I18nextProvider>
+    </QueryClientProvider>
+  );
+}
+
+function renderTrash(initialEntries: string[]) {
+  const client = makeQueryClient();
+  return render(
+    <QueryClientProvider client={client}>
+      <I18nextProvider i18n={i18n}>
+        <AuthProvider>
+          <ToastProvider>
+            <MemoryRouter initialEntries={initialEntries}>
+              <TrashView />
             </MemoryRouter>
           </ToastProvider>
         </AuthProvider>
@@ -401,5 +419,32 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     });
 
     expect(await screen.findByText(i18n.t('dashboard.folder.conflict'))).toBeInTheDocument();
+  });
+});
+
+describe('TrashView — mobile card list (§M2b two-layout pattern)', () => {
+  test('the mobile card list renders the same trashed node alongside the desktop table', async () => {
+    const trashed: NodeDto[] = [
+      {
+        id: 9,
+        parent_id: null,
+        kind: 'file',
+        name: 'مسودة.docx',
+        size_bytes: 1024,
+        mime_type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        auto_delete_at: null,
+        created_at: NOW,
+        updated_at: NOW,
+      },
+    ];
+    stubFetch({ '/api/nodes/trash': trashed, '/api/auth/me': USER });
+
+    renderTrash(['/trash']);
+
+    // jsdom has no viewport, so both layouts mount; the `md:hidden` card list
+    // is present in the DOM with a stable per-node testid and shows the same
+    // name as the (CSS-hidden) desktop row.
+    const card = await screen.findByTestId('trash-card-9');
+    expect(within(card).getByText('مسودة.docx')).toBeInTheDocument();
   });
 });

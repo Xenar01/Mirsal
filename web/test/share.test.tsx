@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act } from '@testing-library/react';
+import { render, screen, fireEvent, act, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { I18nextProvider } from 'react-i18next';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -305,7 +305,12 @@ describe('Shared register — quick-toggle reports the SERVER status (§3.3)', (
     });
     renderShared();
 
-    const startBtn = await screen.findByRole('button', { name: i18n.t('share.start') });
+    // Scope to the register table — jsdom renders BOTH the desktop table and
+    // the (hidden below md, but still mounted) mobile card list (§M2b
+    // two-layout pattern), which repeats the same Start button, so an
+    // unscoped query would match twice.
+    const register = await screen.findByRole('table');
+    const startBtn = within(register).getByRole('button', { name: i18n.t('share.start') });
     await act(async () => {
       fireEvent.click(startBtn);
     });
@@ -336,9 +341,13 @@ describe('Shared view — owner status chips (§3.3)', () => {
 
     renderShared();
 
-    const active = await screen.findByText(i18n.t('status.active'));
-    const stopped = screen.getByText(i18n.t('status.stopped'));
-    const expired = screen.getByText(i18n.t('status.expired'));
+    // Scope to the register table — the mobile card list (mounted alongside
+    // the table in jsdom, hidden only via CSS) repeats the same StatusChip
+    // labels, so unscoped queries would match twice (§M2b two-layout pattern).
+    const register = await screen.findByRole('table');
+    const active = within(register).getByText(i18n.t('status.active'));
+    const stopped = within(register).getByText(i18n.t('status.stopped'));
+    const expired = within(register).getByText(i18n.t('status.expired'));
     expect(active).toBeInTheDocument();
     expect(stopped).toBeInTheDocument();
     expect(expired).toBeInTheDocument();
@@ -357,6 +366,23 @@ describe('Shared view — owner status chips (§3.3)', () => {
     renderShared();
 
     expect(await screen.findByText('لم تُشارك أي عنصر بعد.')).toBeInTheDocument();
+  });
+
+  test('the mobile card list renders the same share alongside the desktop table (§M2b two-layout pattern)', async () => {
+    stubFetch({
+      '/api/shares': [mkShare({ id: 4, node_id: 103, token: 'MobileTok9' })],
+      '/api/nodes': [],
+      '/api/nodes/trash': [],
+      '/api/auth/me': USER,
+    });
+
+    renderShared();
+
+    // jsdom has no viewport, so both layouts mount; the `md:hidden` card list
+    // is present in the DOM with a stable per-share testid and shows the same
+    // token as the (CSS-hidden) desktop row.
+    const card = await screen.findByTestId('shared-card-4');
+    expect(within(card).getByText('MobileTok9')).toBeInTheDocument();
   });
 });
 

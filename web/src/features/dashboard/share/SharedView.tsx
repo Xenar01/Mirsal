@@ -47,25 +47,7 @@ export default function SharedView() {
         )}
 
         {!isPending && !isError && shares.length > 0 && (
-          <div className="overflow-x-auto rounded-[10px] border border-line bg-surface">
-            <table className="w-full border-collapse font-body text-sm">
-              <thead>
-                <tr className="border-b border-line text-ink-2">
-                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('shared.col.token')}</th>
-                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('shared.col.status')}</th>
-                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('shared.col.created')}</th>
-                  <th className="ps-3 pe-3 py-2 text-start font-medium">
-                    <span className="sr-only">{t('shared.col.actions')}</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {shares.map((share) => (
-                  <ShareRow key={share.id} share={share} onRevoke={() => setRevokeTarget(share)} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ShareList shares={shares} onRevoke={setRevokeTarget} />
         )}
       </div>
 
@@ -76,7 +58,121 @@ export default function SharedView() {
   );
 }
 
-function ShareRow({ share, onRevoke }: { share: ShareDto; onRevoke: () => void }) {
+/* ── List (desktop table ≥ md / mobile cards < md) ────────────────────── */
+
+/**
+ * The two-layout pattern (§M2a/§M2b): the desktop table (wrapper gains
+ * `hidden md:block`, the table itself byte-identical to before this refactor)
+ * and a sibling `md:hidden` stacked card list — same shares, same handlers,
+ * both rendered by the shared `ShareRow` below so there is exactly one place
+ * each row's markup/logic is written.
+ */
+function ShareList({
+  shares,
+  onRevoke,
+}: {
+  shares: ShareDto[];
+  onRevoke: (share: ShareDto) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <div className="hidden overflow-x-auto rounded-[10px] border border-line bg-surface md:block">
+        <table className="w-full border-collapse font-body text-sm">
+          <thead>
+            <tr className="border-b border-line text-ink-2">
+              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('shared.col.token')}</th>
+              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('shared.col.status')}</th>
+              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('shared.col.created')}</th>
+              <th className="ps-3 pe-3 py-2 text-start font-medium">
+                <span className="sr-only">{t('shared.col.actions')}</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {shares.map((share) => (
+              <ShareRow
+                key={share.id}
+                variant="row"
+                share={share}
+                onRevoke={() => onRevoke(share)}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="flex flex-col gap-3 md:hidden">
+        {shares.map((share) => (
+          <ShareRow
+            key={share.id}
+            variant="card"
+            share={share}
+            onRevoke={() => onRevoke(share)}
+          />
+        ))}
+      </div>
+    </>
+  );
+}
+
+/**
+ * The row's three actions (copy-link / start-stop / revoke). Shared verbatim
+ * between the desktop actions cell and the mobile card's action row — the
+ * ONLY place these buttons (labels/handlers/classes) are written.
+ */
+function ShareActionButtons({
+  share,
+  isToggling,
+  onCopy,
+  onToggle,
+  onRevoke,
+}: {
+  share: ShareDto;
+  isToggling: boolean;
+  onCopy: () => void;
+  onToggle: () => void;
+  onRevoke: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      <button type="button" onClick={onCopy} className="inline-flex items-center gap-1 text-teal">
+        <Copy size={16} />
+        {t('share.copy')}
+      </button>
+      <button
+        type="button"
+        onClick={onToggle}
+        disabled={isToggling}
+        className="text-teal disabled:opacity-50"
+      >
+        {share.is_active ? t('share.stop') : t('share.start')}
+      </button>
+      <button type="button" onClick={onRevoke} className="text-clay">
+        {t('share.revoke')}
+      </button>
+    </>
+  );
+}
+
+/**
+ * A single share's per-row behavior (toggle/copy-link) plus BOTH of its
+ * presentations. `variant` switches ONLY the returned JSX layout — `'row'`
+ * renders the desktop `<tr>` byte-identically to before this refactor,
+ * `'card'` renders the mobile card — while every handler, derived value, and
+ * the shared `ShareActionButtons` above are the single code path both
+ * variants call.
+ */
+function ShareRow({
+  share,
+  variant = 'row',
+  onRevoke,
+}: {
+  share: ShareDto;
+  variant?: 'row' | 'card';
+  onRevoke: () => void;
+}) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const patch = usePatchShare();
@@ -112,6 +208,40 @@ function ShareRow({ share, onRevoke }: { share: ShareDto; onRevoke: () => void }
     }
   }
 
+  if (variant === 'card') {
+    return (
+      <div
+        data-testid={`shared-card-${share.id}`}
+        className="rounded-[10px] border border-line bg-surface p-3"
+      >
+        <div className="flex items-center gap-2">
+          <bdi dir="ltr" className="min-w-0 flex-1 break-all font-mono text-ink">
+            {share.token}
+          </bdi>
+          <span className="shrink-0">
+            <StatusChip status={share.status} />
+          </span>
+        </div>
+
+        <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-ink-2">
+          <bdi dir="ltr" className="font-mono">
+            {formatDate(share.created_at)}
+          </bdi>
+        </div>
+
+        <div className="mt-2 flex flex-wrap gap-2">
+          <ShareActionButtons
+            share={share}
+            isToggling={patch.isPending}
+            onCopy={copyLink}
+            onToggle={toggle}
+            onRevoke={onRevoke}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <tr className="border-b border-line last:border-b-0 hover:bg-paper">
       <td className="ps-3 pe-3 py-2">
@@ -129,25 +259,13 @@ function ShareRow({ share, onRevoke }: { share: ShareDto; onRevoke: () => void }
       </td>
       <td className="ps-3 pe-3 py-2">
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <button
-            type="button"
-            onClick={copyLink}
-            className="inline-flex items-center gap-1 text-teal"
-          >
-            <Copy size={16} />
-            {t('share.copy')}
-          </button>
-          <button
-            type="button"
-            onClick={toggle}
-            disabled={patch.isPending}
-            className="text-teal disabled:opacity-50"
-          >
-            {share.is_active ? t('share.stop') : t('share.start')}
-          </button>
-          <button type="button" onClick={onRevoke} className="text-clay">
-            {t('share.revoke')}
-          </button>
+          <ShareActionButtons
+            share={share}
+            isToggling={patch.isPending}
+            onCopy={copyLink}
+            onToggle={toggle}
+            onRevoke={onRevoke}
+          />
         </div>
       </td>
     </tr>
