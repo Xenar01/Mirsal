@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 
-export const LATEST_VERSION = 2;
+export const LATEST_VERSION = 3;
 /** Back-compat alias for any importer of the old single-shot constant. */
 export const SCHEMA_VERSION = LATEST_VERSION;
 
@@ -18,6 +18,12 @@ const STEPS: MigrationStep[] = [
         ALTER TABLE shares ADD COLUMN on_exhaust TEXT NOT NULL DEFAULT 'delete'
           CHECK(on_exhaust IN ('stop','delete'));
       `);
+    },
+  },
+  {
+    version: 3,
+    up(db) {
+      db.exec(`ALTER TABLE users ADD COLUMN display_name TEXT;`);
     },
   },
 ];

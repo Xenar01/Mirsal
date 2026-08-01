@@ -25,11 +25,13 @@ export default function CreateUserModal({ open, onClose }: { open: boolean; onCl
   const create = useCreateUser();
 
   const usernameId = useId();
+  const nameId = useId();
   const roleId = useId();
   const quotaId = useId();
   const passwordId = useId();
 
   const [username, setUsername] = useState('');
+  const [displayName, setDisplayName] = useState('');
   const [role, setRole] = useState<'admin' | 'user'>('user');
   const [quotaMb, setQuotaMb] = useState('');
   const [password, setPassword] = useState('');
@@ -42,6 +44,7 @@ export default function CreateUserModal({ open, onClose }: { open: boolean; onCl
   useEffect(() => {
     if (open) {
       setUsername('');
+      setDisplayName('');
       setRole('user');
       setQuotaMb('');
       setPassword(generatePassword());
@@ -72,9 +75,10 @@ export default function CreateUserModal({ open, onClose }: { open: boolean; onCl
       quotaBytes = mb * 1024 * 1024;
     }
     setError(null);
+    const trimmedName = displayName.trim();
 
     create.mutate(
-      { username: trimmedUser, password, role, quotaBytes },
+      { username: trimmedUser, password, role, quotaBytes, displayName: trimmedName === '' ? null : trimmedName },
       {
         onSuccess: () => {
           toast({ kind: 'success', message: t('admin.users.toast.created') });
@@ -126,6 +130,20 @@ export default function CreateUserModal({ open, onClose }: { open: boolean; onCl
               className="mt-1 w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-mono text-sm text-ink"
             />
             <p className="mt-1 font-body text-xs text-ink-2">{t('admin.create.usernameHint')}</p>
+          </div>
+
+          <div>
+            <label htmlFor={nameId} className="block font-body text-sm text-ink-2">
+              {t('admin.create.nameLabel')}
+            </label>
+            <input
+              id={nameId}
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-body text-sm text-ink"
+            />
+            <p className="mt-1 font-body text-xs text-ink-2">{t('admin.create.nameHint')}</p>
           </div>
 
           <div>

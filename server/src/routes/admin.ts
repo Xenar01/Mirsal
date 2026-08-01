@@ -9,12 +9,15 @@ import { revokeAllForUser } from '../auth/sessions.js';
 import { randomToken } from '../util/ids.js';
 import { writeAudit } from '../audit.js';
 import { ownerStatus } from '../shares/shares.js';
+import type { BlobStore } from '../storage/blobs.js';
+import { ensureUserRoots } from '../nodes/tree.js';
 
 export interface AdminRouteDeps {
   db: Database.Database;
   now: Clock;
   guards: Guards;
   passwordService: PasswordService;
+  blobStore: BlobStore;
 }
 
 /**
@@ -33,6 +36,7 @@ interface AdminUserDto {
   used_bytes: number;
   must_change_password: number;
   created_at: number;
+  display_name: string | null;
 }
 
 interface UserRow extends AdminUserDto {
@@ -48,7 +52,7 @@ interface GuardUserRow {
 }
 
 const USER_DTO_COLUMNS =
-  'id, username, role, is_active, quota_bytes, used_bytes, must_change_password, created_at';
+  'id, username, role, is_active, quota_bytes, used_bytes, must_change_password, created_at, display_name';
 
 /** Metadata-only node projection (spec §7): NEVER `storage_path`, never `owner_id`. */
 interface AdminNodeDto {
@@ -94,12 +98,35 @@ interface AdminShareRow {
 // path metacharacters.
 const USERNAME_RE = /^[A-Za-z0-9._-]{1,64}$/;
 
+/** Max length of a display name (a trusted admin-facing label, never a path segment). */
+const DISPLAY_NAME_MAX = 120;
+
+// A free-text display label (Arabic or English). Trusted display string only —
+// never used as a path segment. Trimmed; empty-after-trim collapses to null;
+// bounded length; control chars rejected (defense-in-depth on a display value).
+const displayNameSchema = z
+  .string()
+  .transform((s) => s.trim())
+  .refine((s) => s.length <= DISPLAY_NAME_MAX, { message: 'display_name too long' })
+  .refine(
+    (s) =>
+      ![...s].some((c) => {
+        const n = c.charCodeAt(0);
+        return n < 0x20 || n === 0x7f;
+      }),
+    { message: 'display_name has control chars' }
+  )
+  .transform((s) => (s.length === 0 ? null : s))
+  .nullable()
+  .optional();
+
 const createUserSchema = z.object({
   username: z.string().trim().regex(USERNAME_RE),
   password: z.string().min(1),
   role: z.enum(['admin', 'user']),
   // Absent/undefined => NULL (unlimited). Explicit null also allowed.
   quota_bytes: z.number().int().nonnegative().nullable().optional(),
+  display_name: displayNameSchema,
 });
 
 const patchUserSchema = z
@@ -107,10 +134,16 @@ const patchUserSchema = z
     is_active: z.boolean().optional(),
     role: z.enum(['admin', 'user']).optional(),
     quota_bytes: z.number().int().nonnegative().nullable().optional(),
+    display_name: displayNameSchema,
   })
-  .refine((v) => v.is_active !== undefined || v.role !== undefined || v.quota_bytes !== undefined, {
-    message: 'at least one field is required',
-  });
+  .refine(
+    (v) =>
+      v.is_active !== undefined ||
+      v.role !== undefined ||
+      v.quota_bytes !== undefined ||
+      v.display_name !== undefined,
+    { message: 'at least one field is required' }
+  );
 
 const passwordResetSchema = z.object({
   // Admin may supply an explicit password; omitted => a generated one is used.
@@ -154,6 +187,22 @@ function activeAdminCount(db: Database.Database): number {
 const AUDIT_TARGET_IS_SECRET = new Set(['share_unlock_failure']);
 
 /**
+ * `audit_log.action` values whose `target` holds a **numeric user id** — the
+ * only rows whose target should be resolved to a username/display-name for the
+ * admin view. Deliberately excludes `login_*` (target is a plain username
+ * string, not an id) and every share/secret action (see AUDIT_TARGET_IS_SECRET).
+ * Adding an action here must guarantee its target is a users.id.
+ */
+const USER_TARGET_ACTIONS = new Set([
+  'user_create',
+  'user_update',
+  'user_delete',
+  'user_password_reset',
+  'user_nodes_view',
+  'user_clear_space',
+]);
+
+/**
  * Redacts a secret-valued `target` (see {@link AUDIT_TARGET_IS_SECRET}) to a
  * stable, non-reversible correlation id — a truncated sha256 of the raw
  * value — so an admin can still see "this same share was probed repeatedly"
@@ -182,7 +231,7 @@ function isUniqueViolation(e: unknown): boolean {
  * app-wide instances built in `buildApp`, never re-instantiated here.
  */
 export default async function adminRoutes(app: FastifyInstance, deps: AdminRouteDeps): Promise<void> {
-  const { db, now, guards, passwordService } = deps;
+  const { db, now, guards, passwordService, blobStore } = deps;
 
   // --- Users ---------------------------------------------------------------
 
@@ -201,6 +250,7 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
     }
     const { username, password, role } = parsed.data;
     const quotaBytes = parsed.data.quota_bytes ?? null;
+    const displayName = parsed.data.display_name ?? null;
     const nowMs = now();
 
     const hash = await passwordService.hashPassword(password);
@@ -209,10 +259,10 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
     try {
       const info = db
         .prepare(
-          `INSERT INTO users(username, password_hash, role, quota_bytes, used_bytes, is_active, must_change_password, created_by, created_at, updated_at)
-           VALUES (@username, @hash, @role, @quotaBytes, 0, 1, 1, @actor, @now, @now)`
+          `INSERT INTO users(username, password_hash, role, quota_bytes, used_bytes, is_active, must_change_password, display_name, created_by, created_at, updated_at)
+           VALUES (@username, @hash, @role, @quotaBytes, 0, 1, 1, @displayName, @actor, @now, @now)`
         )
-        .run({ username, hash, role, quotaBytes, actor: req.user!.id, now: nowMs });
+        .run({ username, hash, role, quotaBytes, displayName, actor: req.user!.id, now: nowMs });
       userId = Number(info.lastInsertRowid);
     } catch (e) {
       if (isUniqueViolation(e)) {
@@ -280,6 +330,10 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
     if (parsed.data.quota_bytes !== undefined) {
       sets.push('quota_bytes = @quotaBytes');
       params.quotaBytes = parsed.data.quota_bytes;
+    }
+    if (parsed.data.display_name !== undefined) {
+      sets.push('display_name = @displayName');
+      params.displayName = parsed.data.display_name; // string | null (null clears)
     }
     sets.push('updated_at = @now');
 
@@ -390,6 +444,61 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
     run();
 
     reply.code(200).send({ ok: true });
+  });
+
+  // Permanently wipe a user's whole drive (live + trashed): delete every
+  // folder/file they own (FK cascade removes subtrees + their shares), unlink
+  // the file blobs, reset used_bytes to 0, and guarantee an empty root/trash.
+  // The account/login/role/quota are preserved. Audited (metadata-only — no
+  // content is ever read).
+  app.post('/api/admin/users/:id/clear', { preHandler: guards.requireAdmin }, async (req, reply) => {
+    const id = parseIdParam(req);
+    if (id === null) {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
+    const target = db.prepare('SELECT id FROM users WHERE id = ?').get(id) as { id: number } | undefined;
+    if (!target) {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
+
+    // Collect blob paths BEFORE deletion (unlink is post-commit — a rollback
+    // must never orphan a still-referenced blob).
+    const blobRows = db
+      .prepare(
+        `SELECT storage_path FROM nodes WHERE owner_id = ? AND kind = 'file' AND storage_path IS NOT NULL`
+      )
+      .all(id) as { storage_path: string }[];
+    const storagePaths = blobRows.map((r) => r.storage_path);
+
+    const nowMs = now();
+    const run = db.transaction(() => {
+      db.prepare(`DELETE FROM nodes WHERE owner_id = @id AND kind IN ('folder','file')`).run({ id });
+      db.prepare('UPDATE users SET used_bytes = 0, updated_at = @now WHERE id = @id').run({ id, now: nowMs });
+      writeAudit(
+        db,
+        { actorId: req.user!.id, action: 'user_clear_space', target: String(id), detail: `${storagePaths.length} files` },
+        now
+      );
+    });
+    run();
+
+    // Best-effort blob unlink (non-fatal; the scheduler's orphan sweep reaps
+    // any straggler, same as the user-delete path).
+    for (const p of storagePaths) {
+      try {
+        blobStore.deleteBlob(p);
+      } catch {
+        // ignore — orphan sweep handles it
+      }
+    }
+    // Root/trash are kind 'root'/'trash' (never deleted above), so this is
+    // idempotent; call it to guarantee the pair exists.
+    ensureUserRoots(db, id, nowMs);
+
+    const dto = db.prepare(`SELECT ${USER_DTO_COLUMNS} FROM users WHERE id = ?`).get(id) as AdminUserDto;
+    reply.code(200).send(dto);
   });
 
   // METADATA ONLY — the admin can browse another user's structure but NEVER
@@ -511,9 +620,40 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
       detail: string | null;
       created_at: number;
     }>;
-    // Redact any secret-valued target (see redactAuditTarget) before it ever
-    // leaves the process — the admin role must never receive a live token.
-    const dtos = rows.map((r) => ({ ...r, target: redactAuditTarget(r.action, r.target) }));
+    // Collect the distinct user ids we can resolve: every non-null actor, plus
+    // every numeric target of a user-target action (never a secret/username
+    // target). One lookup, then attach names to each DTO.
+    const ids = new Set<number>();
+    for (const r of rows) {
+      if (r.actor_id !== null) ids.add(r.actor_id);
+      if (USER_TARGET_ACTIONS.has(r.action) && r.target !== null && /^\d+$/.test(r.target)) {
+        ids.add(Number(r.target));
+      }
+    }
+
+    const nameById = new Map<number, { username: string; display_name: string | null }>();
+    if (ids.size > 0) {
+      const idList = [...ids];
+      const placeholders = idList.map(() => '?').join(',');
+      const nameRows = db
+        .prepare(`SELECT id, username, display_name FROM users WHERE id IN (${placeholders})`)
+        .all(...idList) as { id: number; username: string; display_name: string | null }[];
+      for (const nr of nameRows) nameById.set(nr.id, { username: nr.username, display_name: nr.display_name });
+    }
+
+    const dtos = rows.map((r) => {
+      const actor = r.actor_id !== null ? nameById.get(r.actor_id) : undefined;
+      const isUserTarget = USER_TARGET_ACTIONS.has(r.action) && r.target !== null && /^\d+$/.test(r.target);
+      const targetUser = isUserTarget ? nameById.get(Number(r.target)) : undefined;
+      return {
+        ...r,
+        target: redactAuditTarget(r.action, r.target),
+        actor_username: actor?.username ?? null,
+        actor_display_name: actor?.display_name ?? null,
+        target_username: targetUser?.username ?? null,
+        target_display_name: targetUser?.display_name ?? null,
+      };
+    });
     reply.code(200).send(dtos);
   });
 }

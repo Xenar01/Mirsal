@@ -6,7 +6,7 @@ import { Stamp, Pause } from '../../components/icons';
 import { useToast } from '../../components/Toast';
 import { useAuth } from '../auth/auth-context';
 import { formatBytes, formatDate } from '../dashboard/format';
-import { useAdminUsers, usePatchUser, useResetPassword, useDeleteUser } from './queries';
+import { useAdminUsers, usePatchUser, useResetPassword, useDeleteUser, useClearUserSpace } from './queries';
 import { loweringGuard } from './guards';
 import { adminErrorCode } from './api';
 import CreateUserModal from './CreateUserModal';
@@ -37,10 +37,16 @@ export default function UsersTable() {
   const { data, isPending, isError } = useAdminUsers();
   const users = Array.isArray(data) ? data : [];
 
+  const totalUsed = users.reduce((sum, u) => sum + u.used_bytes, 0);
+  const anyUnlimited = users.some((u) => u.quota_bytes === null);
+  const totalQuota = users.reduce((sum, u) => sum + (u.quota_bytes ?? 0), 0);
+
   const [createOpen, setCreateOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<AdminUserDto | null>(null);
   const [quotaTarget, setQuotaTarget] = useState<AdminUserDto | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AdminUserDto | null>(null);
+  const [labelTarget, setLabelTarget] = useState<AdminUserDto | null>(null);
+  const [clearTarget, setClearTarget] = useState<AdminUserDto | null>(null);
 
   return (
     <div className="flex flex-col gap-4">
@@ -62,41 +68,67 @@ export default function UsersTable() {
       )}
 
       {!isPending && !isError && users.length > 0 && (
-        <div className="overflow-x-auto rounded-[10px] border border-line bg-surface">
-          <table className="w-full border-collapse font-body text-sm">
-            <thead>
-              <tr className="border-b border-line text-ink-2">
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.username')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.role')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.state')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.usage')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.created')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">
-                  <span className="sr-only">{t('admin.users.col.actions')}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((row) => (
-                <UserRow
-                  key={row.id}
-                  row={row}
-                  users={users}
-                  currentUserId={user?.id}
-                  onReset={() => setResetTarget(row)}
-                  onQuota={() => setQuotaTarget(row)}
-                  onDelete={() => setDeleteTarget(row)}
-                />
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div
+            data-testid="admin-users-summary"
+            className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-[10px] border border-line bg-surface ps-3 pe-3 py-2 font-body text-sm text-ink-2"
+          >
+            <span>{t('admin.users.summary.count', { count: users.length })}</span>
+            <span>
+              {t('admin.users.summary.used')}{' '}
+              <bdi dir="ltr" className="font-mono text-ink">{formatBytes(totalUsed)}</bdi>
+            </span>
+            <span>
+              {t('admin.users.summary.allocated')}{' '}
+              {anyUnlimited ? (
+                <span className="text-ink">{t('admin.users.unlimited')}</span>
+              ) : (
+                <bdi dir="ltr" className="font-mono text-ink">{formatBytes(totalQuota)}</bdi>
+              )}
+            </span>
+          </div>
+
+          <div className="overflow-x-auto rounded-[10px] border border-line bg-surface">
+            <table className="w-full border-collapse font-body text-sm">
+              <thead>
+                <tr className="border-b border-line text-ink-2">
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.username')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.name')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.role')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.state')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.usage')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.created')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">
+                    <span className="sr-only">{t('admin.users.col.actions')}</span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((row) => (
+                  <UserRow
+                    key={row.id}
+                    row={row}
+                    users={users}
+                    currentUserId={user?.id}
+                    onReset={() => setResetTarget(row)}
+                    onQuota={() => setQuotaTarget(row)}
+                    onDelete={() => setDeleteTarget(row)}
+                    onLabel={() => setLabelTarget(row)}
+                    onClearSpace={() => setClearTarget(row)}
+                  />
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
 
       <CreateUserModal open={createOpen} onClose={() => setCreateOpen(false)} />
       {resetTarget && <ResetPasswordModal user={resetTarget} onClose={() => setResetTarget(null)} />}
       {quotaTarget && <QuotaModal user={quotaTarget} onClose={() => setQuotaTarget(null)} />}
       {deleteTarget && <DeleteUserModal user={deleteTarget} onClose={() => setDeleteTarget(null)} />}
+      {labelTarget && <LabelModal user={labelTarget} onClose={() => setLabelTarget(null)} />}
+      {clearTarget && <ClearSpaceModal user={clearTarget} onClose={() => setClearTarget(null)} />}
     </div>
   );
 }
@@ -215,6 +247,8 @@ function UserRow({
   onReset,
   onQuota,
   onDelete,
+  onLabel,
+  onClearSpace,
 }: {
   row: AdminUserDto;
   users: AdminUserDto[];
@@ -222,6 +256,8 @@ function UserRow({
   onReset: () => void;
   onQuota: () => void;
   onDelete: () => void;
+  onLabel: () => void;
+  onClearSpace: () => void;
 }) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -282,6 +318,13 @@ function UserRow({
             <span className="font-body text-xs text-ink-2">{t('admin.users.mustChange')}</span>
           )}
         </div>
+      </td>
+      <td className="ps-3 pe-3 py-2">
+        {row.display_name ? (
+          <span className="font-body text-ink">{row.display_name}</span>
+        ) : (
+          <span className="font-body text-ink-2">{t('admin.users.noName')}</span>
+        )}
       </td>
       <td className="ps-3 pe-3 py-2 text-ink">
         {isAdmin ? t('admin.users.role.admin') : t('admin.users.role.user')}
@@ -348,6 +391,9 @@ function UserRow({
             <button type="button" onClick={onQuota} className={ADMIN_ACTION}>
               {t('admin.users.action.quota')}
             </button>
+            <button type="button" onClick={onLabel} className={ADMIN_ACTION}>
+              {t('admin.users.action.label')}
+            </button>
             <GuardedAction
               onAct={onDelete}
               guardBlocked={guard.blocked}
@@ -356,6 +402,11 @@ function UserRow({
             >
               {t('admin.users.action.delete')}
             </GuardedAction>
+            {/* Clearing space wipes files/shares but keeps the account, so it is
+                NOT subject to the last-admin / self guard (unlike delete). */}
+            <button type="button" onClick={onClearSpace} className={ADMIN_ACTION_DANGER}>
+              {t('admin.users.action.clearSpace')}
+            </button>
           </div>
 
           {/* The guard reason is shown as VISIBLE text (discoverable to mouse
@@ -497,6 +548,60 @@ function QuotaModal({ user, onClose }: { user: AdminUserDto; onClose: () => void
   );
 }
 
+/* ── Edit display name ────────────────────────────────────────────────── */
+
+function LabelModal({ user, onClose }: { user: AdminUserDto; onClose: () => void }) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const patch = usePatchUser();
+  const inputId = useId();
+  const [value, setValue] = useState(user.display_name ?? '');
+
+  function submit() {
+    const trimmed = value.trim();
+    patch.mutate(
+      { id: user.id, displayName: trimmed === '' ? null : trimmed },
+      {
+        onSuccess: () => {
+          toast({ kind: 'success', message: t('admin.users.toast.nameUpdated') });
+          onClose();
+        },
+        onError: () => toast({ kind: 'error', message: t('admin.label.error') }),
+      }
+    );
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={t('admin.label.title')}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant="primary" onClick={submit} disabled={patch.isPending}>
+            {t('admin.label.submit')}
+          </Button>
+        </>
+      }
+    >
+      <label htmlFor={inputId} className="block font-body text-sm text-ink-2">
+        {t('admin.label.label')}
+      </label>
+      <input
+        id={inputId}
+        type="text"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="mt-1 w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-body text-sm text-ink"
+      />
+      <p className="mt-1 font-body text-xs text-ink-2">{t('admin.label.hint')}</p>
+    </Modal>
+  );
+}
+
 /* ── Delete user (destructive confirm) ────────────────────────────────── */
 
 function DeleteUserModal({ user, onClose }: { user: AdminUserDto; onClose: () => void }) {
@@ -538,6 +643,49 @@ function DeleteUserModal({ user, onClose }: { user: AdminUserDto; onClose: () =>
     >
       <p className="font-body text-sm text-ink">
         {t('admin.delete.body', { username: user.username })}
+      </p>
+    </Modal>
+  );
+}
+
+/* ── Clear user space (destructive confirm) ───────────────────────────── */
+
+function ClearSpaceModal({ user, onClose }: { user: AdminUserDto; onClose: () => void }) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const clear = useClearUserSpace();
+
+  function confirm() {
+    clear.mutate(user.id, {
+      onSuccess: () => {
+        toast({ kind: 'success', message: t('admin.users.toast.cleared') });
+        onClose();
+      },
+      onError: () => {
+        toast({ kind: 'error', message: t('admin.clearSpace.error') });
+        onClose();
+      },
+    });
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={t('admin.clearSpace.title')}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant="danger" onClick={confirm} disabled={clear.isPending}>
+            {t('admin.clearSpace.confirm')}
+          </Button>
+        </>
+      }
+    >
+      <p className="font-body text-sm text-ink">
+        {t('admin.clearSpace.body', { username: user.username })}
       </p>
     </Modal>
   );

@@ -21,6 +21,20 @@ export const MIN_PASSWORD_LEN = 8;
 /** Default page size for the audit log (server default + max 500). */
 export const AUDIT_PAGE_SIZE = 100;
 
+/**
+ * Client mirror of the server's user-target audit actions (admin.ts). Used only
+ * to decide whether an *unresolved* target id should show a "(deleted user)"
+ * hint vs. be rendered as a plain value. Server remains the source of truth.
+ */
+export const USER_TARGET_ACTIONS = new Set([
+  'user_create',
+  'user_update',
+  'user_delete',
+  'user_password_reset',
+  'user_nodes_view',
+  'user_clear_space',
+]);
+
 // --- Users -----------------------------------------------------------------
 
 export function listUsers(): Promise<AdminUserDto[]> {
@@ -33,6 +47,8 @@ export interface CreateUserVars {
   role: 'admin' | 'user';
   /** Omitted/null => unlimited quota. */
   quotaBytes?: number | null;
+  /** Free-text label; omit for none. */
+  displayName?: string | null;
 }
 
 export function createUser(vars: CreateUserVars): Promise<AdminUserDto> {
@@ -44,6 +60,9 @@ export function createUser(vars: CreateUserVars): Promise<AdminUserDto> {
   if (vars.quotaBytes !== undefined && vars.quotaBytes !== null) {
     body.quota_bytes = vars.quotaBytes;
   }
+  if (vars.displayName !== undefined) {
+    body.display_name = vars.displayName;
+  }
   return apiPost<AdminUserDto>('/admin/users', body);
 }
 
@@ -53,6 +72,8 @@ export interface PatchUserVars {
   role?: 'admin' | 'user';
   /** number sets a quota; null = unlimited; omit = unchanged. */
   quotaBytes?: number | null;
+  /** string sets a label; null clears it; omit = unchanged. */
+  displayName?: string | null;
 }
 
 export function patchUser(vars: PatchUserVars): Promise<AdminUserDto> {
@@ -60,6 +81,7 @@ export function patchUser(vars: PatchUserVars): Promise<AdminUserDto> {
   if (vars.isActive !== undefined) body.is_active = vars.isActive;
   if (vars.role !== undefined) body.role = vars.role;
   if (vars.quotaBytes !== undefined) body.quota_bytes = vars.quotaBytes;
+  if (vars.displayName !== undefined) body.display_name = vars.displayName;
   return apiPatch<AdminUserDto>(`/admin/users/${vars.id}`, body);
 }
 
@@ -74,6 +96,14 @@ export function resetPassword(id: number): Promise<{ password: string }> {
 
 export function deleteUser(id: number): Promise<{ ok: true }> {
   return apiDelete<{ ok: true }>(`/admin/users/${id}`);
+}
+
+/**
+ * Wipes a user's drive (all files/folders, including trash) and cancels their
+ * shares, but keeps the account. Returns the refreshed row (used_bytes: 0).
+ */
+export function clearUserSpace(id: number): Promise<AdminUserDto> {
+  return apiPost<AdminUserDto>(`/admin/users/${id}/clear`, {});
 }
 
 // --- Shares ----------------------------------------------------------------

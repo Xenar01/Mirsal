@@ -105,7 +105,7 @@ async function login(
 /** Convenience for a mutating admin call carrying the session + CSRF header. */
 function adminReq(
   built: FastifyInstance,
-  method: 'POST' | 'PATCH' | 'DELETE',
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   url: string,
   auth: { session: string; csrf: string },
   payload?: unknown
@@ -188,6 +188,33 @@ test('POST /api/admin/users with an invalid role -> 400', async () => {
     role: 'superuser',
   });
   expect(res.statusCode).toBe(400);
+});
+
+test('POST /users persists and returns display_name (trimmed)', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const auth = await login(built, 'admin', 'admin-pass-123');
+  const res = await adminReq(built, 'POST', '/api/admin/users', auth as { session: string; csrf: string }, {
+    username: 'labeled',
+    password: 'user-pass-123',
+    role: 'user',
+    display_name: '  أحمد الموظف  ',
+  });
+  expect(res.statusCode).toBe(201);
+  expect(JSON.parse(res.body).display_name).toBe('أحمد الموظف');
+});
+
+test('POST /users without display_name stores null', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const auth = await login(built, 'admin', 'admin-pass-123');
+  const res = await adminReq(built, 'POST', '/api/admin/users', auth as { session: string; csrf: string }, {
+    username: 'nolabel',
+    password: 'user-pass-123',
+    role: 'user',
+  });
+  expect(res.statusCode).toBe(201);
+  expect(JSON.parse(res.body).display_name).toBeNull();
 });
 
 // ---------------------------------------------------------------------------
@@ -288,6 +315,30 @@ test('PATCH quota_bytes on the last admin is allowed (not a lowering change)', a
   expect(res.statusCode).toBe(200);
   const row = db!.prepare('SELECT quota_bytes FROM users WHERE id = ?').get(rootId) as { quota_bytes: number };
   expect(row.quota_bytes).toBe(5000);
+});
+
+test('PATCH /users/:id sets and then clears display_name', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const uid = await seedUser('target', 'x', { role: 'user' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+
+  const setRes = await adminReq(built, 'PATCH', `/api/admin/users/${uid}`, auth, { display_name: 'سارة' });
+  expect(setRes.statusCode).toBe(200);
+  expect(JSON.parse(setRes.body).display_name).toBe('سارة');
+
+  const clearRes = await adminReq(built, 'PATCH', `/api/admin/users/${uid}`, auth, { display_name: null });
+  expect(clearRes.statusCode).toBe(200);
+  expect(JSON.parse(clearRes.body).display_name).toBeNull();
+});
+
+test('PATCH /users/:id with only display_name is accepted (refine allows it)', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const uid = await seedUser('target2', 'x', { role: 'user' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+  const res = await adminReq(built, 'PATCH', `/api/admin/users/${uid}`, auth, { display_name: 'علي' });
+  expect(res.statusCode).toBe(200);
 });
 
 // ---------------------------------------------------------------------------
@@ -462,6 +513,154 @@ test('GET /api/admin/users/:id/nodes for a nonexistent user -> 404', async () =>
 });
 
 // ---------------------------------------------------------------------------
+// Clear a user's space
+// ---------------------------------------------------------------------------
+
+test('POST /users/:id/clear wipes the user drive, frees quota, keeps roots, unlinks blobs', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const uid = await seedUser('victim', 'x', { role: 'user', quotaBytes: 100 * 1024 * 1024 });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+
+  const roots = ensureUserRoots(db!, uid, NOW);
+  // A real blob on disk under STORAGE_DIR/<uid>/<name>.
+  const storageDir = path.join(dir!, 'storage');
+  const ownerDir = path.join(storageDir, String(uid));
+  fs.mkdirSync(ownerDir, { recursive: true });
+  const blobRel = `${uid}/blob1`;
+  fs.writeFileSync(path.join(storageDir, blobRel), 'hello');
+
+  // A folder + a file inside it, and used_bytes set to the file size.
+  const folderId = Number(
+    db!
+      .prepare(
+        `INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at) VALUES (?,?,?,?,?,?)`
+      )
+      .run(uid, roots.rootId, 'folder', 'Docs', NOW, NOW).lastInsertRowid
+  );
+  db!
+    .prepare(
+      `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?)`
+    )
+    .run(uid, folderId, 'file', 'a.txt', 5, blobRel, NOW, NOW);
+  db!.prepare('UPDATE users SET used_bytes = 5 WHERE id = ?').run(uid);
+
+  const res = await adminReq(built, 'POST', `/api/admin/users/${uid}/clear`, auth);
+  expect(res.statusCode).toBe(200);
+  expect(JSON.parse(res.body).used_bytes).toBe(0);
+
+  // No folder/file nodes remain for this user; root+trash remain.
+  const remaining = db!
+    .prepare(`SELECT COUNT(*) c FROM nodes WHERE owner_id = ? AND kind IN ('folder','file')`)
+    .get(uid) as { c: number };
+  expect(remaining.c).toBe(0);
+  const roleCounts = db!
+    .prepare(`SELECT COUNT(*) c FROM nodes WHERE owner_id = ? AND kind IN ('root','trash')`)
+    .get(uid) as { c: number };
+  expect(roleCounts.c).toBe(2);
+  // Blob unlinked.
+  expect(fs.existsSync(path.join(storageDir, blobRel))).toBe(false);
+  // Audited.
+  const audit = db!
+    .prepare(`SELECT COUNT(*) c FROM audit_log WHERE action = 'user_clear_space' AND target = ?`)
+    .get(String(uid)) as { c: number };
+  expect(audit.c).toBe(1);
+});
+
+test('POST /users/:id/clear cascades the user shares', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const uid = await seedUser('victim2', 'x', { role: 'user' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+  const roots = ensureUserRoots(db!, uid, NOW);
+  const fileId = Number(
+    db!
+      .prepare(
+        `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?)`
+      )
+      .run(uid, roots.rootId, 'file', 'b.txt', 0, `${uid}/b`, NOW, NOW).lastInsertRowid
+  );
+  db!
+    .prepare(
+      `INSERT INTO shares(node_id, owner_id, token, is_active, allow_download, created_at) VALUES (?,?,?,?,?,?)`
+    )
+    .run(fileId, uid, 'tok-clear-test', 1, 1, NOW);
+
+  await adminReq(built, 'POST', `/api/admin/users/${uid}/clear`, auth);
+  const shares = db!.prepare(`SELECT COUNT(*) c FROM shares WHERE owner_id = ?`).get(uid) as { c: number };
+  expect(shares.c).toBe(0);
+});
+
+test('POST /users/:id/clear on an unknown user → 404', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+  const res = await adminReq(built, 'POST', '/api/admin/users/99999/clear', auth);
+  expect(res.statusCode).toBe(404);
+});
+
+test('POST /users/:id/clear only wipes the target user, leaving another user untouched', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const uidA = await seedUser('victimA', 'x', { role: 'user' });
+  const uidB = await seedUser('victimB', 'x', { role: 'user' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+
+  const rootsA = ensureUserRoots(db!, uidA, NOW);
+  const rootsB = ensureUserRoots(db!, uidB, NOW);
+
+  // Give each user a folder + a file inside it, plus a share on the file.
+  function seedDrive(uid: number, rootId: number, tag: string) {
+    const folderId = Number(
+      db!
+        .prepare(
+          `INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at) VALUES (?,?,?,?,?,?)`
+        )
+        .run(uid, rootId, 'folder', `Docs-${tag}`, NOW, NOW).lastInsertRowid
+    );
+    const fileId = Number(
+      db!
+        .prepare(
+          `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
+           VALUES (?,?,?,?,?,?,?,?)`
+        )
+        .run(uid, folderId, 'file', `a-${tag}.txt`, 5, `${uid}/blob-${tag}`, NOW, NOW).lastInsertRowid
+    );
+    db!
+      .prepare(
+        `INSERT INTO shares(node_id, owner_id, token, is_active, allow_download, created_at) VALUES (?,?,?,?,?,?)`
+      )
+      .run(fileId, uid, `tok-${tag}`, 1, 1, NOW);
+    db!.prepare('UPDATE users SET used_bytes = 5 WHERE id = ?').run(uid);
+    return { folderId, fileId };
+  }
+
+  seedDrive(uidA, rootsA.rootId, 'A');
+  seedDrive(uidB, rootsB.rootId, 'B');
+
+  const res = await adminReq(built, 'POST', `/api/admin/users/${uidA}/clear`, auth);
+  expect(res.statusCode).toBe(200);
+
+  // A's folder/file nodes are gone (anchors the contrast).
+  const remainingA = db!
+    .prepare(`SELECT COUNT(*) c FROM nodes WHERE owner_id = ? AND kind IN ('folder','file')`)
+    .get(uidA) as { c: number };
+  expect(remainingA.c).toBe(0);
+
+  // B's folder/file nodes, used_bytes, and share are all untouched.
+  const remainingB = db!
+    .prepare(`SELECT COUNT(*) c FROM nodes WHERE owner_id = ? AND kind IN ('folder','file')`)
+    .get(uidB) as { c: number };
+  expect(remainingB.c).toBe(2);
+  const userB = db!.prepare(`SELECT used_bytes FROM users WHERE id = ?`).get(uidB) as { used_bytes: number };
+  expect(userB.used_bytes).toBe(5);
+  const sharesB = db!.prepare(`SELECT COUNT(*) c FROM shares WHERE owner_id = ?`).get(uidB) as { c: number };
+  expect(sharesB.c).toBe(1);
+});
+
+// ---------------------------------------------------------------------------
 // Global shares list + force-revoke
 // ---------------------------------------------------------------------------
 
@@ -604,6 +803,56 @@ test('GET /api/admin/audit redacts a share_unlock_failure target (routes/public.
 
   const revokeRow = rows.find((r) => r.action === 'share_revoke')!;
   expect(revokeRow.target).toBe('42');
+});
+
+test('audit DTO resolves actor and user-target usernames, redacts secret targets', async () => {
+  const built = await makeApp();
+  const adminId = await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+
+  // A real user-management action → writes a user_create audit row with the new user's id as target.
+  const createRes = await adminReq(built, 'POST', '/api/admin/users', auth, {
+    username: 'newbie',
+    password: 'user-pass-123',
+    role: 'user',
+    display_name: 'المستخدم الجديد',
+  });
+  const newId = JSON.parse(createRes.body).id as number;
+
+  // A secret-target row (simulate a failed share unlock) inserted directly.
+  db!
+    .prepare('INSERT INTO audit_log(actor_id, action, target, detail, created_at) VALUES (NULL, ?, ?, NULL, ?)')
+    .run('share_unlock_failure', 'super-secret-token-value', NOW);
+
+  const res = await adminReq(built, 'GET', '/api/admin/audit', auth);
+  expect(res.statusCode).toBe(200);
+  const rows = JSON.parse(res.body) as Array<Record<string, unknown>>;
+
+  const createRow = rows.find((r) => r.action === 'user_create' && Number(r.target) === newId)!;
+  expect(createRow.actor_username).toBe('admin');
+  expect(createRow.actor_id).toBe(adminId);
+  expect(createRow.target_username).toBe('newbie');
+  expect(createRow.target_display_name).toBe('المستخدم الجديد');
+
+  const secretRow = rows.find((r) => r.action === 'share_unlock_failure')!;
+  expect(secretRow.actor_username).toBeNull();
+  expect(String(secretRow.target)).toMatch(/^redacted:/); // still redacted
+  expect(secretRow.target_username).toBeNull(); // never resolved
+});
+
+test('audit DTO leaves target_username null for a deleted user target', async () => {
+  const built = await makeApp();
+  await seedUser('admin', 'admin-pass-123', { role: 'admin' });
+  const auth = (await login(built, 'admin', 'admin-pass-123')) as { session: string; csrf: string };
+  // Audit row referencing a user id that does not exist.
+  db!
+    .prepare('INSERT INTO audit_log(actor_id, action, target, detail, created_at) VALUES (NULL, ?, ?, NULL, ?)')
+    .run('user_delete', '99999', NOW);
+  const res = await adminReq(built, 'GET', '/api/admin/audit', auth);
+  const rows = JSON.parse(res.body) as Array<Record<string, unknown>>;
+  const row = rows.find((r) => r.action === 'user_delete' && r.target === '99999')!;
+  expect(row.target_username).toBeNull();
+  expect(row.target_display_name).toBeNull();
 });
 
 // ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ interface AdminUser {
   used_bytes: number;
   must_change_password: number;
   created_at: number;
+  display_name: string | null;
 }
 
 function mkUser(over: Partial<AdminUser> & { id: number; username: string }): AdminUser {
@@ -32,6 +33,7 @@ function mkUser(over: Partial<AdminUser> & { id: number; username: string }): Ad
     used_bytes: 0,
     must_change_password: 0,
     created_at: NOW,
+    display_name: null,
     ...over,
   };
 }
@@ -206,6 +208,26 @@ describe('Admin — CreateUserModal validation (§3.1)', () => {
     expect(body.password.length).toBeGreaterThanOrEqual(8);
   });
 
+  test('a display name is sent as display_name in the POST body', async () => {
+    const { calls } = stubFetch({ users: [] });
+    await renderAdmin({ users: [] });
+
+    const username = await openCreate();
+    fireEvent.change(username, { target: { value: 'sara' } });
+    fireEvent.change(screen.getByLabelText(t('admin.create.nameLabel')), {
+      target: { value: 'سارة' },
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: t('admin.create.submit') }));
+    });
+
+    const posts = createPosts(calls);
+    expect(posts).toHaveLength(1);
+    const body = posts[0].body as { display_name?: string };
+    expect(body.display_name).toBe('سارة');
+  });
+
   test('a 409 username_taken keeps the form and shows an inline error', async () => {
     stubFetch({
       users: [],
@@ -308,6 +330,56 @@ describe('Admin — last-admin / self guards (§3.1)', () => {
   });
 });
 
+describe('Admin — display name (Task 3)', () => {
+  test('the users table shows the display-name column value and a placeholder when null', async () => {
+    const users = [
+      mkUser({ id: 2, username: 'ahmed', display_name: 'أحمد الموظف' }),
+      mkUser({ id: 3, username: 'noname', display_name: null }),
+    ];
+    stubFetch({ users });
+    await renderAdmin({ users });
+
+    expect(await screen.findByText(t('admin.users.col.name'))).toBeInTheDocument();
+    expect(screen.getByText('أحمد الموظف')).toBeInTheDocument();
+
+    const noNameRow = await screen.findByTestId('user-row-3');
+    expect(within(noNameRow).getByText(t('admin.users.noName'))).toBeInTheDocument();
+  });
+});
+
+describe('Admin — total-space summary (Task 6)', () => {
+  test('users table shows a total-space summary across all users', async () => {
+    const users = [
+      mkUser({ id: 2, username: 'a', used_bytes: 1024 * 1024, quota_bytes: 10 * 1024 * 1024 }),
+      mkUser({ id: 3, username: 'b', used_bytes: 3 * 1024 * 1024, quota_bytes: 20 * 1024 * 1024 }),
+    ];
+    stubFetch({ users });
+    await renderAdmin({ users });
+
+    // Σ used = 4 MB → formatBytes renders "4" and the MB unit somewhere in the strip.
+    expect(await screen.findByTestId('admin-users-summary')).toHaveTextContent('4');
+    // user count = 2
+    expect(screen.getByTestId('admin-users-summary')).toHaveTextContent('2');
+  });
+});
+
+describe('Admin — clear user space (Task 8)', () => {
+  test('clear-space confirm calls POST /clear and refreshes the row', async () => {
+    const { calls } = stubFetch({
+      users: [mkUser({ id: 2, username: 'victim', used_bytes: 5 * 1024 * 1024, quota_bytes: 10 * 1024 * 1024 })],
+      overrides: { 'POST /api/admin/users/2/clear': [200, mkUser({ id: 2, username: 'victim', used_bytes: 0 })] },
+    });
+    await renderAdmin({});
+
+    fireEvent.click(within(await screen.findByTestId('user-row-2')).getByText(t('admin.users.action.clearSpace')));
+    await act(async () => {
+      fireEvent.click(screen.getByText(t('admin.clearSpace.confirm')));
+    });
+    const call = calls.find((c) => c.method === 'POST' && c.path === '/api/admin/users/2/clear');
+    expect(call).toBeTruthy();
+  });
+});
+
 describe('Admin — SharesTable force-revoke (§3.1)', () => {
   test('force-revoking a share issues DELETE /api/admin/shares/:id', async () => {
     const shares = [
@@ -367,5 +439,34 @@ describe('Admin — AuditLog (§3.1)', () => {
     expect(screen.getByText('redacted:abcdef0123456789')).toBeInTheDocument();
     // A null actor renders as the system label, not a blank.
     expect(screen.getByText(t('admin.audit.system'))).toBeInTheDocument();
+  });
+
+  test('renders resolved actor and target names, not raw ids (Task 5)', async () => {
+    const audit = [
+      {
+        id: 1,
+        actor_id: 1,
+        action: 'user_create',
+        target: '2',
+        detail: null,
+        created_at: NOW,
+        actor_username: 'admin',
+        actor_display_name: null,
+        target_username: 'newbie',
+        target_display_name: 'المستخدم الجديد',
+      },
+    ];
+    stubFetch({ audit });
+    await renderAdmin({ audit });
+
+    fireEvent.click(await screen.findByRole('tab', { name: t('admin.tabs.audit') }));
+
+    // Scope to the audit table: the header also shows the logged-in
+    // username ("admin"), so an unscoped query would be ambiguous.
+    const table = await screen.findByRole('table');
+    expect(within(table).getByText('admin')).toBeInTheDocument();
+    expect(within(table).getByText('المستخدم الجديد')).toBeInTheDocument();
+    // The raw numeric target id must not appear once resolved.
+    expect(within(table).queryByText('2')).toBeNull();
   });
 });

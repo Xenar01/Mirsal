@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS users(
   trash_node_id INTEGER,                         -- NOT a FK (avoids circular users<->nodes dependency)
   created_by INTEGER,
   created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  updated_at INTEGER NOT NULL,
+  display_name TEXT                              -- NULL = no label; free-text admin-facing name (v3)
 );
 
 CREATE TABLE IF NOT EXISTS sessions(

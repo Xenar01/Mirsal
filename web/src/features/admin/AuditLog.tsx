@@ -3,16 +3,19 @@ import { useTranslation } from 'react-i18next';
 import Button from '../../components/Button';
 import { formatDate } from '../dashboard/format';
 import { useAudit } from './queries';
-import { AUDIT_PAGE_SIZE } from './api';
+import { AUDIT_PAGE_SIZE, USER_TARGET_ACTIONS } from './api';
 import type { AuditRowDto } from './types';
 
 /*
  * AuditLog (§3.1) — the read-only audit register, paginated.
  *
- * Rows: timestamp (Damascus, mono/bidi), actor (id, or the system label for a
+ * Rows: timestamp (Damascus, mono/bidi), actor (resolved display-name or
+ * username, falling back to `#id` when unresolved, or the system label for a
  * null actor), a friendly Arabic action label (falling back to the raw machine
- * action for anything unmapped), and the target (a DB id or an already-redacted
- * secret — the server redacts token-valued targets before they leave the box).
+ * action for anything unmapped), and the target — for user-target actions this
+ * resolves to the target user's display-name/username (with a "(محذوف)" hint
+ * appended to `#id` when the user no longer resolves), otherwise the raw
+ * target as returned by the server (already redacted if it was a secret).
  * Read-only: no row actions. Prev/Next page through `['admin','audit', page]`.
  */
 export default function AuditLog() {
@@ -66,9 +69,13 @@ export default function AuditLog() {
                   <td className="ps-3 pe-3 py-2">
                     {entry.actor_id === null ? (
                       <span className="text-ink-2">{t('admin.audit.system')}</span>
+                    ) : entry.actor_display_name || entry.actor_username ? (
+                      <span className="font-body text-ink">
+                        {entry.actor_display_name || entry.actor_username}
+                      </span>
                     ) : (
                       <bdi dir="ltr" className="font-mono text-ink">
-                        {entry.actor_id}
+                        {`#${entry.actor_id}`}
                       </bdi>
                     )}
                   </td>
@@ -76,6 +83,14 @@ export default function AuditLog() {
                   <td className="ps-3 pe-3 py-2">
                     {entry.target === null ? (
                       <span className="text-ink-2">—</span>
+                    ) : entry.target_display_name || entry.target_username ? (
+                      <span className="font-body text-ink-2">
+                        {entry.target_display_name || entry.target_username}
+                      </span>
+                    ) : USER_TARGET_ACTIONS.has(entry.action) ? (
+                      <bdi dir="ltr" className="font-mono text-ink-2 break-all">
+                        {`#${entry.target} ${t('admin.audit.deleted')}`}
+                      </bdi>
                     ) : (
                       <bdi dir="ltr" className="font-mono text-ink-2 break-all">
                         {entry.target}
