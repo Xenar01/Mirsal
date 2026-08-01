@@ -914,3 +914,94 @@ test('rollup size on a pathologically wide live folder is bounded, not an unboun
   expect(wide!.size_bytes).toBeGreaterThan(0);
   expect(wide!.size_bytes).toBeLessThan(totalFiles);
 });
+
+test('POST /api/nodes/trash/empty permanently deletes all trashed nodes, frees quota, and unlinks blobs; leaves live nodes untouched', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  // A live file that must survive.
+  const liveUp = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'keep.txt',
+    data: Buffer.from('keepme'),
+  }); // 6 bytes
+  const liveId = liveUp.body.id as number;
+
+  // A folder with a nested file, plus a loose file — both trashed.
+  const folderRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { parent_id: rootId, name: 'Box' },
+  });
+  const folder = folderRes.json();
+  await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'inside.txt', data: Buffer.from('hello') }); // 5
+  const looseUp = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'loose.txt',
+    data: Buffer.from('worldwide'),
+  }); // 9
+
+  await built.inject({ method: 'POST', url: `/api/nodes/${folder.id}/trash`, cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf } });
+  await built.inject({ method: 'POST', url: `/api/nodes/${looseUp.body.id}/trash`, cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf } });
+
+  const usedBefore = (db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number }).used_bytes;
+  expect(usedBefore).toBe(6 + 5 + 9);
+
+  const res = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/trash/empty',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+  });
+  expect(res.statusCode).toBe(200);
+  expect(res.json().freedBytes).toBe(5 + 9); // the two trashed subtrees, not the live file
+
+  // Trash now empty; live file still listed.
+  const trashList = (await built.inject({ method: 'GET', url: '/api/nodes/trash', cookies: { mirsal_session: session } })).json();
+  expect(trashList).toEqual([]);
+  const rootList = (await built.inject({ method: 'GET', url: '/api/nodes', cookies: { mirsal_session: session } })).json() as Array<{ id: number }>;
+  expect(rootList.some((n) => n.id === liveId)).toBe(true);
+
+  // Quota dropped by exactly the trashed bytes; live file's blob still on disk.
+  const usedAfter = (db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number }).used_bytes;
+  expect(usedAfter).toBe(6);
+  expect(fs.existsSync(path.join(storageDir!, String(uid), String(liveId)))).toBe(true);
+});
+
+test('POST /api/nodes/trash/empty is a no-op 200 on an already-empty trash', async () => {
+  const built = await makeApp();
+  await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+
+  const res = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/trash/empty',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+  });
+  expect(res.statusCode).toBe(200);
+  expect(res.json().freedBytes).toBe(0);
+});
+
+test('POST /api/nodes/trash/empty is owner-scoped — never touches another user\'s trash', async () => {
+  const built = await makeApp();
+  const aliceId = await seedUser('alice', 'pw');
+  const bobId = await seedUser('bob', 'pw');
+  const alice = await login(built, 'alice', 'pw');
+  const bob = await login(built, 'bob', 'pw');
+
+  // Bob trashes a file.
+  const bobUp = await uploadFile(built, bob.session, bob.csrf, { parentId: rootIdFor(bobId), filename: 'b.txt', data: Buffer.from('bob') });
+  await built.inject({ method: 'POST', url: `/api/nodes/${bobUp.body.id}/trash`, cookies: { mirsal_session: bob.session }, headers: { 'x-csrf-token': bob.csrf } });
+
+  // Alice empties HER trash (empty) — Bob's trashed file must remain.
+  await built.inject({ method: 'POST', url: '/api/nodes/trash/empty', cookies: { mirsal_session: alice.session }, headers: { 'x-csrf-token': alice.csrf } });
+
+  const bobTrash = (await built.inject({ method: 'GET', url: '/api/nodes/trash', cookies: { mirsal_session: bob.session } })).json() as Array<{ id: number }>;
+  expect(bobTrash.some((n) => n.id === bobUp.body.id)).toBe(true);
+  expect(aliceId).not.toBe(bobId);
+});

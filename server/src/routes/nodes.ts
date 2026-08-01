@@ -589,6 +589,47 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
     reply.code(200).send({ freedBytes: result.freedBytes });
   });
 
+  app.post('/api/nodes/trash/empty', { preHandler: guards.requireAuth }, async (req, reply) => {
+    const uid = req.user!.id;
+
+    // Top-level trashed nodes only — the same shape GET /api/nodes/trash uses.
+    // Each is an independent subtree (its parent is not trashed), so
+    // permanentDelete over each deletes every trashed subtree exactly once;
+    // a file nested inside a trashed folder is removed by its ancestor's cascade.
+    const topLevel = db
+      .prepare(
+        `SELECT n.id FROM nodes n
+         WHERE n.owner_id = @uid AND n.trashed_at IS NOT NULL
+           AND (n.parent_id IS NULL OR NOT EXISTS (
+             SELECT 1 FROM nodes p WHERE p.id = n.parent_id AND p.trashed_at IS NOT NULL
+           ))`
+      )
+      .all({ uid }) as { id: number }[];
+
+    // Per-node transactions (permanentDelete opens its own) — never wrap in one
+    // outer transaction (better-sqlite3 forbids nesting).
+    let freedBytes = 0;
+    const storagePaths: string[] = [];
+    for (const { id } of topLevel) {
+      const result = permanentDelete(db, uid, id);
+      freedBytes += result.freedBytes;
+      storagePaths.push(...result.storagePaths);
+    }
+
+    // Unlink blobs AFTER every commit (mirrors DELETE /api/nodes/:id): the rows
+    // and used_bytes are already gone, so a disk error here must not be mapped
+    // to a 404. Idempotent no-op when the trash was empty.
+    for (const p of storagePaths) {
+      blobStore.deleteBlob(p);
+    }
+
+    if (topLevel.length > 0) {
+      writeAudit(db, { actorId: uid, action: 'empty_trash', target: String(topLevel.length) }, now);
+    }
+
+    reply.code(200).send({ freedBytes });
+  });
+
   app.patch('/api/nodes/:id/auto-delete', { preHandler: guards.requireAuth }, async (req, reply) => {
     const id = parseIdParam(req);
     if (id === null) {
