@@ -6,6 +6,7 @@ import { useAuth } from '../auth/auth-context';
 import UsersTable from './UsersTable';
 import SharesTable from './SharesTable';
 import AuditLog from './AuditLog';
+import AppNav from '../dashboard/AppNav';
 
 /*
  * AdminPanel (§3.1) — the admin control panel, replacing the route placeholder.
@@ -71,6 +72,15 @@ export default function AdminPanel() {
       </header>
 
       <div className="mx-auto flex max-w-5xl flex-col gap-6 p-4">
+        {/* Below md the admin panel has no dashboard rail, so surface the shared
+            app-nav as a scrollable pill strip — otherwise a mobile admin lands
+            on this metadata-only panel with no way to Files/Shared/Trash. At md+
+            the header's "back to files" link + the desktop rail cover it, so it
+            is hidden to avoid a redundant second nav. */}
+        <div className="md:hidden">
+          <AppNav />
+        </div>
+
         <div className="flex flex-col gap-1">
           <h1 className="font-display text-lg text-ink">{t('admin.title')}</h1>
           <p className="font-body text-sm text-ink-2">{t('admin.subtitle')}</p>

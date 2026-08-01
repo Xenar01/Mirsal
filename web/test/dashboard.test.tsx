@@ -448,3 +448,17 @@ describe('TrashView — mobile card list (§M2b two-layout pattern)', () => {
     expect(within(card).getByText('مسودة.docx')).toBeInTheDocument();
   });
 });
+
+describe('DashboardShell — primary app nav (§M4)', () => {
+  test('renders the shared app-nav as links to My Files / Shared / Trash (below md a scrollable pill strip)', async () => {
+    stubFetch({ '/api/nodes': [], '/api/nodes/trash': [], '/api/auth/me': USER });
+    renderDrive(['/']);
+
+    const nav = await screen.findByRole('navigation', { name: i18n.t('dashboard.nav.label') });
+    expect(within(nav).getByRole('link', { name: i18n.t('dashboard.nav.myFiles') })).toHaveAttribute('href', '/');
+    expect(within(nav).getByRole('link', { name: i18n.t('dashboard.nav.shared') })).toHaveAttribute('href', '/shared');
+    expect(within(nav).getByRole('link', { name: i18n.t('dashboard.nav.trash') })).toHaveAttribute('href', '/trash');
+    // A non-admin never sees the Admin pill.
+    expect(within(nav).queryByRole('link', { name: i18n.t('dashboard.nav.admin') })).toBeNull();
+  });
+});

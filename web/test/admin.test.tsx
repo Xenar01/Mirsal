@@ -537,3 +537,21 @@ describe('Admin — AuditLog (§3.1)', () => {
     expect(within(table).queryByText('2')).toBeNull();
   });
 });
+
+describe('AdminPanel — mobile app nav strip (§M4)', () => {
+  test('renders the shared app-nav so a mobile admin can reach Files/Shared/Trash/Admin', async () => {
+    stubFetch({ users: [] });
+    await renderAdmin({ users: [] });
+
+    // The primary app nav (a `navigation` landmark) is now rendered inside the
+    // admin panel — below md it is a scrollable pill strip; here in jsdom it is
+    // always present so a mobile admin is never stranded on the metadata-only
+    // panel with no way back to their files.
+    const nav = await screen.findByRole('navigation', { name: t('dashboard.nav.label') });
+    expect(within(nav).getByRole('link', { name: t('dashboard.nav.myFiles') })).toHaveAttribute('href', '/');
+    expect(within(nav).getByRole('link', { name: t('dashboard.nav.shared') })).toHaveAttribute('href', '/shared');
+    expect(within(nav).getByRole('link', { name: t('dashboard.nav.trash') })).toHaveAttribute('href', '/trash');
+    // An admin also sees the Admin pill (current route).
+    expect(within(nav).getByRole('link', { name: t('dashboard.nav.admin') })).toBeInTheDocument();
+  });
+});
