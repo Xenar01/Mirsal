@@ -6,7 +6,7 @@ import { useToast } from '../../components/Toast';
 import { FolderDossier, FileSheet } from '../../components/icons';
 import DashboardShell from './DashboardShell';
 import { formatBytes, formatDate } from './format';
-import { useTrash, useRestoreNode, useDeleteNode } from './queries';
+import { useTrash, useRestoreNode, useDeleteNode, useEmptyTrash } from './queries';
 import type { NodeDto } from './types';
 
 /*
@@ -26,6 +26,7 @@ export default function TrashView() {
 
   const restore = useRestoreNode();
   const [deleteTarget, setDeleteTarget] = useState<NodeDto | null>(null);
+  const [emptyOpen, setEmptyOpen] = useState(false);
 
   function onRestore(node: NodeDto) {
     restore.mutate(node.id, {
@@ -37,7 +38,14 @@ export default function TrashView() {
   return (
     <DashboardShell>
       <div className="flex flex-col gap-4">
-        <h1 className="font-display text-lg text-ink">{t('trash.title')}</h1>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h1 className="font-display text-lg text-ink">{t('trash.title')}</h1>
+          {!isPending && !isError && items.length > 0 && (
+            <Button variant="danger" onClick={() => setEmptyOpen(true)}>
+              {t('trash.emptyAll')}
+            </Button>
+          )}
+        </div>
 
         {isPending && <p className="font-body text-sm text-ink-2">{t('trash.loading')}</p>}
         {isError && (
@@ -58,6 +66,7 @@ export default function TrashView() {
       {deleteTarget && (
         <ConfirmDeleteModal node={deleteTarget} onClose={() => setDeleteTarget(null)} />
       )}
+      {emptyOpen && <ConfirmEmptyModal onClose={() => setEmptyOpen(false)} />}
     </DashboardShell>
   );
 }
@@ -254,6 +263,45 @@ function ConfirmDeleteModal({ node, onClose }: { node: NodeDto; onClose: () => v
       }
     >
       <p className="font-body text-sm text-ink">{t('trash.confirm.body', { name: node.name })}</p>
+    </Modal>
+  );
+}
+
+function ConfirmEmptyModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+  const empty = useEmptyTrash();
+
+  function confirm() {
+    empty.mutate(undefined, {
+      onSuccess: () => {
+        toast({ kind: 'success', message: t('trash.toast.emptied') });
+        onClose();
+      },
+      onError: () => {
+        toast({ kind: 'error', message: t('trash.toast.emptyFailed') });
+        onClose();
+      },
+    });
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={t('trash.confirmEmpty.title')}
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            {t('trash.confirmEmpty.cancel')}
+          </Button>
+          <Button variant="danger" onClick={confirm} disabled={empty.isPending}>
+            {t('trash.confirmEmpty.confirm')}
+          </Button>
+        </>
+      }
+    >
+      <p className="font-body text-sm text-ink">{t('trash.confirmEmpty.body')}</p>
     </Modal>
   );
 }

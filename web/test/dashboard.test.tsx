@@ -11,6 +11,7 @@ import DriveView from '../src/features/dashboard/DriveView';
 import TrashView from '../src/features/dashboard/TrashView';
 import UploadDrop from '../src/features/dashboard/UploadDrop';
 import type { NodeDto } from '../src/features/dashboard/types';
+import { sortNodes, type SortState } from '../src/features/dashboard/sort';
 
 const USER = { id: 1, username: 'sara', role: 'user', mustChangePassword: false };
 const NOW = 1_750_000_000_000; // fixed epoch-ms
@@ -420,6 +421,126 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
 
     expect(await screen.findByText(i18n.t('dashboard.folder.conflict'))).toBeInTheDocument();
   });
+
+  test('clicking the Size column header reorders the rows (folders stay first) (#7)', async () => {
+    const listing: NodeDto[] = [
+      { id: 1, parent_id: 9, kind: 'file', name: 'big.bin', size_bytes: 900, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 100 },
+      { id: 2, parent_id: 9, kind: 'file', name: 'small.txt', size_bytes: 10, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 200 },
+      { id: 3, parent_id: 9, kind: 'folder', name: 'Docs', size_bytes: 0, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 300 },
+    ];
+    stubFetch({ '/api/nodes': listing, '/api/shares': [] });
+    renderDrive(['/']);
+
+    // Scope to the register table — the mobile card list (mounted alongside
+    // the table in jsdom, hidden only via CSS) repeats the same node names,
+    // so an unscoped query would match twice.
+    const table = await screen.findByRole('table');
+    await within(table).findByText('big.bin');
+    const sizeHeaderBtn = within(table).getByRole('button', { name: /الحجم/ });
+    await act(async () => {
+      fireEvent.click(sizeHeaderBtn); // size asc
+    });
+
+    const nameCells = within(table).getAllByText(/big\.bin|small\.txt|Docs/).map((el) => el.textContent);
+    // Folder first, then files ascending by size: Docs, small.txt, big.bin
+    expect(nameCells).toEqual(['Docs', 'small.txt', 'big.bin']);
+  });
+
+  test('selecting rows shows a bulk bar; confirming bulk-trashes each selected id (#8)', async () => {
+    const listing: NodeDto[] = [
+      { id: 1, parent_id: 9, kind: 'file', name: 'a.txt', size_bytes: 5, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 100 },
+      { id: 2, parent_id: 9, kind: 'file', name: 'b.txt', size_bytes: 6, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 200 },
+    ];
+    const trashed: number[] = [];
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url).split('?')[0];
+      const method = (init?.method ?? 'GET').toUpperCase();
+      if (path === '/api/nodes' && method === 'GET') return jsonResponse(200, listing);
+      if (path === '/api/shares') return jsonResponse(200, []);
+      const m = path.match(/^\/api\/nodes\/(\d+)\/trash$/);
+      if (m && method === 'POST') { trashed.push(Number(m[1])); return jsonResponse(200, {}); }
+      return jsonResponse(200, {});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderDrive(['/']);
+    // Scope the initial wait to the table — jsdom mounts both the desktop
+    // table and the (CSS-hidden) mobile card list, which repeats the same
+    // node name, so an unscoped `findByText` would match twice.
+    await screen.findByRole('table');
+
+    // Select both rows via their per-row checkboxes.
+    const cbs = screen.getAllByRole('checkbox', { name: 'تحديد الصف' });
+    await act(async () => {
+      fireEvent.click(cbs[0]);
+      fireEvent.click(cbs[1]);
+    });
+
+    // Bulk bar appears with the count; confirm.
+    const bulkBtn = await screen.findByRole('button', { name: /نقل إلى المهملات \(2\)/ });
+    await act(async () => {
+      fireEvent.click(bulkBtn);
+    });
+    // Scope to the confirm dialog — its submit button shares the same label
+    // ("نقل") as each row's per-node "move" action button, so an unscoped
+    // query would match those too.
+    const dialog = await screen.findByRole('dialog');
+    const confirm = within(dialog).getByRole('button', { name: 'نقل' });
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+
+    expect(trashed.sort()).toEqual([1, 2]);
+  });
+
+  test('the select-all checkbox toggles every row in the current folder (#8)', async () => {
+    const listing: NodeDto[] = [
+      { id: 1, parent_id: 9, kind: 'file', name: 'a.txt', size_bytes: 5, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 100 },
+      { id: 2, parent_id: 9, kind: 'folder', name: 'Docs', size_bytes: 0, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 200 },
+    ];
+    stubFetch({ '/api/nodes': listing, '/api/shares': [] });
+    renderDrive(['/']);
+    await screen.findByRole('table');
+
+    const selectAll = screen.getByRole('checkbox', { name: 'تحديد الكل' });
+    await act(async () => {
+      fireEvent.click(selectAll);
+    });
+    // Bulk bar reflects both rows selected.
+    await screen.findByRole('button', { name: /نقل إلى المهملات \(2\)/ });
+  });
+});
+
+describe('sortNodes — folders first, then by key/direction (#7)', () => {
+  const mk = (id: number, kind: 'folder' | 'file', name: string, size: number, updated: number): NodeDto => ({
+    id, parent_id: 1, kind, name, size_bytes: size, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: updated,
+  });
+  const nodes: NodeDto[] = [
+    mk(1, 'file', 'banana', 30, 100),
+    mk(2, 'folder', 'Zebra', 0, 300),
+    mk(3, 'file', 'apple', 10, 200),
+    mk(4, 'folder', 'alpha', 0, 50),
+  ];
+
+  const names = (s: SortState) => sortNodes(nodes, s).map((n) => n.name);
+
+  test('name asc: folders (by name) before files (by name)', () => {
+    expect(names({ key: 'name', dir: 'asc' })).toEqual(['alpha', 'Zebra', 'apple', 'banana']);
+  });
+  test('name desc reverses within each group but keeps folders first', () => {
+    expect(names({ key: 'name', dir: 'desc' })).toEqual(['Zebra', 'alpha', 'banana', 'apple']);
+  });
+  test('size asc sorts files by size_bytes (folders still first)', () => {
+    expect(names({ key: 'size', dir: 'asc' }).slice(2)).toEqual(['apple', 'banana']); // 10 < 30
+  });
+  test('date desc sorts by updated_at newest-first within group', () => {
+    expect(names({ key: 'date', dir: 'desc' }).slice(2)).toEqual(['apple', 'banana']); // 200 > 100
+  });
+  test('returns a new array (does not mutate input order)', () => {
+    const before = nodes.map((n) => n.id);
+    sortNodes(nodes, { key: 'size', dir: 'desc' });
+    expect(nodes.map((n) => n.id)).toEqual(before);
+  });
 });
 
 describe('TrashView — mobile card list (§M2b two-layout pattern)', () => {
@@ -446,6 +567,45 @@ describe('TrashView — mobile card list (§M2b two-layout pattern)', () => {
     // name as the (CSS-hidden) desktop row.
     const card = await screen.findByTestId('trash-card-9');
     expect(within(card).getByText('مسودة.docx')).toBeInTheDocument();
+  });
+});
+
+describe('TrashView — empty whole trash (#6)', () => {
+  test('shows an empty-trash button only when the trash is non-empty, and calls the endpoint on confirm', async () => {
+    const trashed: NodeDto[] = [
+      { id: 10, parent_id: 2, kind: 'file', name: 'old.txt', size_bytes: 5, mime_type: 'text/plain', auto_delete_at: null, created_at: NOW, updated_at: NOW },
+    ];
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url).split('?')[0];
+      const method = (init?.method ?? 'GET').toUpperCase();
+      calls.push(`${method} ${path}`);
+      if (path === '/api/nodes/trash' && method === 'GET') return jsonResponse(200, trashed);
+      if (path === '/api/nodes/trash/empty' && method === 'POST') return jsonResponse(200, { freedBytes: 5 });
+      return jsonResponse(200, {});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderTrash(['/trash']);
+    const emptyBtn = await screen.findByRole('button', { name: 'إفراغ سلة المهملات' });
+
+    fireEvent.click(emptyBtn);
+    // Destructive confirm modal → the confirm button carries the "إفراغ" label.
+    const confirm = await screen.findByRole('button', { name: 'إفراغ' });
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+
+    expect(calls).toContain('POST /api/nodes/trash/empty');
+  });
+
+  test('hides the empty-trash button when the trash is empty', async () => {
+    stubFetch({ '/api/nodes/trash': [] });
+    renderTrash(['/trash']);
+    // The empty-state copy renders…
+    await screen.findByText('المهملات فارغة.');
+    // …and no empty-trash button is present.
+    expect(screen.queryByRole('button', { name: 'إفراغ سلة المهملات' })).toBeNull();
   });
 });
 

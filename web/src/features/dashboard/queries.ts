@@ -85,6 +85,14 @@ export function useDeleteNode() {
   });
 }
 
+export function useEmptyTrash() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: () => nodesApi.emptyTrash(),
+    onSuccess: () => invalidateNodes(client),
+  });
+}
+
 /**
  * Set/clear a node's auto-delete deadline (§3.4). Invalidates the whole
  * `['nodes', …]` family (which includes `['nodes', parentId]`) so the register
