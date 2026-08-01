@@ -57,7 +57,7 @@ export default function Modal({ open, onClose, title, children, footer }: ModalP
             type="button"
             onClick={onClose}
             aria-label={t('common.close')}
-            className="inline-flex rounded-md p-1 text-ink-2 transition-colors hover:bg-paper hover:text-ink"
+            className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-md p-1 text-ink-2 transition-colors hover:bg-paper hover:text-ink"
           >
             <Close size={20} />
           </button>

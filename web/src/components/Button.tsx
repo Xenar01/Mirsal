@@ -38,7 +38,7 @@ export default function Button({
 }: ButtonProps) {
   const classes = [
     'inline-flex items-center justify-center gap-2 rounded-lg font-body text-sm',
-    'ps-4 pe-4 py-2 min-h-9',
+    'ps-4 pe-4 py-2 min-h-11',
     VARIANT[variant],
     disabled ? 'opacity-50 cursor-not-allowed' : '',
     className ?? '',

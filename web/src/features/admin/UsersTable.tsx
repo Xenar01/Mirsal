@@ -27,9 +27,9 @@ import type { AdminUserDto } from './types';
 // Compact chip-button styling for the user-row actions (matches the drive
 // register), so a row of actions reads as a toolbar of buttons, not bare text.
 const ADMIN_ACTION =
-  'inline-flex items-center rounded-md border border-line px-2.5 py-1 font-body text-xs text-teal transition-colors hover:bg-paper focus-visible:bg-paper';
+  'inline-flex min-h-10 items-center rounded-md border border-line px-2.5 py-1 font-body text-xs text-teal transition-colors hover:bg-paper focus-visible:bg-paper';
 const ADMIN_ACTION_DANGER =
-  'inline-flex items-center rounded-md border border-line px-2.5 py-1 font-body text-xs text-clay transition-colors hover:bg-paper focus-visible:bg-paper';
+  'inline-flex min-h-10 items-center rounded-md border border-line px-2.5 py-1 font-body text-xs text-clay transition-colors hover:bg-paper focus-visible:bg-paper';
 
 export default function UsersTable() {
   const { t } = useTranslation();

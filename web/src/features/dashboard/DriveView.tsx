@@ -298,9 +298,9 @@ function Register({
  * read as a button at rest; hover tints to paper.
  */
 const ROW_ACTION =
-  'inline-flex items-center rounded-md border border-line px-2.5 py-1 font-body text-xs text-teal transition-colors hover:bg-paper focus-visible:bg-paper';
+  'inline-flex min-h-10 items-center rounded-md border border-line px-2.5 py-1 font-body text-xs text-teal transition-colors hover:bg-paper focus-visible:bg-paper';
 const ROW_ACTION_DANGER =
-  'inline-flex items-center rounded-md border border-line px-2.5 py-1 font-body text-xs text-clay transition-colors hover:bg-paper focus-visible:bg-paper';
+  'inline-flex min-h-10 items-center rounded-md border border-line px-2.5 py-1 font-body text-xs text-clay transition-colors hover:bg-paper focus-visible:bg-paper';
 
 /** A subtle status pill for a share's active lifecycle controls (password /
  *  remaining downloads / expiry), shown under the status chip in the register. */

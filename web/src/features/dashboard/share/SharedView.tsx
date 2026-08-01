@@ -115,7 +115,7 @@ function ShareRow({ share, onRevoke }: { share: ShareDto; onRevoke: () => void }
   return (
     <tr className="border-b border-line last:border-b-0 hover:bg-paper">
       <td className="ps-3 pe-3 py-2">
-        <bdi dir="ltr" className="font-mono text-ink">
+        <bdi dir="ltr" className="break-all font-mono text-ink">
           {share.token}
         </bdi>
       </td>
