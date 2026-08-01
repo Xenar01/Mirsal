@@ -449,6 +449,45 @@ describe('TrashView — mobile card list (§M2b two-layout pattern)', () => {
   });
 });
 
+describe('TrashView — empty whole trash (#6)', () => {
+  test('shows an empty-trash button only when the trash is non-empty, and calls the endpoint on confirm', async () => {
+    const trashed: NodeDto[] = [
+      { id: 10, parent_id: 2, kind: 'file', name: 'old.txt', size_bytes: 5, mime_type: 'text/plain', auto_delete_at: null, created_at: NOW, updated_at: NOW },
+    ];
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(url).split('?')[0];
+      const method = (init?.method ?? 'GET').toUpperCase();
+      calls.push(`${method} ${path}`);
+      if (path === '/api/nodes/trash' && method === 'GET') return jsonResponse(200, trashed);
+      if (path === '/api/nodes/trash/empty' && method === 'POST') return jsonResponse(200, { freedBytes: 5 });
+      return jsonResponse(200, {});
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderTrash(['/trash']);
+    const emptyBtn = await screen.findByRole('button', { name: 'إفراغ سلة المهملات' });
+
+    fireEvent.click(emptyBtn);
+    // Destructive confirm modal → the confirm button carries the "إفراغ" label.
+    const confirm = await screen.findByRole('button', { name: 'إفراغ' });
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+
+    expect(calls).toContain('POST /api/nodes/trash/empty');
+  });
+
+  test('hides the empty-trash button when the trash is empty', async () => {
+    stubFetch({ '/api/nodes/trash': [] });
+    renderTrash(['/trash']);
+    // The empty-state copy renders…
+    await screen.findByText('المهملات فارغة.');
+    // …and no empty-trash button is present.
+    expect(screen.queryByRole('button', { name: 'إفراغ سلة المهملات' })).toBeNull();
+  });
+});
+
 describe('DashboardShell — primary app nav (§M4)', () => {
   test('renders the shared app-nav as links to My Files / Shared / Trash (below md a scrollable pill strip)', async () => {
     stubFetch({ '/api/nodes': [], '/api/nodes/trash': [], '/api/auth/me': USER });

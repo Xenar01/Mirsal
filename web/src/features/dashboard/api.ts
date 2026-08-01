@@ -49,6 +49,11 @@ export function deleteNode(id: number): Promise<void> {
   return apiDelete<void>(`/nodes/${id}`);
 }
 
+/** Permanently empties the caller's whole Trash (server cascades each subtree). */
+export function emptyTrash(): Promise<{ freedBytes: number }> {
+  return apiPost<{ freedBytes: number }>('/nodes/trash/empty');
+}
+
 /**
  * Schedules (or clears) a node's auto-delete deadline (spec §3.4). `epoch-ms`
  * UTC must be a future instant when set (the server validates); `null` clears
