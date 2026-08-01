@@ -7,7 +7,7 @@ import { useToast } from '../../components/Toast';
 import { useAuth } from '../auth/auth-context';
 import { formatBytes, formatDate } from '../dashboard/format';
 import { useAdminUsers, usePatchUser, useResetPassword, useDeleteUser, useClearUserSpace } from './queries';
-import { loweringGuard } from './guards';
+import { loweringGuard, type GuardState } from './guards';
 import { adminErrorCode } from './api';
 import CreateUserModal from './CreateUserModal';
 import RevealOncePanel from './RevealOncePanel';
@@ -88,7 +88,10 @@ export default function UsersTable() {
             </span>
           </div>
 
-          <div className="overflow-x-auto rounded-[10px] border border-line bg-surface">
+          {/* Desktop (≥ md): the users register table, unchanged — only the
+              wrapper gained `hidden md:block` so it yields to the mobile card
+              list below md. */}
+          <div className="hidden overflow-x-auto rounded-[10px] border border-line bg-surface md:block">
             <table className="w-full border-collapse font-body text-sm">
               <thead>
                 <tr className="border-b border-line text-ink-2">
@@ -107,6 +110,7 @@ export default function UsersTable() {
                 {users.map((row) => (
                   <UserRow
                     key={row.id}
+                    variant="row"
                     row={row}
                     users={users}
                     currentUserId={user?.id}
@@ -119,6 +123,26 @@ export default function UsersTable() {
                 ))}
               </tbody>
             </table>
+          </div>
+
+          {/* Mobile (< md): the same users as a stacked card list — same
+              data, same handlers, same modals (see UserRow's `variant`
+              prop). */}
+          <div className="flex flex-col gap-3 md:hidden">
+            {users.map((row) => (
+              <UserRow
+                key={row.id}
+                variant="card"
+                row={row}
+                users={users}
+                currentUserId={user?.id}
+                onReset={() => setResetTarget(row)}
+                onQuota={() => setQuotaTarget(row)}
+                onDelete={() => setDeleteTarget(row)}
+                onLabel={() => setLabelTarget(row)}
+                onClearSpace={() => setClearTarget(row)}
+              />
+            ))}
           </div>
         </>
       )}
@@ -238,12 +262,149 @@ function GuardedAction({
   );
 }
 
+/**
+ * The guard-blocked reason, as VISIBLE text (discoverable to mouse users) and
+ * linked to every guarded control via `aria-describedby` (the id `GuardedAction`
+ * consumes). Shared verbatim between the desktop row and the mobile card — the
+ * ONLY place this note is written; only the alignment class differs per layout.
+ */
+function GuardReasonNote({
+  reasonId,
+  reason,
+  className,
+}: {
+  reasonId: string;
+  reason: string;
+  className?: string;
+}) {
+  return (
+    <p id={reasonId} className={`font-body text-xs text-ink-2 ${className ?? ''}`}>
+      {reason}
+    </p>
+  );
+}
+
 /* ── User row ─────────────────────────────────────────────────────────── */
 
+/**
+ * A row's full action cluster (activate/deactivate, promote/demote,
+ * reset-password, quota, label, delete, clear-space — same guards + handlers
+ * for every action). Shared verbatim between the desktop actions cell and the
+ * mobile card's action row — the ONLY place these seven buttons
+ * (labels/handlers/guards) are written; the two callers differ only in the
+ * wrapping container's layout classes.
+ */
+function UserActionButtons({
+  active,
+  isAdmin,
+  guard,
+  reasonId,
+  pending,
+  onToggleActive,
+  onToggleRole,
+  onReset,
+  onQuota,
+  onLabel,
+  onDelete,
+  onClearSpace,
+}: {
+  active: boolean;
+  isAdmin: boolean;
+  guard: GuardState;
+  reasonId: string;
+  pending: boolean;
+  onToggleActive: () => void;
+  onToggleRole: () => void;
+  onReset: () => void;
+  onQuota: () => void;
+  onLabel: () => void;
+  onDelete: () => void;
+  onClearSpace: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <>
+      {active ? (
+        <GuardedAction
+          onAct={onToggleActive}
+          guardBlocked={guard.blocked}
+          reasonId={reasonId}
+          pending={pending}
+          className={ADMIN_ACTION}
+        >
+          {t('admin.users.action.deactivate')}
+        </GuardedAction>
+      ) : (
+        <button
+          type="button"
+          onClick={onToggleActive}
+          disabled={pending}
+          className={`${ADMIN_ACTION} disabled:opacity-50`}
+        >
+          {t('admin.users.action.activate')}
+        </button>
+      )}
+
+      {isAdmin ? (
+        <GuardedAction
+          onAct={onToggleRole}
+          guardBlocked={guard.blocked}
+          reasonId={reasonId}
+          pending={pending}
+          className={ADMIN_ACTION}
+        >
+          {t('admin.users.action.demote')}
+        </GuardedAction>
+      ) : (
+        <button
+          type="button"
+          onClick={onToggleRole}
+          disabled={pending}
+          className={`${ADMIN_ACTION} disabled:opacity-50`}
+        >
+          {t('admin.users.action.promote')}
+        </button>
+      )}
+
+      <button type="button" onClick={onReset} className={ADMIN_ACTION}>
+        {t('admin.users.action.resetPassword')}
+      </button>
+      <button type="button" onClick={onQuota} className={ADMIN_ACTION}>
+        {t('admin.users.action.quota')}
+      </button>
+      <button type="button" onClick={onLabel} className={ADMIN_ACTION}>
+        {t('admin.users.action.label')}
+      </button>
+      <GuardedAction
+        onAct={onDelete}
+        guardBlocked={guard.blocked}
+        reasonId={reasonId}
+        className={ADMIN_ACTION_DANGER}
+      >
+        {t('admin.users.action.delete')}
+      </GuardedAction>
+      {/* Clearing space wipes files/shares but keeps the account, so it is
+          NOT subject to the last-admin / self guard (unlike delete). */}
+      <button type="button" onClick={onClearSpace} className={ADMIN_ACTION_DANGER}>
+        {t('admin.users.action.clearSpace')}
+      </button>
+    </>
+  );
+}
+
+/**
+ * A user's per-row behavior (guards/mutations) plus BOTH of its presentations.
+ * `variant` switches ONLY the returned JSX layout — `'row'` renders the
+ * desktop `<tr>` byte-identically to before this refactor, `'card'` renders
+ * the mobile card — while the guard computation, the mutation handlers, and
+ * the shared `StateBadge` / `UsageCell` / `UserActionButtons` / `GuardReasonNote`
+ * above are the single code path both variants call.
+ */
 function UserRow({
   row,
   users,
   currentUserId,
+  variant = 'row',
   onReset,
   onQuota,
   onDelete,
@@ -253,6 +414,7 @@ function UserRow({
   row: AdminUserDto;
   users: AdminUserDto[];
   currentUserId: number | undefined;
+  variant?: 'row' | 'card';
   onReset: () => void;
   onQuota: () => void;
   onDelete: () => void;
@@ -307,6 +469,73 @@ function UserRow({
     );
   }
 
+  if (variant === 'card') {
+    return (
+      <div
+        data-testid={`user-card-${row.id}`}
+        className="rounded-[10px] border border-line bg-surface p-3"
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <bdi dir="ltr" className="block truncate font-mono text-ink">
+              {row.username}
+            </bdi>
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-body text-xs text-ink-2">
+              {row.display_name ? (
+                <span className="min-w-0 truncate text-ink">{row.display_name}</span>
+              ) : (
+                <span>{t('admin.users.noName')}</span>
+              )}
+              <span aria-hidden="true">·</span>
+              <span>{isAdmin ? t('admin.users.role.admin') : t('admin.users.role.user')}</span>
+              {row.must_change_password === 1 && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span>{t('admin.users.mustChange')}</span>
+                </>
+              )}
+            </div>
+          </div>
+          <span className="shrink-0">
+            <StateBadge active={active} />
+          </span>
+        </div>
+
+        <div className="mt-2">
+          <UsageCell user={row} />
+        </div>
+
+        <div className="mt-1 font-body text-xs text-ink-2">
+          <bdi dir="ltr" className="font-mono">
+            {formatDate(row.created_at)}
+          </bdi>
+        </div>
+
+        <div className="mt-2 flex flex-col gap-1.5">
+          <div className="flex flex-wrap gap-2">
+            <UserActionButtons
+              active={active}
+              isAdmin={isAdmin}
+              guard={guard}
+              reasonId={reasonId}
+              pending={patch.isPending}
+              onToggleActive={toggleActive}
+              onToggleRole={toggleRole}
+              onReset={onReset}
+              onQuota={onQuota}
+              onLabel={onLabel}
+              onDelete={onDelete}
+              onClearSpace={onClearSpace}
+            />
+          </div>
+          {guard.blocked && guardReason && (
+            <GuardReasonNote reasonId={reasonId} reason={guardReason} />
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <tr data-testid={`user-row-${row.id}`} className="border-b border-line last:border-b-0 align-top hover:bg-paper">
       <td className="ps-3 pe-3 py-2">
@@ -343,70 +572,20 @@ function UserRow({
       <td className="ps-3 pe-3 py-2">
         <div className="flex flex-col items-end gap-1.5">
           <div className="flex flex-wrap items-center justify-end gap-2">
-            {active ? (
-              <GuardedAction
-                onAct={toggleActive}
-                guardBlocked={guard.blocked}
-                reasonId={reasonId}
-                pending={patch.isPending}
-                className={ADMIN_ACTION}
-              >
-                {t('admin.users.action.deactivate')}
-              </GuardedAction>
-            ) : (
-              <button
-                type="button"
-                onClick={toggleActive}
-                disabled={patch.isPending}
-                className={`${ADMIN_ACTION} disabled:opacity-50`}
-              >
-                {t('admin.users.action.activate')}
-              </button>
-            )}
-
-            {isAdmin ? (
-              <GuardedAction
-                onAct={toggleRole}
-                guardBlocked={guard.blocked}
-                reasonId={reasonId}
-                pending={patch.isPending}
-                className={ADMIN_ACTION}
-              >
-                {t('admin.users.action.demote')}
-              </GuardedAction>
-            ) : (
-              <button
-                type="button"
-                onClick={toggleRole}
-                disabled={patch.isPending}
-                className={`${ADMIN_ACTION} disabled:opacity-50`}
-              >
-                {t('admin.users.action.promote')}
-              </button>
-            )}
-
-            <button type="button" onClick={onReset} className={ADMIN_ACTION}>
-              {t('admin.users.action.resetPassword')}
-            </button>
-            <button type="button" onClick={onQuota} className={ADMIN_ACTION}>
-              {t('admin.users.action.quota')}
-            </button>
-            <button type="button" onClick={onLabel} className={ADMIN_ACTION}>
-              {t('admin.users.action.label')}
-            </button>
-            <GuardedAction
-              onAct={onDelete}
-              guardBlocked={guard.blocked}
+            <UserActionButtons
+              active={active}
+              isAdmin={isAdmin}
+              guard={guard}
               reasonId={reasonId}
-              className={ADMIN_ACTION_DANGER}
-            >
-              {t('admin.users.action.delete')}
-            </GuardedAction>
-            {/* Clearing space wipes files/shares but keeps the account, so it is
-                NOT subject to the last-admin / self guard (unlike delete). */}
-            <button type="button" onClick={onClearSpace} className={ADMIN_ACTION_DANGER}>
-              {t('admin.users.action.clearSpace')}
-            </button>
+              pending={patch.isPending}
+              onToggleActive={toggleActive}
+              onToggleRole={toggleRole}
+              onReset={onReset}
+              onQuota={onQuota}
+              onLabel={onLabel}
+              onDelete={onDelete}
+              onClearSpace={onClearSpace}
+            />
           </div>
 
           {/* The guard reason is shown as VISIBLE text (discoverable to mouse
@@ -414,9 +593,7 @@ function UserRow({
               the guarded buttons stay focusable (aria-disabled, not native
               `disabled`), so keyboard + AT users reach the explanation too. */}
           {guard.blocked && guardReason && (
-            <p id={reasonId} className="max-w-xs text-end font-body text-xs text-ink-2">
-              {guardReason}
-            </p>
+            <GuardReasonNote reasonId={reasonId} reason={guardReason} className="max-w-xs text-end" />
           )}
         </div>
       </td>

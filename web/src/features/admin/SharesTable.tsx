@@ -38,73 +38,163 @@ export default function SharesTable() {
       )}
 
       {!isPending && !isError && shares.length > 0 && (
-        <div className="overflow-x-auto rounded-[10px] border border-line bg-surface">
-          <table className="w-full border-collapse font-body text-sm">
-            <thead>
-              <tr className="border-b border-line text-ink-2">
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.shares.col.owner')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.shares.col.item')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.shares.col.status')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.shares.col.password')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.shares.col.expiry')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.shares.col.created')}</th>
-                <th className="ps-3 pe-3 py-2 text-start font-medium">
-                  <span className="sr-only">{t('admin.shares.col.actions')}</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {shares.map((share) => (
-                <tr key={share.id} className="border-b border-line last:border-b-0 hover:bg-paper">
-                  <td className="ps-3 pe-3 py-2">
-                    <div className="flex flex-col gap-1">
-                      <bdi dir="ltr" className="font-mono text-ink">
-                        {share.owner_username}
-                      </bdi>
-                      {!share.owner_active && (
-                        <span className="font-body text-xs text-ink-2">
-                          {t('admin.shares.ownerInactive')}
-                        </span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="ps-3 pe-3 py-2 text-ink">{share.node_name ?? '—'}</td>
-                  <td className="ps-3 pe-3 py-2">
-                    <StatusChip status={share.status} />
-                  </td>
-                  <td className="ps-3 pe-3 py-2 text-ink-2">
-                    {share.has_password ? t('admin.shares.hasPassword') : t('admin.shares.noPassword')}
-                  </td>
-                  <td className="ps-3 pe-3 py-2">
-                    {share.expires_at === null ? (
-                      <span className="text-ink-2">{t('admin.shares.noExpiry')}</span>
-                    ) : (
-                      <bdi dir="ltr" className="font-mono text-ink-2">
-                        {formatDate(share.expires_at)}
-                      </bdi>
-                    )}
-                  </td>
-                  <td className="ps-3 pe-3 py-2">
-                    <bdi dir="ltr" className="font-mono text-ink-2">
-                      {formatDate(share.created_at)}
-                    </bdi>
-                  </td>
-                  <td className="ps-3 pe-3 py-2">
-                    <div className="flex items-center justify-end">
-                      <button type="button" onClick={() => setRevokeTarget(share)} className="text-clay">
-                        {t('admin.shares.revoke')}
-                      </button>
-                    </div>
-                  </td>
+        <>
+          {/* Desktop (≥ md): the shares register table, unchanged — only the
+              wrapper gained `hidden md:block` so it yields to the mobile card
+              list below md. */}
+          <div className="hidden overflow-x-auto rounded-[10px] border border-line bg-surface md:block">
+            <table className="w-full border-collapse font-body text-sm">
+              <thead>
+                <tr className="border-b border-line text-ink-2">
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.shares.col.owner')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.shares.col.item')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.shares.col.status')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.shares.col.password')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.shares.col.expiry')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.shares.col.created')}</th>
+                  <th className="ps-3 pe-3 py-2 text-start font-medium">
+                    <span className="sr-only">{t('admin.shares.col.actions')}</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {shares.map((share) => (
+                  <ShareRow key={share.id} variant="row" share={share} onRevoke={setRevokeTarget} />
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile (< md): the same shares as a stacked card list — same
+              data, same handler, same modal (see ShareRow's `variant` prop). */}
+          <div className="flex flex-col gap-3 md:hidden">
+            {shares.map((share) => (
+              <ShareRow key={share.id} variant="card" share={share} onRevoke={setRevokeTarget} />
+            ))}
+          </div>
+        </>
       )}
 
       {revokeTarget && <RevokeConfirm share={revokeTarget} onClose={() => setRevokeTarget(null)} />}
     </div>
+  );
+}
+
+/**
+ * The row's single action (force-revoke). Shared verbatim between the desktop
+ * actions cell and the mobile card's action row — the ONLY place this button
+ * (label/handler/class) is written.
+ */
+function ShareRevokeButton({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <button type="button" onClick={onClick} className="text-clay">
+      {t('admin.shares.revoke')}
+    </button>
+  );
+}
+
+/**
+ * A single share's BOTH presentations. `variant` switches only the returned
+ * JSX layout — `'row'` is the desktop `<tr>` byte-identical to before this
+ * refactor, `'card'` is the mobile card — while `ShareRevokeButton` above is
+ * the single code path both variants call.
+ */
+function ShareRow({
+  share,
+  variant = 'row',
+  onRevoke,
+}: {
+  share: AdminShareDto;
+  variant?: 'row' | 'card';
+  onRevoke: (share: AdminShareDto) => void;
+}) {
+  const { t } = useTranslation();
+
+  if (variant === 'card') {
+    return (
+      <div
+        data-testid={`share-card-${share.id}`}
+        className="rounded-[10px] border border-line bg-surface p-3"
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
+            <bdi dir="ltr" className="block truncate font-mono text-ink">
+              {share.owner_username}
+            </bdi>
+            {!share.owner_active && (
+              <span className="font-body text-xs text-ink-2">{t('admin.shares.ownerInactive')}</span>
+            )}
+          </div>
+          <span className="shrink-0">
+            <StatusChip status={share.status} />
+          </span>
+        </div>
+
+        <div className="mt-1 truncate font-body text-sm text-ink">{share.node_name ?? '—'}</div>
+
+        <div className="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 font-body text-xs text-ink-2">
+          <span>{share.has_password ? t('admin.shares.hasPassword') : t('admin.shares.noPassword')}</span>
+          <span aria-hidden="true">·</span>
+          {share.expires_at === null ? (
+            <span>{t('admin.shares.noExpiry')}</span>
+          ) : (
+            <bdi dir="ltr" className="font-mono">
+              {formatDate(share.expires_at)}
+            </bdi>
+          )}
+          <span aria-hidden="true">·</span>
+          <bdi dir="ltr" className="font-mono">
+            {formatDate(share.created_at)}
+          </bdi>
+        </div>
+
+        <div className="mt-2 flex flex-wrap gap-2">
+          <ShareRevokeButton onClick={() => onRevoke(share)} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <tr className="border-b border-line last:border-b-0 hover:bg-paper">
+      <td className="ps-3 pe-3 py-2">
+        <div className="flex flex-col gap-1">
+          <bdi dir="ltr" className="font-mono text-ink">
+            {share.owner_username}
+          </bdi>
+          {!share.owner_active && (
+            <span className="font-body text-xs text-ink-2">{t('admin.shares.ownerInactive')}</span>
+          )}
+        </div>
+      </td>
+      <td className="ps-3 pe-3 py-2 text-ink">{share.node_name ?? '—'}</td>
+      <td className="ps-3 pe-3 py-2">
+        <StatusChip status={share.status} />
+      </td>
+      <td className="ps-3 pe-3 py-2 text-ink-2">
+        {share.has_password ? t('admin.shares.hasPassword') : t('admin.shares.noPassword')}
+      </td>
+      <td className="ps-3 pe-3 py-2">
+        {share.expires_at === null ? (
+          <span className="text-ink-2">{t('admin.shares.noExpiry')}</span>
+        ) : (
+          <bdi dir="ltr" className="font-mono text-ink-2">
+            {formatDate(share.expires_at)}
+          </bdi>
+        )}
+      </td>
+      <td className="ps-3 pe-3 py-2">
+        <bdi dir="ltr" className="font-mono text-ink-2">
+          {formatDate(share.created_at)}
+        </bdi>
+      </td>
+      <td className="ps-3 pe-3 py-2">
+        <div className="flex items-center justify-end">
+          <ShareRevokeButton onClick={() => onRevoke(share)} />
+        </div>
+      </td>
+    </tr>
   );
 }
 
