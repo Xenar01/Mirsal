@@ -65,7 +65,9 @@ function buildDetailDto(db: Database.Database, c: Collection, base: string, nowM
   }));
   let template: { node_id: number; name: string } | null = null;
   if (c.template_node_id !== null) {
-    const t = db.prepare('SELECT name FROM nodes WHERE id = @id').get({ id: c.template_node_id }) as { name: string } | undefined;
+    const t = db
+      .prepare('SELECT name FROM nodes WHERE id = @id AND owner_id = @ownerId')
+      .get({ id: c.template_node_id, ownerId: c.owner_id }) as { name: string } | undefined;
     if (t) template = { node_id: c.template_node_id, name: t.name };
   }
   return {
@@ -89,7 +91,7 @@ function parseIdParam(req: FastifyRequest, key = 'id'): number | null {
 const createSchema = z.object({
   title: z.string().min(1).max(200),
   template_node_id: z.number().int().nullable().optional(),
-  departments: z.array(z.string()).min(1),
+  departments: z.array(z.string().max(200)).min(1).max(500),
   password: z.string().min(1).nullable().optional(),
   deadline_at: z.number().int().nullable().optional(),
 });
@@ -164,6 +166,10 @@ export default async function collectionsRoutes(app: FastifyInstance, deps: Coll
     if (id === null) { reply.code(404).send({ error: 'not_found' }); return; }
     const parsed = patchSchema.safeParse(req.body);
     if (!parsed.success) { reply.code(400).send({ error: 'invalid_body' }); return; }
+    if (parsed.data.title !== undefined && parsed.data.title.trim() === '') {
+      reply.code(400).send({ error: 'invalid_body' });
+      return;
+    }
     const uid = req.user!.id;
 
     const patch: SetCollectionStatePatch = {};

@@ -122,7 +122,7 @@ Per-department subfolders avoid cross-department filename collisions and make "d
 ## 7. API surface
 
 ### 7.1 Owner routes (authenticated: `requireAuth` + CSRF, owner-scoped)
-- `POST /api/collections` — create `{ title, templateNodeId?, departments: string[], password?, deadlineAt? }` → `{ id, token, url }`. Validates: title non-empty; ≥1 department; departments deduped/trimmed/length-capped; template (if given) is an owner-owned live **file** node; `deadlineAt` (if given) is in the future.
+- `POST /api/collections` — create `{ title, templateNodeId?, departments: string[], password?, deadlineAt? }` → `{ id, token, url }`. Validates: title non-empty; ≥1 department; departments deduped/trimmed/length-capped; template (if given) is an owner-owned live **file** node. `deadlineAt` (if given) may be any epoch-ms value — there is no future-only validation; a deadline at or earlier than "now" simply makes the collection read as `expired` at request time (see `collectionStatus`).
 - `GET /api/collections` — list the owner's collections with summary counts (`departmentCount`, `respondedCount`, `is_active`, `deadline_at`).
 - `GET /api/collections/:id` — detail: collection fields + department roster, each annotated with `responded` (bool), file count, `submitted_at`, `note`, and the `folder_node_id` (so the UI can wire downloads via the existing node routes).
 - `PATCH /api/collections/:id` — update `{ title?, password?, deadlineAt?, isActive? }` (owner-scoped; `404` for missing/foreign — no oracle). Clearing password/deadline via explicit `null`.

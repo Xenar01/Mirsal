@@ -108,22 +108,6 @@ async function login(built: FastifyInstance, username: string, password: string)
   return { session, csrf };
 }
 
-function rootIdFor(uid: number): number {
-  return ensureUserRoots(db!, uid, NOW).rootId;
-}
-
-/** Inserts a live file node directly under `uid`'s root and returns its id. */
-function seedFileNode(uid: number): number {
-  const { rootId } = ensureUserRoots(db!, uid, NOW);
-  const info = db!
-    .prepare(
-      `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
-       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @now, @now)`
-    )
-    .run({ ownerId: uid, parentId: rootId, name: `f-${Math.random()}`, now: NOW });
-  return Number(info.lastInsertRowid);
-}
-
 /** Inserts a live file node owned by an arbitrary uid and returns its id. */
 function seedFileNodeFor(uid: number): number {
   const { rootId } = ensureUserRoots(db!, uid, NOW);
@@ -202,6 +186,33 @@ test('POST with only blank departments -> 400', async () => {
   expect(res.statusCode).toBe(400);
 });
 
+test('POST with a department name >200 chars -> 400', async () => {
+  const built = await makeApp();
+  await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const res = await built.inject({
+    method: 'POST', url: '/api/collections',
+    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    payload: { title: 'T', departments: ['A'.repeat(201)] },
+  });
+  expect(res.statusCode).toBe(400);
+  expect(res.json()).toMatchObject({ error: 'invalid_body' });
+});
+
+test('POST with >500 departments -> 400', async () => {
+  const built = await makeApp();
+  await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const departments = Array.from({ length: 501 }, (_, i) => `D${i}`);
+  const res = await built.inject({
+    method: 'POST', url: '/api/collections',
+    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    payload: { title: 'T', departments },
+  });
+  expect(res.statusCode).toBe(400);
+  expect(res.json()).toMatchObject({ error: 'invalid_body' });
+});
+
 test('POST /api/collections requires auth -> 401', async () => {
   const built = await makeApp();
   const res = await built.inject({ method: 'POST', url: '/api/collections', payload: { title: 'T', departments: ['A'] } });
@@ -274,6 +285,24 @@ test('PATCH with an empty body -> 400; foreign collection -> 404', async () => {
   // Discriminating: the foreign PATCH attempt must not have touched the row.
   const untouched = await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: a.session } });
   expect(untouched.json()).toMatchObject({ is_active: true, title: 'T' });
+});
+
+test('PATCH { title: "   " } -> 400; stored title unchanged', async () => {
+  const built = await makeApp();
+  await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const c = await mkCollection(built, session, csrf, { title: 'Original', departments: ['A'] });
+
+  const res = await built.inject({
+    method: 'PATCH', url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    payload: { title: '   ' },
+  });
+  expect(res.statusCode).toBe(400);
+  expect(res.json()).toMatchObject({ error: 'invalid_body' });
+
+  const after = await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: session } });
+  expect(after.json()).toMatchObject({ title: 'Original' });
 });
 
 test('DELETE removes the collection (gone from list, folder node gone); 2nd DELETE -> 404', async () => {
