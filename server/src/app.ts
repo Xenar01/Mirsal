@@ -15,6 +15,7 @@ import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
 import nodesRoutes from './routes/nodes.js';
 import sharesRoutes from './routes/shares.js';
+import collectionsRoutes from './routes/collections.js';
 import publicRoutes from './routes/public.js';
 import { createPasswordService } from './auth/passwords.js';
 import { makeGuards } from './auth/guards.js';
@@ -117,6 +118,11 @@ async function registerRoutes(app: FastifyInstance, deps: AppDeps): Promise<void
 
   // H4: owner-scoped share management (requireAuth + CSRF via guard).
   await app.register(sharesRoutes, { db: deps.db, now: deps.now, guards, config: deps.config });
+
+  // Collections Phase 1: owner-scoped collection management (requireAuth +
+  // CSRF via guard). Shares the same `blobStore` instance as nodesRoutes
+  // above rather than constructing a second one.
+  await app.register(collectionsRoutes, { db: deps.db, now: deps.now, guards, config: deps.config, blobStore });
 
   // H4: the public access gate — NO auth, NO CSRF; every response under
   // `/api/public/*` gets `Referrer-Policy: no-referrer` (set inside the
