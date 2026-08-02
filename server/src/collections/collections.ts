@@ -3,6 +3,7 @@ import { randomToken } from '../util/ids.js';
 import { hashPassword } from '../auth/passwords.js';
 import { ensureUserRoots } from '../nodes/tree.js';
 import { nextSuffixedName } from '../nodes/collisions.js';
+import { permanentDelete } from '../nodes/trash.js';
 
 /** Prefix for the auto-created Drive folder that holds a collection's responses. */
 export const COLLECTION_FOLDER_PREFIX = 'طلب تجميع: ';
@@ -138,4 +139,95 @@ export function getCollection(
   return db
     .prepare('SELECT * FROM collections WHERE id = @id AND owner_id = @ownerId')
     .get({ id: collectionId, ownerId }) as Collection | undefined;
+}
+
+/** A collection row plus aggregate counts, for the owner list view. */
+export interface CollectionSummaryRow extends Collection {
+  department_count: number;
+  responded_count: number;
+}
+
+/** Owner's collections, newest-first, each with department + responded counts. */
+export function listCollections(db: Database.Database, ownerId: number): CollectionSummaryRow[] {
+  return db
+    .prepare(
+      `SELECT c.*,
+         (SELECT COUNT(*) FROM collection_departments d WHERE d.collection_id = c.id) AS department_count,
+         (SELECT COUNT(*) FROM collection_responses r WHERE r.collection_id = c.id) AS responded_count
+       FROM collections c
+       WHERE c.owner_id = @ownerId
+       ORDER BY c.created_at DESC, c.id DESC`
+    )
+    .all({ ownerId }) as CollectionSummaryRow[];
+}
+
+/** Tri-state patch: omitted key = unchanged; `null` clears password/deadline. */
+export interface SetCollectionStatePatch {
+  title?: string;
+  isActive?: boolean;
+  password?: string | null;
+  deadlineAt?: number | null;
+}
+
+/**
+ * Applies `patch` to `collectionId`, scoped to `ownerId`. Always bumps
+ * `updated_at`. A string `password` is hashed via the shared service (before
+ * the synchronous UPDATE). Returns the updated row, or undefined if no
+ * owner-scoped row matched.
+ */
+export async function setCollectionState(
+  db: Database.Database,
+  ownerId: number,
+  collectionId: number,
+  patch: SetCollectionStatePatch,
+  now: number
+): Promise<Collection | undefined> {
+  const sets: string[] = ['updated_at = @now'];
+  const params: Record<string, unknown> = { collectionId, ownerId, now };
+
+  if (patch.title !== undefined) {
+    sets.push('title = @title');
+    params.title = patch.title.trim();
+  }
+  if (patch.isActive !== undefined) {
+    sets.push('is_active = @isActive');
+    params.isActive = patch.isActive ? 1 : 0;
+  }
+  if (patch.password !== undefined) {
+    sets.push('password_hash = @passwordHash');
+    params.passwordHash = patch.password === null ? null : await hashPassword(patch.password);
+  }
+  if (patch.deadlineAt !== undefined) {
+    sets.push('deadline_at = @deadlineAt');
+    params.deadlineAt = patch.deadlineAt;
+  }
+
+  db.prepare(`UPDATE collections SET ${sets.join(', ')} WHERE id = @collectionId AND owner_id = @ownerId`).run(
+    params
+  );
+
+  return db
+    .prepare('SELECT * FROM collections WHERE id = @collectionId AND owner_id = @ownerId')
+    .get({ collectionId, ownerId }) as Collection | undefined;
+}
+
+/**
+ * Deletes `collectionId` (owner-scoped) by permanently deleting its response
+ * folder subtree — which cascades (via `collections.folder_node_id ON DELETE
+ * CASCADE`) to the collection row, its departments, and its responses.
+ * Returns the blob `storagePaths` the caller must unlink AFTER the DB commit
+ * (mirrors `permanentDelete`; this function never touches the filesystem).
+ */
+export function deleteCollection(
+  db: Database.Database,
+  ownerId: number,
+  collectionId: number
+): { deleted: boolean; storagePaths: string[] } {
+  const row = db
+    .prepare('SELECT folder_node_id FROM collections WHERE id = @id AND owner_id = @ownerId')
+    .get({ id: collectionId, ownerId }) as { folder_node_id: number } | undefined;
+  if (!row) return { deleted: false, storagePaths: [] };
+
+  const { storagePaths } = permanentDelete(db, ownerId, row.folder_node_id);
+  return { deleted: true, storagePaths };
 }

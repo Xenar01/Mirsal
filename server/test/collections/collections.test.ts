@@ -12,6 +12,9 @@ import {
   getCollection,
   collectionStatus,
   normalizeDepartments,
+  listCollections,
+  setCollectionState,
+  deleteCollection,
 } from '../../src/collections/collections.js';
 
 let db: Database.Database | undefined;
@@ -170,4 +173,72 @@ test('getCollection is owner-scoped', async () => {
   const c = await createCollection(db!, uid, { title: 'T', departments: ['A'] }, Date.now());
   expect(getCollection(db!, uid, c.id)?.id).toBe(c.id);
   expect(getCollection(db!, other, c.id)).toBeUndefined();
+});
+
+/** Seeds a department response: a subfolder under the collection folder holding `fileBytes` file. */
+function seedResponse(collectionId: number, departmentId: number, collectionFolderId: number, uid: number, now: number, fileBytes = 10): number {
+  const subInfo = db!
+    .prepare(`INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
+              VALUES (@uid, @parent, 'folder', @name, 0, @now, @now)`)
+    .run({ uid, parent: collectionFolderId, name: `dept-${departmentId}`, now });
+  const subId = Number(subInfo.lastInsertRowid);
+  db!.prepare(`INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
+               VALUES (@uid, @parent, 'file', @name, @bytes, @sp, @now, @now)`)
+    .run({ uid, parent: subId, name: `r-${Math.random()}`, bytes: fileBytes, sp: `${uid}/${Math.random()}`, now });
+  db!.prepare(`INSERT INTO collection_responses(collection_id, department_id, folder_node_id, note, submitted_at)
+               VALUES (?, ?, ?, NULL, ?)`).run(collectionId, departmentId, subId, now);
+  return subId;
+}
+
+test('listCollections returns owner rows newest-first with department + responded counts', async () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const c = await createCollection(db!, uid, { title: 'T', departments: ['A', 'B', 'C'] }, now);
+  const deptA = (db!.prepare('SELECT id FROM collection_departments WHERE collection_id=? ORDER BY position').get(c.id) as { id: number }).id;
+  seedResponse(c.id, deptA, c.folder_node_id, uid, now);
+
+  const rows = listCollections(db!, uid);
+  expect(rows.length).toBe(1);
+  expect(rows[0]).toMatchObject({ id: c.id, department_count: 3, responded_count: 1 });
+});
+
+test('setCollectionState updates title/isActive/deadline, clears password with null, bumps updated_at, owner-scoped', async () => {
+  const uid = seedUser();
+  const other = seedUser();
+  const now = 1000;
+  const c = await createCollection(db!, uid, { title: 'Old', departments: ['A'], password: 'pw' }, now);
+
+  const u1 = await setCollectionState(db!, uid, c.id, { title: 'New', isActive: false, deadlineAt: 5000 }, 2000);
+  expect(u1).toMatchObject({ title: 'New', is_active: 0, deadline_at: 5000 });
+  expect(u1!.updated_at).toBe(2000);
+
+  const u2 = await setCollectionState(db!, uid, c.id, { password: null }, 3000);
+  expect(u2!.password_hash).toBeNull();
+
+  // Foreign owner cannot touch it.
+  const u3 = await setCollectionState(db!, other, c.id, { isActive: true }, 4000);
+  expect(u3).toBeUndefined();
+  expect((db!.prepare('SELECT is_active FROM collections WHERE id=?').get(c.id) as { is_active: number }).is_active).toBe(0);
+});
+
+test('deleteCollection removes the collection, its folder subtree, departments/responses, and returns blob paths', async () => {
+  const uid = seedUser();
+  const now = Date.now();
+  const c = await createCollection(db!, uid, { title: 'T', departments: ['A'] }, now);
+  const deptA = (db!.prepare('SELECT id FROM collection_departments WHERE collection_id=?').get(c.id) as { id: number }).id;
+  seedResponse(c.id, deptA, c.folder_node_id, uid, now, 42);
+
+  const res = deleteCollection(db!, uid, c.id);
+  expect(res.deleted).toBe(true);
+  expect(res.storagePaths.length).toBe(1);
+
+  expect(db!.prepare('SELECT COUNT(*) c FROM collections WHERE id=?').get(c.id)).toMatchObject({ c: 0 });
+  expect(db!.prepare('SELECT COUNT(*) c FROM collection_departments WHERE collection_id=?').get(c.id)).toMatchObject({ c: 0 });
+  expect(db!.prepare('SELECT COUNT(*) c FROM collection_responses WHERE collection_id=?').get(c.id)).toMatchObject({ c: 0 });
+  expect(db!.prepare('SELECT COUNT(*) c FROM nodes WHERE id=?').get(c.folder_node_id)).toMatchObject({ c: 0 });
+});
+
+test('deleteCollection on a foreign/missing collection returns deleted=false', () => {
+  const uid = seedUser();
+  expect(deleteCollection(db!, uid, 999999)).toEqual({ deleted: false, storagePaths: [] });
 });
