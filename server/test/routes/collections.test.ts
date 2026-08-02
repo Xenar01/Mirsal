@@ -223,3 +223,101 @@ test('GET /api/collections/:id is owner-scoped -> 404 for another user', async (
   expect((await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: a.session } })).statusCode).toBe(200);
   expect((await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: b.session } })).statusCode).toBe(404);
 });
+
+async function mkCollection(built: FastifyInstance, session: string, csrf: string, payload: any) {
+  return (await built.inject({
+    method: 'POST', url: '/api/collections',
+    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf }, payload,
+  })).json();
+}
+
+test('PATCH is_active:false -> closed; past deadline -> expired; title updates', async () => {
+  const built = await makeApp();
+  await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const c = await mkCollection(built, session, csrf, { title: 'Old', departments: ['A'] });
+
+  const stop = await built.inject({
+    method: 'PATCH', url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    payload: { is_active: false, title: 'New' },
+  });
+  expect(stop.statusCode).toBe(200);
+  expect(stop.json()).toMatchObject({ status: 'closed', title: 'New' });
+
+  const exp = await built.inject({
+    method: 'PATCH', url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    payload: { is_active: true, deadline_at: NOW - 1000 },
+  });
+  expect(exp.json()).toMatchObject({ status: 'expired' });
+});
+
+test('PATCH with an empty body -> 400; foreign collection -> 404', async () => {
+  const built = await makeApp();
+  await seedUser('alice', 'pw');
+  await seedUser('bob', 'pw');
+  const a = await login(built, 'alice', 'pw');
+  const b = await login(built, 'bob', 'pw');
+  const c = await mkCollection(built, a.session, a.csrf, { title: 'T', departments: ['A'] });
+
+  expect((await built.inject({
+    method: 'PATCH', url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: a.session }, headers: { 'x-csrf-token': a.csrf }, payload: {},
+  })).statusCode).toBe(400);
+
+  expect((await built.inject({
+    method: 'PATCH', url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: b.session }, headers: { 'x-csrf-token': b.csrf }, payload: { is_active: false },
+  })).statusCode).toBe(404);
+
+  // Discriminating: the foreign PATCH attempt must not have touched the row.
+  const untouched = await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: a.session } });
+  expect(untouched.json()).toMatchObject({ is_active: true, title: 'T' });
+});
+
+test('DELETE removes the collection (gone from list, folder node gone); 2nd DELETE -> 404', async () => {
+  const built = await makeApp();
+  await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const c = await mkCollection(built, session, csrf, { title: 'T', departments: ['A'] });
+  const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
+
+  const del = await built.inject({
+    method: 'DELETE', url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+  });
+  expect(del.statusCode).toBe(200);
+  expect(db!.prepare('SELECT COUNT(*) c FROM nodes WHERE id=?').get(folderId)).toMatchObject({ c: 0 });
+
+  const list = (await built.inject({ method: 'GET', url: '/api/collections', cookies: { mirsal_session: session } })).json();
+  expect(list.some((x: any) => x.id === c.id)).toBe(false);
+
+  const again = await built.inject({
+    method: 'DELETE', url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+  });
+  expect(again.statusCode).toBe(404);
+});
+
+test('DELETE is owner-scoped: a foreign DELETE -> 404 and the row/folder survive', async () => {
+  const built = await makeApp();
+  await seedUser('alice', 'pw');
+  await seedUser('bob', 'pw');
+  const a = await login(built, 'alice', 'pw');
+  const b = await login(built, 'bob', 'pw');
+  const c = await mkCollection(built, a.session, a.csrf, { title: 'T', departments: ['A'] });
+  const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
+
+  const foreignDel = await built.inject({
+    method: 'DELETE', url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: b.session }, headers: { 'x-csrf-token': b.csrf },
+  });
+  expect(foreignDel.statusCode).toBe(404);
+
+  // Discriminating: bob's failed DELETE must not have removed alice's row.
+  expect(db!.prepare('SELECT COUNT(*) c FROM collections WHERE id=?').get(c.id)).toMatchObject({ c: 1 });
+  expect(db!.prepare('SELECT COUNT(*) c FROM nodes WHERE id=?').get(folderId)).toMatchObject({ c: 1 });
+  const stillThere = await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: a.session } });
+  expect(stillThere.statusCode).toBe(200);
+});

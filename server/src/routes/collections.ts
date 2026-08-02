@@ -94,6 +94,20 @@ const createSchema = z.object({
   deadline_at: z.number().int().nullable().optional(),
 });
 
+const patchSchema = z
+  .object({
+    title: z.string().min(1).max(200).optional(),
+    // Tri-state: absent = unchanged, null = clear, non-empty string = set.
+    password: z.string().min(1).nullable().optional(),
+    // Tri-state: absent = unchanged, null = no deadline, number = deadline.
+    deadline_at: z.number().int().nullable().optional(),
+    is_active: z.boolean().optional(),
+  })
+  .refine(
+    (v) => v.title !== undefined || v.password !== undefined || v.deadline_at !== undefined || v.is_active !== undefined,
+    { message: 'at least one field is required' }
+  );
+
 /** Owner-scoped collection management. requireAuth (+ CSRF on mutating verbs). */
 export default async function collectionsRoutes(app: FastifyInstance, deps: CollectionsRouteDeps): Promise<void> {
   const { db, now, guards, config, blobStore } = deps;
@@ -141,5 +155,36 @@ export default async function collectionsRoutes(app: FastifyInstance, deps: Coll
     const c = getCollection(db, uid, id);
     if (!c) { reply.code(404).send({ error: 'not_found' }); return; }
     reply.code(200).send(buildDetailDto(db, c, base, now()));
+  });
+
+  app.patch('/api/collections/:id', { preHandler: guards.requireAuth }, async (req, reply) => {
+    const id = parseIdParam(req);
+    if (id === null) { reply.code(404).send({ error: 'not_found' }); return; }
+    const parsed = patchSchema.safeParse(req.body);
+    if (!parsed.success) { reply.code(400).send({ error: 'invalid_body' }); return; }
+    const uid = req.user!.id;
+
+    const patch: SetCollectionStatePatch = {};
+    if (parsed.data.title !== undefined) patch.title = parsed.data.title;
+    if (parsed.data.is_active !== undefined) patch.isActive = parsed.data.is_active;
+    if (parsed.data.password !== undefined) patch.password = parsed.data.password;
+    if (parsed.data.deadline_at !== undefined) patch.deadlineAt = parsed.data.deadline_at;
+
+    const updated = await setCollectionState(db, uid, id, patch, now());
+    if (!updated) { reply.code(404).send({ error: 'not_found' }); return; }
+    reply.code(200).send(buildDetailDto(db, updated, base, now()));
+  });
+
+  app.delete('/api/collections/:id', { preHandler: guards.requireAuth }, async (req, reply) => {
+    const id = parseIdParam(req);
+    if (id === null) { reply.code(404).send({ error: 'not_found' }); return; }
+    const uid = req.user!.id;
+    const c = getCollection(db, uid, id);
+    if (!c) { reply.code(404).send({ error: 'not_found' }); return; }
+
+    const { storagePaths } = deleteCollection(db, uid, id);
+    for (const p of storagePaths) blobStore.deleteBlob(p);
+    writeAudit(db, { actorId: uid, action: 'collection_deleted', target: c.token, detail: JSON.stringify({ collection_id: id }) }, now);
+    reply.code(200).send({ ok: true });
   });
 }
