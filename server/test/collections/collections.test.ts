@@ -202,6 +202,25 @@ test('listCollections returns owner rows newest-first with department + responde
   expect(rows[0]).toMatchObject({ id: c.id, department_count: 3, responded_count: 1 });
 });
 
+test('listCollections orders newest-first by created_at (not insertion/id order) and is owner-scoped', async () => {
+  const uid = seedUser();
+  const other = seedUser();
+
+  // c1 is created FIRST (lower id) but with a LATER `now`; c2 is created
+  // SECOND (higher id) but with an EARLIER `now`. If the query ordered by
+  // id/insertion order instead of created_at, this would come out reversed.
+  const c1 = await createCollection(db!, uid, { title: 'Newer', departments: ['A'] }, 2000);
+  const c2 = await createCollection(db!, uid, { title: 'Older', departments: ['A'] }, 1000);
+  // A collection owned by a different user, with the latest `now` of all
+  // three — if owner-scoping were broken it would leak into `uid`'s rows
+  // (and would sort first, breaking the ordering assertion too).
+  await createCollection(db!, other, { title: 'Foreign', departments: ['A'] }, 3000);
+
+  const rows = listCollections(db!, uid);
+  expect(rows.map((r) => r.id)).toEqual([c1.id, c2.id]);
+  expect(rows.every((r) => r.owner_id === uid)).toBe(true);
+});
+
 test('setCollectionState updates title/isActive/deadline, clears password with null, bumps updated_at, owner-scoped', async () => {
   const uid = seedUser();
   const other = seedUser();
@@ -214,6 +233,9 @@ test('setCollectionState updates title/isActive/deadline, clears password with n
 
   const u2 = await setCollectionState(db!, uid, c.id, { password: null }, 3000);
   expect(u2!.password_hash).toBeNull();
+
+  const u2b = await setCollectionState(db!, uid, c.id, { deadlineAt: null }, 3500);
+  expect(u2b!.deadline_at).toBeNull();
 
   // Foreign owner cannot touch it.
   const u3 = await setCollectionState(db!, other, c.id, { isActive: true }, 4000);
@@ -241,4 +263,18 @@ test('deleteCollection removes the collection, its folder subtree, departments/r
 test('deleteCollection on a foreign/missing collection returns deleted=false', () => {
   const uid = seedUser();
   expect(deleteCollection(db!, uid, 999999)).toEqual({ deleted: false, storagePaths: [] });
+});
+
+test('deleteCollection does not allow a non-owner to delete another user\'s real collection', async () => {
+  const uid = seedUser();
+  const other = seedUser();
+  const now = Date.now();
+  const c = await createCollection(db!, uid, { title: 'T', departments: ['A'] }, now);
+
+  const res = deleteCollection(db!, other, c.id);
+  expect(res).toEqual({ deleted: false, storagePaths: [] });
+
+  // The collection row and its folder node must be untouched.
+  expect(db!.prepare('SELECT COUNT(*) c FROM collections WHERE id=?').get(c.id)).toMatchObject({ c: 1 });
+  expect(db!.prepare('SELECT COUNT(*) c FROM nodes WHERE id=?').get(c.folder_node_id)).toMatchObject({ c: 1 });
 });
