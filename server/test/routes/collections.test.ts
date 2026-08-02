@@ -321,3 +321,62 @@ test('DELETE is owner-scoped: a foreign DELETE -> 404 and the row/folder survive
   const stillThere = await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: a.session } });
   expect(stillThere.statusCode).toBe(200);
 });
+
+test('POST department -> 201; duplicate -> 409; foreign collection -> 404', async () => {
+  const built = await makeApp();
+  await seedUser('alice', 'pw');
+  await seedUser('bob', 'pw');
+  const a = await login(built, 'alice', 'pw');
+  const b = await login(built, 'bob', 'pw');
+  const c = await mkCollection(built, a.session, a.csrf, { title: 'T', departments: ['A'] });
+
+  const add = await built.inject({
+    method: 'POST', url: `/api/collections/${c.id}/departments`,
+    cookies: { mirsal_session: a.session }, headers: { 'x-csrf-token': a.csrf }, payload: { name: 'B' },
+  });
+  expect(add.statusCode).toBe(201);
+  expect(add.json()).toMatchObject({ name: 'B', position: 1 });
+
+  const dup = await built.inject({
+    method: 'POST', url: `/api/collections/${c.id}/departments`,
+    cookies: { mirsal_session: a.session }, headers: { 'x-csrf-token': a.csrf }, payload: { name: 'A' },
+  });
+  expect(dup.statusCode).toBe(409);
+  expect(dup.json()).toMatchObject({ code: 'duplicate' });
+
+  const foreign = await built.inject({
+    method: 'POST', url: `/api/collections/${c.id}/departments`,
+    cookies: { mirsal_session: b.session }, headers: { 'x-csrf-token': b.csrf }, payload: { name: 'Z' },
+  });
+  expect(foreign.statusCode).toBe(404);
+});
+
+test('DELETE department -> 200; a department with a response -> 409 has_response', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const c = await mkCollection(built, session, csrf, { title: 'T', departments: ['A', 'B'] });
+  const depts = db!.prepare('SELECT id, name FROM collection_departments WHERE collection_id=? ORDER BY position').all(c.id) as { id: number; name: string }[];
+  const b = depts.find((d) => d.name === 'B')!;
+
+  const del = await built.inject({
+    method: 'DELETE', url: `/api/collections/${c.id}/departments/${b.id}`,
+    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+  });
+  expect(del.statusCode).toBe(200);
+
+  // Give dept A a response, then try to delete it.
+  const a = depts.find((d) => d.name === 'A')!;
+  const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
+  const sub = Number(db!.prepare(`INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
+    VALUES (?,?,'folder','A',0,?,?)`).run(uid, folderId, NOW, NOW).lastInsertRowid);
+  db!.prepare(`INSERT INTO collection_responses(collection_id,department_id,folder_node_id,note,submitted_at)
+    VALUES (?,?,?,NULL,?)`).run(c.id, a.id, sub, NOW);
+
+  const blocked = await built.inject({
+    method: 'DELETE', url: `/api/collections/${c.id}/departments/${a.id}`,
+    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+  });
+  expect(blocked.statusCode).toBe(409);
+  expect(blocked.json()).toMatchObject({ code: 'has_response' });
+});

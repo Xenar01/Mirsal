@@ -94,6 +94,8 @@ const createSchema = z.object({
   deadline_at: z.number().int().nullable().optional(),
 });
 
+const addDeptSchema = z.object({ name: z.string().min(1).max(200) });
+
 const patchSchema = z
   .object({
     title: z.string().min(1).max(200).optional(),
@@ -185,6 +187,35 @@ export default async function collectionsRoutes(app: FastifyInstance, deps: Coll
     const { storagePaths } = deleteCollection(db, uid, id);
     for (const p of storagePaths) blobStore.deleteBlob(p);
     writeAudit(db, { actorId: uid, action: 'collection_deleted', target: c.token, detail: JSON.stringify({ collection_id: id }) }, now);
+    reply.code(200).send({ ok: true });
+  });
+
+  app.post('/api/collections/:id/departments', { preHandler: guards.requireAuth }, async (req, reply) => {
+    const id = parseIdParam(req);
+    if (id === null) { reply.code(404).send({ error: 'not_found' }); return; }
+    const parsed = addDeptSchema.safeParse(req.body);
+    if (!parsed.success) { reply.code(400).send({ error: 'invalid_body' }); return; }
+    const uid = req.user!.id;
+    try {
+      const dept = addDepartment(db, uid, id, parsed.data.name, now());
+      reply.code(201).send({ id: dept.id, name: dept.name, position: dept.position });
+    } catch (e) {
+      if (e instanceof DuplicateDepartmentError) { reply.code(409).send({ code: 'duplicate' }); return; }
+      const msg = e instanceof Error ? e.message : '';
+      if (msg === 'not_found') { reply.code(404).send({ error: 'not_found' }); return; }
+      if (msg === 'invalid_name') { reply.code(400).send({ error: 'invalid_body' }); return; }
+      throw e;
+    }
+  });
+
+  app.delete('/api/collections/:id/departments/:deptId', { preHandler: guards.requireAuth }, async (req, reply) => {
+    const id = parseIdParam(req, 'id');
+    const deptId = parseIdParam(req, 'deptId');
+    if (id === null || deptId === null) { reply.code(404).send({ error: 'not_found' }); return; }
+    const uid = req.user!.id;
+    const result = removeDepartment(db, uid, id, deptId);
+    if (result === 'not_found') { reply.code(404).send({ error: 'not_found' }); return; }
+    if (result === 'has_response') { reply.code(409).send({ code: 'has_response' }); return; }
     reply.code(200).send({ ok: true });
   });
 }
