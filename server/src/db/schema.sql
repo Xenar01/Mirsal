@@ -84,3 +84,43 @@ CREATE TABLE IF NOT EXISTS share_access_log(
   ua TEXT,
   accessed_at INTEGER NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS collections(
+  id INTEGER PRIMARY KEY,
+  owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token TEXT UNIQUE NOT NULL,                    -- 32-byte CSPRNG, URL-safe (public URL)
+  title TEXT NOT NULL,
+  template_node_id INTEGER REFERENCES nodes(id) ON DELETE SET NULL,  -- NULL = no template
+  folder_node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE, -- the collection's Drive folder
+  password_hash TEXT,                            -- NULL = no password
+  is_active INTEGER NOT NULL DEFAULT 1,          -- owner open/close toggle
+  deadline_at INTEGER,                           -- NULL = no deadline; <= now => closed (request-time)
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_collections_owner ON collections(owner_id);
+
+CREATE TABLE IF NOT EXISTS collection_departments(
+  id INTEGER PRIMARY KEY,
+  collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  position INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  UNIQUE(collection_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS collection_responses(
+  id INTEGER PRIMARY KEY,
+  collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+  department_id INTEGER NOT NULL REFERENCES collection_departments(id) ON DELETE CASCADE,
+  folder_node_id INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE, -- the department's response subfolder
+  note TEXT,
+  submitted_at INTEGER NOT NULL,
+  submitted_ip TEXT
+);
+-- NAMED unique index (not an inline UNIQUE) so fresh (schema.sql) and upgraded
+-- (migration up) DBs produce byte-identical DDL — an inline UNIQUE would emit a
+-- divergent auto-named index. One-response-per-department lives here.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_collection_response_dept
+  ON collection_responses(collection_id, department_id);
+CREATE INDEX IF NOT EXISTS ix_collection_responses_collection ON collection_responses(collection_id);
