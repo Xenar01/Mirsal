@@ -205,3 +205,61 @@ test('POST unlock: no-password collection -> 400 no_password; closed -> 404; bad
   });
   expect((await built.inject({ method: 'POST', url: `/api/collect/${withPw.token}/unlock`, payload: { password: 'pw2' } })).statusCode).toBe(404);
 });
+
+// ── template ────────────────────────────────────────────────────────────────
+/** Uploads a real file to the owner's Drive via the owner API; returns its node id. */
+async function uploadOwnerFile(
+  built: FastifyInstance,
+  session: string,
+  csrf: string,
+  filename: string,
+  content: string
+): Promise<number> {
+  const { rootId } = (await import('../../src/nodes/tree.js')).ensureUserRoots(
+    db!,
+    (db!.prepare('SELECT id FROM users WHERE username=?').get('alice') as { id: number }).id,
+    NOW
+  );
+  const boundary = '----tmpl';
+  const body = Buffer.concat([
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="parent_id"\r\n\r\n${rootId}\r\n`),
+    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: text/plain\r\n\r\n`),
+    Buffer.from(content),
+    Buffer.from(`\r\n--${boundary}--\r\n`),
+  ]);
+  const up = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/upload',
+    cookies: { mirsal_session: session },
+    headers: { 'content-type': `multipart/form-data; boundary=${boundary}`, 'x-csrf-token': csrf },
+    payload: body,
+  });
+  expect(up.statusCode).toBe(200);
+  return up.json().id;
+}
+
+test('GET template: streams the attached file; missing template -> 404', async () => {
+  const built = await makeApp();
+  await seedUser('alice');
+  const { session, csrf } = await login(built, 'alice');
+  const templateNodeId = await uploadOwnerFile(built, session, csrf, 'template.txt', 'HELLO-TEMPLATE');
+
+  const c = await makeCollection(built, session, csrf, { title: 'T', departments: ['A'], template_node_id: templateNodeId });
+  const res = await built.inject({ method: 'GET', url: `/api/collect/${c.token}/template` });
+  expect(res.statusCode).toBe(200);
+  expect(res.body).toBe('HELLO-TEMPLATE');
+  expect(res.headers['content-disposition']).toContain('template.txt');
+
+  const noTpl = await makeCollection(built, session, csrf, { title: 'NoTpl', departments: ['A'] });
+  expect((await built.inject({ method: 'GET', url: `/api/collect/${noTpl.token}/template` })).statusCode).toBe(404);
+});
+
+test('GET template: password-protected + not unlocked -> 401', async () => {
+  const built = await makeApp();
+  await seedUser('alice');
+  const { session, csrf } = await login(built, 'alice');
+  const c = await makeCollection(built, session, csrf, { title: 'T', departments: ['A'], password: 'pw3' });
+  const res = await built.inject({ method: 'GET', url: `/api/collect/${c.token}/template` });
+  expect(res.statusCode).toBe(401);
+  expect(res.json()).toMatchObject({ needsPassword: true });
+});
