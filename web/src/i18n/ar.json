@@ -587,7 +587,19 @@
       "deleteTitle": "حذف طلب التجميع",
       "deleteBody": "سيُحذف الطلب وكل ردوده وملفاته نهائيًا. لا يمكن التراجع. متابعة؟",
       "deleteConfirm": "حذف نهائي",
-      "cancel": "إلغاء"
+      "cancel": "إلغاء",
+      "edit": "تعديل الطلب",
+      "titleSave": "حفظ العنوان",
+      "passwordHeading": "كلمة مرور الطلب",
+      "passwordProtected": "الطلب محمي بكلمة مرور.",
+      "passwordUnprotected": "الطلب بلا كلمة مرور.",
+      "passwordSet": "تعيين كلمة المرور",
+      "passwordClear": "إزالة كلمة المرور",
+      "deadlineHeading": "موعد إغلاق الطلب",
+      "deadlineCurrent": "يُغلق في",
+      "deadlineNever": "بلا موعد إغلاق.",
+      "deadlineApply": "تطبيق",
+      "deadlineClear": "إزالة الموعد"
     },
     "toast": {
       "created": "أُنشئ الطلب.",
@@ -598,6 +610,11 @@
       "departmentAdded": "أُضيف القسم.",
       "departmentRemoved": "أُزيل القسم.",
       "deleted": "حُذف الطلب.",
+      "titleUpdated": "حُدّث العنوان.",
+      "passwordUpdated": "حُدّثت كلمة المرور.",
+      "passwordCleared": "أُزيلت كلمة المرور.",
+      "deadlineUpdated": "حُدّث موعد الإغلاق.",
+      "deadlineCleared": "أُزيل موعد الإغلاق.",
       "error": "تعذّر تنفيذ العملية. حاول مجددًا."
     }
   },
