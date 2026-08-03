@@ -220,12 +220,14 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // Single catch-all: JSON 404 for unmatched /api/* (never let the SPA
   // fallback swallow API errors); index.html for other GETs so client-side
   // routing works; a plain JSON 404 otherwise (non-GET, or when the SPA hasn't
-  // been built yet). The public share page at /s/<token> (spec §3.5) is served
-  // from the SAME index.html shell, but its HTML document additionally carries
-  // `Referrer-Policy: no-referrer` so the secret token never leaks via a
-  // `Referer` header on outbound navigations. (The `/api/public/*` JSON
-  // endpoints set that header via the public plugin's own onSend hook; this is
-  // the header for the HTML document itself.)
+  // been built yet). The token-bearing public shells — the share page at
+  // /s/<token> (spec §3.5) and the collection intake page at /c/<token>
+  // (Collections Phase 2) — are served from the SAME index.html shell, but
+  // their HTML documents additionally carry `Referrer-Policy: no-referrer` so
+  // the secret token never leaks via a `Referer` header on outbound
+  // navigations. (The `/api/public/*` and `/api/collect/*` JSON endpoints set
+  // that header via their own onSend hooks; this is the header for the HTML
+  // document itself.)
   app.setNotFoundHandler((req, reply) => {
     const pathname = req.url.split('?')[0];
 
@@ -235,7 +237,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     }
 
     if (distExists && req.method === 'GET') {
-      if (pathname.startsWith('/s/')) {
+      if (pathname.startsWith('/s/') || pathname.startsWith('/c/')) {
         reply.header('Referrer-Policy', 'no-referrer');
       }
       reply.sendFile('index.html');
