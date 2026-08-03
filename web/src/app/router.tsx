@@ -7,6 +7,9 @@ import TrashView from '../features/dashboard/TrashView';
 import SharedView from '../features/dashboard/share/SharedView';
 import AdminPanel from '../features/admin/AdminPanel';
 import SealedDispatch from '../features/public/SealedDispatch';
+import CollectionsView from '../features/collections/CollectionsView';
+import CollectionDetail from '../features/collections/CollectionDetail';
+import CollectPage from '../features/collect/CollectPage';
 
 /**
  * App route table. Uses `<Routes>` (not a data router) so it can be mounted
@@ -20,6 +23,8 @@ export default function AppRoutes() {
       {/* Public sealed-dispatch page (no auth). Bilingual (AR default, EN toggle
           flips to LTR); the server delivers Referrer-Policy: no-referrer. */}
       <Route path="/s/:token" element={<SealedDispatch />} />
+      {/* Public Collections intake page (no auth), beside /s/:token. */}
+      <Route path="/c/:token" element={<CollectPage />} />
 
       <Route
         path="/"
@@ -50,6 +55,22 @@ export default function AppRoutes() {
         element={
           <RequireAuth>
             <SharedView />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/collections"
+        element={
+          <RequireAuth>
+            <CollectionsView />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/collections/:id"
+        element={
+          <RequireAuth>
+            <CollectionDetail />
           </RequireAuth>
         }
       />
