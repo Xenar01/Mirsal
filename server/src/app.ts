@@ -16,6 +16,7 @@ import adminRoutes from './routes/admin.js';
 import nodesRoutes from './routes/nodes.js';
 import sharesRoutes from './routes/shares.js';
 import collectionsRoutes from './routes/collections.js';
+import collectRoutes from './routes/collect.js';
 import publicRoutes from './routes/public.js';
 import { createPasswordService } from './auth/passwords.js';
 import { makeGuards } from './auth/guards.js';
@@ -129,6 +130,18 @@ async function registerRoutes(app: FastifyInstance, deps: AppDeps): Promise<void
   // plugin's own encapsulated onSend hook, so it never leaks onto the
   // authenticated routes above).
   await app.register(publicRoutes, {
+    db: deps.db,
+    now: deps.now,
+    passwordService,
+    blobStore,
+    config: deps.config,
+  });
+
+  // Collections Phase 2: the public intake gate — NO auth, NO CSRF; token-in-URL.
+  // Same shared passwordService + blobStore as the routes above. Its own
+  // encapsulated onSend hook stamps no-referrer + no-store (never leaks onto
+  // the authenticated routes).
+  await app.register(collectRoutes, {
     db: deps.db,
     now: deps.now,
     passwordService,
