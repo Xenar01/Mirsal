@@ -159,3 +159,49 @@ test('GET meta open + password + no cookie -> {isOpen:true, needsPassword:true} 
   expect(res.statusCode).toBe(200);
   expect(res.json()).toEqual({ isOpen: true, needsPassword: true });
 });
+
+// ── unlock ──────────────────────────────────────────────────────────────────
+test('POST unlock: wrong pw -> 401 + audit; correct pw -> 200 + cookie; meta then reveals full', async () => {
+  const built = await makeApp();
+  await seedUser('alice');
+  const { session, csrf } = await login(built, 'alice');
+  const c = await makeCollection(built, session, csrf, { title: 'Secret', departments: ['A', 'B'], password: 'hunter2' });
+
+  const wrong = await built.inject({ method: 'POST', url: `/api/collect/${c.token}/unlock`, payload: { password: 'nope' } });
+  expect(wrong.statusCode).toBe(401);
+  expect(wrong.json()).toMatchObject({ error: 'invalid_password' });
+  const audit = db!.prepare("SELECT COUNT(*) n FROM audit_log WHERE action='collection_unlock_failure'").get() as { n: number };
+  expect(audit.n).toBe(1);
+
+  const ok = await built.inject({ method: 'POST', url: `/api/collect/${c.token}/unlock`, payload: { password: 'hunter2' } });
+  expect(ok.statusCode).toBe(200);
+  const setCookie = (ok.cookies as InjectedCookie[]).find((k) => k.name === 'mirsal_collect_unlock');
+  expect(setCookie).toBeDefined();
+
+  const meta = await built.inject({
+    method: 'GET',
+    url: `/api/collect/${c.token}`,
+    cookies: { mirsal_collect_unlock: setCookie!.value },
+  });
+  expect(meta.json()).toMatchObject({ isOpen: true, needsPassword: true, title: 'Secret' });
+  expect(meta.json().departments.map((d: any) => d.name)).toEqual(['A', 'B']);
+});
+
+test('POST unlock: no-password collection -> 400 no_password; closed -> 404; bad body -> 400', async () => {
+  const built = await makeApp();
+  await seedUser('alice');
+  const { session, csrf } = await login(built, 'alice');
+  const open = await makeCollection(built, session, csrf, { title: 'T', departments: ['A'] });
+  expect((await built.inject({ method: 'POST', url: `/api/collect/${open.token}/unlock`, payload: { password: 'x' } })).statusCode).toBe(400);
+  expect((await built.inject({ method: 'POST', url: `/api/collect/${open.token}/unlock`, payload: {} })).statusCode).toBe(400);
+
+  const withPw = await makeCollection(built, session, csrf, { title: 'P', departments: ['A'], password: 'pw2' });
+  await built.inject({
+    method: 'PATCH',
+    url: `/api/collections/${withPw.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { is_active: false },
+  });
+  expect((await built.inject({ method: 'POST', url: `/api/collect/${withPw.token}/unlock`, payload: { password: 'pw2' } })).statusCode).toBe(404);
+});
