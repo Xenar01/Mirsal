@@ -427,7 +427,7 @@ function PasswordSection({ collection }: { collection: CollectionDetailDto }) {
     event?.preventDefault();
     const next = value.trim();
     if (!next) {
-      setError(t('share.password.required'));
+      setError(t('collections.detail.passwordRequired'));
       return;
     }
     setError(null);
@@ -463,7 +463,7 @@ function PasswordSection({ collection }: { collection: CollectionDetailDto }) {
       </p>
       <form onSubmit={submit} className="flex flex-col gap-2">
         <label htmlFor={inputId} className="font-body text-sm text-ink-2">
-          {t('share.password.label')}
+          {t('collections.detail.passwordLabel')}
         </label>
         <input
           id={inputId}

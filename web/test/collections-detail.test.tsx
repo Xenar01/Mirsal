@@ -174,7 +174,7 @@ describe('CollectionDetail — roster + lifecycle (Collections Phase 3 / Task 5)
   });
 
   test('expanding a responded department lists its files (GET /api/nodes?parent=50) with download links', async () => {
-    stubFetch({
+    const fetchMock = stubFetch({
       '/api/collections/7': mkDetail(),
       '/api/auth/me': USER,
       '/api/nodes': [mkNode()],
@@ -186,6 +186,13 @@ describe('CollectionDetail — roster + lifecycle (Collections Phase 3 / Task 5)
 
     const link = await screen.findByRole('link', { name: new RegExp(i18n.t('collections.detail.download')) });
     expect(link).toHaveAttribute('href', '/api/nodes/60/download');
+
+    // Assert the department's OWN folder (50) was requested — the stub's bare
+    // `/api/nodes` path branch matches any parent, so without this a request
+    // for the wrong folder id would still pass.
+    const nodesCall = fetchMock.mock.calls.find(([u]) => String(u).includes('/api/nodes?'));
+    expect(nodesCall).toBeDefined();
+    expect(String(nodesCall![0])).toContain('parent=50');
   });
 
   test('close toggles is_active via PATCH', async () => {

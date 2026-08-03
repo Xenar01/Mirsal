@@ -595,6 +595,8 @@
       "passwordUnprotected": "الطلب بلا كلمة مرور.",
       "passwordSet": "تعيين كلمة المرور",
       "passwordClear": "إزالة كلمة المرور",
+      "passwordLabel": "كلمة مرور جديدة",
+      "passwordRequired": "أدخل كلمة مرور.",
       "deadlineHeading": "موعد إغلاق الطلب",
       "deadlineCurrent": "يُغلق في",
       "deadlineNever": "بلا موعد إغلاق.",
