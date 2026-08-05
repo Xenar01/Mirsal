@@ -97,7 +97,7 @@ async function seedUser(username: string, password: string): Promise<number> {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, quota_bytes, created_at, updated_at)
-       VALUES (?, ?, 'user', 1, 0, NULL, ?, ?)`
+       VALUES (?, ?, 'user', 1, 0, NULL, ?, ?)`,
     )
     .run(username, hash, NOW, NOW);
   return Number(info.lastInsertRowid);
@@ -107,7 +107,11 @@ function findCookie(cookies: InjectedCookie[], name: string): InjectedCookie | u
   return cookies.find((c) => c.name === name);
 }
 
-async function login(built: FastifyInstance, username: string, password: string): Promise<{ session: string; csrf: string }> {
+async function login(
+  built: FastifyInstance,
+  username: string,
+  password: string,
+): Promise<{ session: string; csrf: string }> {
   const res = await built.inject({ method: 'POST', url: '/api/auth/login', payload: { username, password } });
   const session = findCookie(res.cookies as InjectedCookie[], 'mirsal_session')!.value;
   const csrf = findCookie(res.cookies as InjectedCookie[], 'mirsal_csrf')!.value;
@@ -133,7 +137,7 @@ function buildMultipart(parts: MultipartPart[]): { body: Buffer; contentType: st
     chunks.push(Buffer.from(`--${boundary}\r\n`));
     if (part.filename !== undefined) {
       chunks.push(
-        Buffer.from(`Content-Disposition: form-data; name="${part.name}"; filename="${part.filename}"\r\n`, 'utf8')
+        Buffer.from(`Content-Disposition: form-data; name="${part.name}"; filename="${part.filename}"\r\n`, 'utf8'),
       );
       chunks.push(Buffer.from(`Content-Type: ${part.contentType ?? 'application/octet-stream'}\r\n\r\n`));
       chunks.push(part.data ?? Buffer.alloc(0));
@@ -151,7 +155,7 @@ async function uploadFile(
   built: FastifyInstance,
   session: string,
   csrf: string,
-  opts: { parentId: number; filename: string; data: Buffer; contentType?: string }
+  opts: { parentId: number; filename: string; data: Buffer; contentType?: string },
 ): Promise<any> {
   const { body, contentType } = buildMultipart([
     { name: 'parent_id', value: String(opts.parentId) },
@@ -167,7 +171,13 @@ async function uploadFile(
   return res.json();
 }
 
-async function makeFolder(built: FastifyInstance, session: string, csrf: string, parentId: number, name: string): Promise<any> {
+async function makeFolder(
+  built: FastifyInstance,
+  session: string,
+  csrf: string,
+  parentId: number,
+  name: string,
+): Promise<any> {
   const res = await built.inject({
     method: 'POST',
     url: '/api/nodes/folder',
@@ -182,7 +192,7 @@ async function createShare(
   built: FastifyInstance,
   session: string,
   csrf: string,
-  body: { node_id: number; password?: string; expires_at?: number | null }
+  body: { node_id: number; password?: string; expires_at?: number | null },
 ): Promise<any> {
   const res = await built.inject({
     method: 'POST',
@@ -229,10 +239,12 @@ test('file share: GET meta, download bytes match, share_access_log written, Refe
   expect(dlRes.statusCode).toBe(200);
   expect(dlRes.headers['x-content-type-options']).toBe('nosniff');
   expect(dlRes.headers['referrer-policy']).toBe('no-referrer');
-  expect((dlRes.headers['content-disposition'] as string)).toContain('attachment');
+  expect(dlRes.headers['content-disposition'] as string).toContain('attachment');
   expect(dlRes.rawPayload.equals(content)).toBe(true);
 
-  const logCount = db!.prepare('SELECT COUNT(*) AS c FROM share_access_log WHERE share_id = ?').get(share.id) as { c: number };
+  const logCount = db!.prepare('SELECT COUNT(*) AS c FROM share_access_log WHERE share_id = ?').get(share.id) as {
+    c: number;
+  };
   expect(logCount.c).toBe(1);
 });
 
@@ -268,7 +280,11 @@ test('folder share hides contents: /list and per-file /download are 403; only /z
   const rootId = rootIdFor(uid);
 
   const folder = await makeFolder(built, session, csrf, rootId, 'Album');
-  const inside = await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'inside.txt', data: Buffer.from('IN') });
+  const inside = await uploadFile(built, session, csrf, {
+    parentId: folder.id,
+    filename: 'inside.txt',
+    data: Buffer.from('IN'),
+  });
   const share = await createShare(built, session, csrf, { node_id: folder.id });
 
   // meta still works — the recipient sees the folder name + isFolder.
@@ -329,7 +345,11 @@ test('folder share: /zip when a subtree blob is missing on disk -> 404, never ha
   const rootId = rootIdFor(uid);
 
   const folder = await makeFolder(built, session, csrf, rootId, 'Bundle');
-  const inside = await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'ghost.txt', data: Buffer.from('will vanish') });
+  const inside = await uploadFile(built, session, csrf, {
+    parentId: folder.id,
+    filename: 'ghost.txt',
+    data: Buffer.from('will vanish'),
+  });
   const share = await createShare(built, session, csrf, { node_id: folder.id });
 
   // Reverse-orphan: the row is present but its blob is gone. /zip must fail
@@ -423,9 +443,9 @@ test('password share: wrong password is 401, and repeated attempts get rate-limi
   expect(codes[codes.length - 1]).toBe(429);
 
   // an unlock failure was audited
-  const audit = db!
-    .prepare("SELECT COUNT(*) AS c FROM audit_log WHERE action = 'share_unlock_failure'")
-    .get() as { c: number };
+  const audit = db!.prepare("SELECT COUNT(*) AS c FROM audit_log WHERE action = 'share_unlock_failure'").get() as {
+    c: number;
+  };
   expect(audit.c).toBeGreaterThanOrEqual(1);
 }, 20_000);
 
@@ -438,7 +458,11 @@ test('lifecycle: stopped -> 410, expired (past) -> 410 without a tick, revoked -
   const uid = await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
   const rootId = rootIdFor(uid);
-  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'life.txt', data: Buffer.from('L') });
+  const file = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'life.txt',
+    data: Buffer.from('L'),
+  });
   const share = await createShare(built, session, csrf, { node_id: file.id });
 
   // live to start
@@ -482,7 +506,11 @@ test('410 distinguishes stopped from expired (reason + expires_at); unknown + go
   const uid = await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
   const rootId = rootIdFor(uid);
-  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'reason.txt', data: Buffer.from('R') });
+  const file = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'reason.txt',
+    data: Buffer.from('R'),
+  });
   const share = await createShare(built, session, csrf, { node_id: file.id });
 
   // Stopped (is_active=0, no expiry) -> 410 carries reason:'stopped' and expires_at:null,
@@ -544,7 +572,11 @@ test('download is refused when allow_download is off -> 403', async () => {
   const uid = await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
   const rootId = rootIdFor(uid);
-  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'noview.txt', data: Buffer.from('N') });
+  const file = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'noview.txt',
+    data: Buffer.from('N'),
+  });
   const share = await createShare(built, session, csrf, { node_id: file.id });
 
   // allow_download isn't exposed through the owner API in this phase; flip it directly.
@@ -582,7 +614,7 @@ test('folder-heavy (file-sparse) subtree: /zip walk is bounded by total nodes vi
   const CHAIN_LENGTH = 20_500;
   const insertFolder = db!.prepare(
     `INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at)
-     VALUES (@ownerId, @parentId, 'folder', @name, @now, @now)`
+     VALUES (@ownerId, @parentId, 'folder', @name, @now, @now)`,
   );
   let deepParentId = folder.id;
   db!.transaction(() => {
@@ -624,7 +656,7 @@ test('unlock cookie is invalidated by a password rotation (no longer a pure func
   // The old cookie works before any rotation.
   expect(
     (await built.inject({ method: 'GET', url: `/api/public/${share.token}`, cookies: { mirsal_unlock: cookie1 } }))
-      .statusCode
+      .statusCode,
   ).toBe(200);
 
   // Owner rotates the password.
@@ -656,7 +688,7 @@ test('unlock cookie is invalidated by a password rotation (no longer a pure func
   const cookie2 = findCookie(unlock2.cookies as InjectedCookie[], 'mirsal_unlock')!.value;
   expect(
     (await built.inject({ method: 'GET', url: `/api/public/${share.token}`, cookies: { mirsal_unlock: cookie2 } }))
-      .statusCode
+      .statusCode,
   ).toBe(200);
 });
 
@@ -665,7 +697,11 @@ test('unlock cookie lifetime is enforced server-side, not only via the Max-Age a
   const uid = await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
   const rootId = rootIdFor(uid);
-  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'ttl.txt', data: Buffer.from('T') });
+  const file = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'ttl.txt',
+    data: Buffer.from('T'),
+  });
   const share = await createShare(built, session, csrf, { node_id: file.id, password: 'time-pw' });
 
   const unlockRes = await built.inject({
@@ -679,7 +715,7 @@ test('unlock cookie lifetime is enforced server-side, not only via the Max-Age a
   // Immediately after issuance, the cookie works.
   expect(
     (await built.inject({ method: 'GET', url: `/api/public/${share.token}`, cookies: { mirsal_unlock: cookie } }))
-      .statusCode
+      .statusCode,
   ).toBe(200);
 
   // `built.inject` replays whatever cookie value is given regardless of any
@@ -745,7 +781,11 @@ test('public /download is rate-limited (per-token), bounding unbounded-bandwidth
   const uid = await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
   const rootId = rootIdFor(uid);
-  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'many.txt', data: Buffer.from('M') });
+  const file = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'many.txt',
+    data: Buffer.from('M'),
+  });
   const share = await createShare(built, session, csrf, { node_id: file.id });
 
   const codes: number[] = [];
@@ -770,7 +810,7 @@ const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  */
 function parkedZipRequest(
   port: number,
-  token: string
+  token: string,
 ): { request: http.ClientRequest; response: Promise<http.IncomingMessage>; closed: Promise<void> } {
   let settled = false;
   let resolveResp!: (r: http.IncomingMessage) => void;
@@ -792,7 +832,7 @@ function parkedZipRequest(
       res.on('error', () => resolveClosed());
       // Intentionally do NOT read res — leave the download parked mid-stream.
       resolveResp(res);
-    }
+    },
   );
   request.on('error', (err) => {
     if (!settled) {
@@ -815,7 +855,7 @@ function fullZipRequest(port: number, token: string): Promise<{ statusCode: numb
         res.on('data', (c: Buffer) => chunks.push(c));
         res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks) }));
         res.on('error', reject);
-      }
+      },
     );
     request.on('error', reject);
     request.end();
@@ -920,7 +960,7 @@ function fullPostDownload(port: number, token: string): Promise<{ statusCode: nu
         res.on('data', (c: Buffer) => chunks.push(c));
         res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks) }));
         res.on('error', reject);
-      }
+      },
     );
     request.on('error', reject);
     request.end();
@@ -937,7 +977,7 @@ function fullPostDownload(port: number, token: string): Promise<{ statusCode: nu
  */
 function parkedPostDownload(
   port: number,
-  token: string
+  token: string,
 ): { request: http.ClientRequest; response: Promise<http.IncomingMessage>; closed: Promise<void> } {
   let settled = false;
   let resolveResp!: (r: http.IncomingMessage) => void;
@@ -959,7 +999,7 @@ function parkedPostDownload(
       res.on('error', () => resolveClosed());
       // Intentionally do NOT read res — leave the download parked mid-stream.
       resolveResp(res);
-    }
+    },
   );
   request.on('error', (err) => {
     if (!settled) {
@@ -992,9 +1032,8 @@ function drainToEnd(res: http.IncomingMessage): Promise<Buffer> {
 async function waitForCount(shareId: number, target: number): Promise<number> {
   let last = -1;
   for (let i = 0; i < 100; i++) {
-    last = (
-      db!.prepare('SELECT download_count FROM shares WHERE id = ?').get(shareId) as { download_count: number }
-    ).download_count;
+    last = (db!.prepare('SELECT download_count FROM shares WHERE id = ?').get(shareId) as { download_count: number })
+      .download_count;
     if (last === target) return last;
     await delay(20);
   }
@@ -1006,7 +1045,11 @@ test('meta includes download_limit for a limited file share (and null when unlim
   const uid = await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
   const rootId = rootIdFor(uid);
-  const file = await uploadFile(built, session, csrf, { parentId: rootId, filename: 'lim.txt', data: Buffer.from('X') });
+  const file = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'lim.txt',
+    data: Buffer.from('X'),
+  });
   const share = await createShare(built, session, csrf, { node_id: file.id });
 
   // Unlimited by default -> meta.download_limit is explicitly null.
@@ -1036,7 +1079,7 @@ test('GET /download on a limited share -> 405 method_not_allowed', async () => {
   // The GET must not have counted anything.
   expect(
     (db!.prepare('SELECT download_count FROM shares WHERE id = ?').get(share.id) as { download_count: number })
-      .download_count
+      .download_count,
   ).toBe(0);
 });
 
@@ -1058,7 +1101,7 @@ test('POST /download on a limited share (limit=2) streams the file and counts it
   expect(await waitForCount(share.id, 1)).toBe(1);
   // 1 < 2 -> not exhausted: node untouched, link still live.
   expect(
-    (db!.prepare('SELECT trashed_at FROM nodes WHERE id = ?').get(file.id) as { trashed_at: number | null }).trashed_at
+    (db!.prepare('SELECT trashed_at FROM nodes WHERE id = ?').get(file.id) as { trashed_at: number | null }).trashed_at,
   ).toBeNull();
   expect((await built.inject({ method: 'GET', url: `/api/public/${share.token}` })).statusCode).toBe(200);
 }, 30_000);
@@ -1134,7 +1177,7 @@ test('two concurrent POST /download on limit=1 -> statuses {200, 410}; count end
   // Winner still parked -> nothing counted yet.
   expect(
     (db!.prepare('SELECT download_count FROM shares WHERE id = ?').get(share.id) as { download_count: number })
-      .download_count
+      .download_count,
   ).toBe(0);
 
   // Drain the winner -> completion -> count reaches exactly 1 (atomic reserve
@@ -1172,7 +1215,7 @@ test('aborting a POST /download mid-stream leaves count unchanged (0) and the li
   await delay(150);
   expect(
     (db!.prepare('SELECT download_count FROM shares WHERE id = ?').get(share.id) as { download_count: number })
-      .download_count
+      .download_count,
   ).toBe(0);
   // Link still live.
   expect((await built.inject({ method: 'GET', url: `/api/public/${share.token}` })).statusCode).toBe(200);
@@ -1225,12 +1268,12 @@ test('stop-mode: the limit-th completed POST sets is_active=0 and the link 410s 
   expect(res.body.equals(content)).toBe(true);
 
   expect(await waitForCount(share.id, 1)).toBe(1);
-  expect((db!.prepare('SELECT is_active FROM shares WHERE id = ?').get(share.id) as { is_active: number }).is_active).toBe(
-    0
-  );
+  expect(
+    (db!.prepare('SELECT is_active FROM shares WHERE id = ?').get(share.id) as { is_active: number }).is_active,
+  ).toBe(0);
   // stop-mode leaves the file intact — only the share is turned off.
   expect(
-    (db!.prepare('SELECT trashed_at FROM nodes WHERE id = ?').get(file.id) as { trashed_at: number | null }).trashed_at
+    (db!.prepare('SELECT trashed_at FROM nodes WHERE id = ?').get(file.id) as { trashed_at: number | null }).trashed_at,
   ).toBeNull();
   // The link 410s afterwards (indistinguishable from a manually-stopped share).
   const after = await built.inject({ method: 'GET', url: `/api/public/${share.token}` });
@@ -1263,7 +1306,7 @@ test('owner trashing the file mid-download does not crash on completion (delete-
   // handler's applyExhaustion must tolerate the already-trashed node.
   trashNode(db!, uid, file.id, NOW);
   expect(
-    (db!.prepare('SELECT trashed_at FROM nodes WHERE id = ?').get(file.id) as { trashed_at: number | null }).trashed_at
+    (db!.prepare('SELECT trashed_at FROM nodes WHERE id = ?').get(file.id) as { trashed_at: number | null }).trashed_at,
   ).not.toBeNull();
 
   await drainToEnd(winnerRes);
@@ -1276,7 +1319,7 @@ test('owner trashing the file mid-download does not crash on completion (delete-
   // re-trash of the already-trashed node.
   expect(
     (db!.prepare('SELECT purge_after FROM nodes WHERE id = ?').get(file.id) as { purge_after: number | null })
-      .purge_after
+      .purge_after,
   ).toBeNull();
   // Process still alive and serving (node gone -> ambiguous 404).
   expect((await built.inject({ method: 'GET', url: `/api/public/${share.token}` })).statusCode).toBe(404);
@@ -1298,7 +1341,7 @@ test('unlimited file share: GET /download still streams (unchanged)', async () =
   // No counter to touch on an unlimited share.
   expect(
     (db!.prepare('SELECT download_count FROM shares WHERE id = ?').get(share.id) as { download_count: number })
-      .download_count
+      .download_count,
   ).toBe(0);
 });
 
@@ -1319,7 +1362,7 @@ test('limit=2: two sequential completed POSTs reach the cap and exhaust (complet
   expect(first.body.equals(content)).toBe(true);
   expect(await waitForCount(share.id, 1)).toBe(1);
   expect(
-    (db!.prepare('SELECT trashed_at FROM nodes WHERE id = ?').get(file.id) as { trashed_at: number | null }).trashed_at
+    (db!.prepare('SELECT trashed_at FROM nodes WHERE id = ?').get(file.id) as { trashed_at: number | null }).trashed_at,
   ).toBeNull();
 
   // Second completed download: reserve reads completed=1 (1 < 2 -> reserves),

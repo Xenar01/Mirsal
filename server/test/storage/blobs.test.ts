@@ -67,11 +67,7 @@ describe('writeStreamToTemp', () => {
   test('writes a 10-byte stream to a temp file in the owner dir and reports 10 bytes', async () => {
     const { dir, store } = freshStore();
 
-    const { tempPath, bytes } = await store.writeStreamToTemp(
-      'u1',
-      Readable.from(Buffer.alloc(10)),
-      100
-    );
+    const { tempPath, bytes } = await store.writeStreamToTemp('u1', Readable.from(Buffer.alloc(10)), 100);
 
     expect(bytes).toBe(10);
     expect(statSync(tempPath).size).toBe(10);
@@ -82,14 +78,10 @@ describe('writeStreamToTemp', () => {
   test('rejects a stream exceeding limitBytes and leaves no leftover temp file', async () => {
     const { dir, store } = freshStore();
 
-    await expect(
-      store.writeStreamToTemp('u1', Readable.from(Buffer.alloc(200)), 100)
-    ).rejects.toThrow();
+    await expect(store.writeStreamToTemp('u1', Readable.from(Buffer.alloc(200)), 100)).rejects.toThrow();
 
     const ownerDir = path.join(dir, 'u1');
-    const leftovers = existsSync(ownerDir)
-      ? readdirSync(ownerDir).filter((name) => name.startsWith('.tmp-'))
-      : [];
+    const leftovers = existsSync(ownerDir) ? readdirSync(ownerDir).filter((name) => name.startsWith('.tmp-')) : [];
     expect(leftovers).toEqual([]);
   });
 });
@@ -97,11 +89,7 @@ describe('writeStreamToTemp', () => {
 describe('commitTemp', () => {
   test('renames the temp file into place and returns the relative storage_path', async () => {
     const { dir, store } = freshStore();
-    const { tempPath } = await store.writeStreamToTemp(
-      'u1',
-      Readable.from(Buffer.from('hello')),
-      100
-    );
+    const { tempPath } = await store.writeStreamToTemp('u1', Readable.from(Buffer.from('hello')), 100);
 
     const storagePath = store.commitTemp(tempPath, 'u1', 'n1');
 
@@ -124,11 +112,7 @@ describe('commitTemp', () => {
 describe('readBlob / deleteBlob', () => {
   test('readBlob streams back the committed file contents', async () => {
     const { store } = freshStore();
-    const { tempPath } = await store.writeStreamToTemp(
-      'u1',
-      Readable.from(Buffer.from('payload')),
-      100
-    );
+    const { tempPath } = await store.writeStreamToTemp('u1', Readable.from(Buffer.from('payload')), 100);
     store.commitTemp(tempPath, 'u1', 'n1');
 
     const content = await readAll(store.readBlob('u1/n1'));

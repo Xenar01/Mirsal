@@ -224,7 +224,7 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
       shareId,
       req.ip,
       typeof ua === 'string' ? ua : null,
-      now()
+      now(),
     );
   }
 
@@ -329,8 +329,7 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
 
     // #10: a folder share exposes ONLY the ZIP — its contents are never listed.
     const listNode = db.prepare('SELECT kind FROM nodes WHERE id = @id').get({ id: share.node_id }) as
-      | { kind: string }
-      | undefined;
+      { kind: string } | undefined;
     if (listNode?.kind === 'folder') {
       reply.code(403).send({ error: 'forbidden' });
       return;
@@ -389,7 +388,7 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
   async function resolveDownloadableFile(
     req: FastifyRequest,
     reply: FastifyReply,
-    share: Share
+    share: Share,
   ): Promise<{ node: Node; stream: ReadStream } | null> {
     if (!share.allow_download) {
       reply.code(403).send({ error: 'forbidden' });
@@ -399,8 +398,7 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
     // #10: a folder share allows no per-file download (with or without ?node=) —
     // only the ZIP. Constant-shape 403, identical to an out-of-subtree rejection.
     const shareNode = db.prepare('SELECT kind FROM nodes WHERE id = @id').get({ id: share.node_id }) as
-      | { kind: string }
-      | undefined;
+      { kind: string } | undefined;
     if (shareNode?.kind === 'folder') {
       reply.code(403).send({ error: 'forbidden' });
       return null;
@@ -468,7 +466,7 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
     scope.addContentTypeParser(
       'application/x-www-form-urlencoded',
       { parseAs: 'string', bodyLimit: 1024 },
-      (_req, _body, done) => done(null, undefined)
+      (_req, _body, done) => done(null, undefined),
     );
 
     scope.get('/api/public/:token/download', async (req, reply) => {
@@ -553,7 +551,7 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
                 .prepare(
                   `UPDATE shares SET download_count = download_count + 1
                    WHERE id = @id AND download_limit IS NOT NULL AND download_count < download_limit
-                   RETURNING id, owner_id, node_id, on_exhaust, download_limit, download_count`
+                   RETURNING id, owner_id, node_id, on_exhaust, download_limit, download_count`,
                 )
                 .get({ id: share.id }) as
                 | {
@@ -649,9 +647,7 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
         return;
       }
 
-      const rootNode = db.prepare('SELECT * FROM nodes WHERE id = @id').get({ id: share.node_id }) as
-        | Node
-        | undefined;
+      const rootNode = db.prepare('SELECT * FROM nodes WHERE id = @id').get({ id: share.node_id }) as Node | undefined;
       if (!rootNode) {
         // isShareLive already proved liveness; defensive only.
         reply.code(404).send({ error: 'not_found' });

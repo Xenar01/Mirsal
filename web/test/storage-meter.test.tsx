@@ -22,7 +22,7 @@ function renderMeter() {
   return render(
     <I18nextProvider i18n={i18n}>
       <StorageMeter />
-    </I18nextProvider>
+    </I18nextProvider>,
   );
 }
 
@@ -33,7 +33,15 @@ afterEach(() => {
 
 describe('StorageMeter', () => {
   test('a user WITH a quota shows a progress bar (25%) and NOT the no-quota note', () => {
-    mockUser = { id: 1, username: 'u', role: 'user', mustChangePassword: false, rootNodeId: 2, quotaBytes: 1000, usedBytes: 250 };
+    mockUser = {
+      id: 1,
+      username: 'u',
+      role: 'user',
+      mustChangePassword: false,
+      rootNodeId: 2,
+      quotaBytes: 1000,
+      usedBytes: 250,
+    };
     renderMeter();
     const bar = screen.getByRole('progressbar');
     expect(bar).toHaveAttribute('aria-valuenow', '25');
@@ -41,7 +49,15 @@ describe('StorageMeter', () => {
   });
 
   test('when trash > 0, clarifies it is part of used and how to free it', () => {
-    mockUser = { id: 1, username: 'u', role: 'user', mustChangePassword: false, rootNodeId: 2, quotaBytes: 1000, usedBytes: 250 };
+    mockUser = {
+      id: 1,
+      username: 'u',
+      role: 'user',
+      mustChangePassword: false,
+      rootNodeId: 2,
+      quotaBytes: 1000,
+      usedBytes: 250,
+    };
     mockTrashBytes = 100;
     renderMeter();
     // The "of which in trash" label makes clear trash is INCLUDED in used (not additive).
@@ -50,14 +66,30 @@ describe('StorageMeter', () => {
   });
 
   test('when trash is 0, no trash line is shown', () => {
-    mockUser = { id: 1, username: 'u', role: 'user', mustChangePassword: false, rootNodeId: 2, quotaBytes: 1000, usedBytes: 250 };
+    mockUser = {
+      id: 1,
+      username: 'u',
+      role: 'user',
+      mustChangePassword: false,
+      rootNodeId: 2,
+      quotaBytes: 1000,
+      usedBytes: 250,
+    };
     mockTrashBytes = 0;
     renderMeter();
     expect(screen.queryByText(i18n.t('storage.ofWhichTrash'))).not.toBeInTheDocument();
   });
 
   test('a user with NO quota shows the no-quota note and no progress bar', () => {
-    mockUser = { id: 1, username: 'u', role: 'user', mustChangePassword: false, rootNodeId: 2, quotaBytes: null, usedBytes: 250 };
+    mockUser = {
+      id: 1,
+      username: 'u',
+      role: 'user',
+      mustChangePassword: false,
+      rootNodeId: 2,
+      quotaBytes: null,
+      usedBytes: 250,
+    };
     renderMeter();
     expect(screen.getByText(i18n.t('storage.noQuota'))).toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();

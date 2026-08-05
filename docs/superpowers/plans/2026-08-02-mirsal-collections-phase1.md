@@ -26,6 +26,7 @@ Every task's requirements implicitly include these (copied from the spec + verif
 - **Commits:** one per task on branch `feat/collections`; the repo's `post-commit` hook auto-pushes to origin. Use the `Co-Authored-By` trailer the repo uses.
 
 **Arabic copy** used by this phase (owner app is Arabic-only, but Phase 1 has almost no user-visible strings — the folder name is the only one):
+
 - Collection folder name prefix: `طلب تجميع: ` (note trailing space), e.g. `طلب تجميع: تقرير الربع الأول`.
 
 ---
@@ -33,19 +34,22 @@ Every task's requirements implicitly include these (copied from the spec + verif
 ### Task 1: Migration v4 — three collections tables
 
 **Files:**
+
 - Modify: `server/src/db/schema.sql` (append three `CREATE TABLE` + indexes)
 - Modify: `server/src/db/migrate.ts` (`LATEST_VERSION = 4`; add a `{ version: 4, up }` step)
 - Test: `server/test/db/migrate.test.ts` (add a v4 `describe`; update existing terminal-version assertions)
 
 **Interfaces:**
+
 - Produces: three tables — `collections`, `collection_departments`, `collection_responses` — plus indexes `ix_collections_owner`, `ix_collection_responses_collection`. Consumed by every later task.
 
 - [ ] **Step 1: Write the failing test** — append to `server/test/db/migrate.test.ts` (after the existing v3 describe block):
 
 ```ts
 function tableNames(db: Database.Database): string[] {
-  return (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[])
-    .map((r) => r.name);
+  return (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map(
+    (r) => r.name,
+  );
 }
 
 describe('migrate v4 collections tables', () => {
@@ -53,9 +57,7 @@ describe('migrate v4 collections tables', () => {
     const db = new Database(':memory:');
     migrate(db);
     const names = tableNames(db);
-    expect(names).toEqual(
-      expect.arrayContaining(['collections', 'collection_departments', 'collection_responses'])
-    );
+    expect(names).toEqual(expect.arrayContaining(['collections', 'collection_departments', 'collection_responses']));
     expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
   });
 
@@ -72,7 +74,7 @@ describe('migrate v4 collections tables', () => {
     db.prepare('INSERT INTO schema_version(version, applied_at) VALUES (3, 0)').run();
     migrate(db);
     expect(tableNames(db)).toEqual(
-      expect.arrayContaining(['collections', 'collection_departments', 'collection_responses'])
+      expect.arrayContaining(['collections', 'collection_departments', 'collection_responses']),
     );
     expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
   });
@@ -87,24 +89,29 @@ describe('migrate v4 collections tables', () => {
     upgraded.prepare('INSERT INTO schema_version(version, applied_at) VALUES (1, 0)').run();
     migrate(upgraded);
     const ddl = (db: Database.Database) =>
-      (db
-        .prepare(
-          "SELECT sql FROM sqlite_master WHERE name IN ('collections','collection_departments','collection_responses') ORDER BY name"
-        )
-        .all() as { sql: string }[]).map((r) => r.sql);
+      (
+        db
+          .prepare(
+            "SELECT sql FROM sqlite_master WHERE name IN ('collections','collection_departments','collection_responses') ORDER BY name",
+          )
+          .all() as { sql: string }[]
+      ).map((r) => r.sql);
     expect(ddl(fresh)).toEqual(ddl(upgraded));
   });
 
   it('is idempotent at v4', () => {
     const db = new Database(':memory:');
     migrate(db);
-    expect(() => { migrate(db); migrate(db); }).not.toThrow();
+    expect(() => {
+      migrate(db);
+      migrate(db);
+    }).not.toThrow();
     expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
   });
 });
 ```
 
-  Then **update the existing terminal-version assertions** in this file: every occurrence of `.v).toBe(3)` (there are 6 — in the `migrate v2` and `migrate v3` describe blocks, all asserting `MAX(version)` = the latest version) becomes `.v).toBe(4)`. Leave the `COUNT(*) … .c).toBe(1)` idempotency assertion untouched. (Reword the three v3-block test titles that say "version 3"/"at v3" to "the latest version" if desired — cosmetic.)
+Then **update the existing terminal-version assertions** in this file: every occurrence of `.v).toBe(3)` (there are 6 — in the `migrate v2` and `migrate v3` describe blocks, all asserting `MAX(version)` = the latest version) becomes `.v).toBe(4)`. Leave the `COUNT(*) … .c).toBe(1)` idempotency assertion untouched. (Reword the three v3-block test titles that say "version 3"/"at v3" to "the latest version" if desired — cosmetic.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -155,7 +162,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_collection_response_dept
 CREATE INDEX IF NOT EXISTS ix_collection_responses_collection ON collection_responses(collection_id);
 ```
 
-  Then **edit `migrate.ts`:** change `export const LATEST_VERSION = 3;` → `= 4;` and append this step to the `STEPS` array (after the `version: 3` step). The `up` body must be the **exact same DDL** as above so fresh and upgraded DBs converge:
+Then **edit `migrate.ts`:** change `export const LATEST_VERSION = 3;` → `= 4;` and append this step to the `STEPS` array (after the `version: 3` step). The `up` body must be the **exact same DDL** as above so fresh and upgraded DBs converge:
 
 ```ts
   {
@@ -200,9 +207,10 @@ CREATE INDEX IF NOT EXISTS ix_collection_responses_collection ON collection_resp
   },
 ```
 
-  **Convergence note (important):** an inline `UNIQUE(collection_id, department_id)` in `schema.sql` produces an auto-named index (`sqlite_autoindex_*`), while a migration cannot restate the table — so for the `collection_responses` uniqueness, use a **named** `CREATE UNIQUE INDEX ux_collection_response_dept` in **both** `schema.sql` (replace the inline `UNIQUE(...)` line with the table having no inline unique, then add the `CREATE UNIQUE INDEX` after it) **and** the migration `up`, so fresh and upgraded schemas are byte-identical. Apply the same for any other constraint that would otherwise auto-name. (The `collection_departments` `UNIQUE(collection_id, name)` is fine to keep inline since both fresh and upgraded go through identical `CREATE TABLE` text.)
+**Convergence note (important):** an inline `UNIQUE(collection_id, department_id)` in `schema.sql` produces an auto-named index (`sqlite_autoindex_*`), while a migration cannot restate the table — so for the `collection_responses` uniqueness, use a **named** `CREATE UNIQUE INDEX ux_collection_response_dept` in **both** `schema.sql` (replace the inline `UNIQUE(...)` line with the table having no inline unique, then add the `CREATE UNIQUE INDEX` after it) **and** the migration `up`, so fresh and upgraded schemas are byte-identical. Apply the same for any other constraint that would otherwise auto-name. (The `collection_departments` `UNIQUE(collection_id, name)` is fine to keep inline since both fresh and upgraded go through identical `CREATE TABLE` text.)
 
-  Concretely, in `schema.sql` the `collection_responses` table should read **without** the inline `UNIQUE(...)`, followed by:
+Concretely, in `schema.sql` the `collection_responses` table should read **without** the inline `UNIQUE(...)`, followed by:
+
 ```sql
 CREATE UNIQUE INDEX IF NOT EXISTS ux_collection_response_dept
   ON collection_responses(collection_id, department_id);
@@ -230,10 +238,12 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ### Task 2: `collections.ts` model — `Collection`, `collectionStatus`, `createCollection`, `getCollection`
 
 **Files:**
+
 - Create: `server/src/collections/collections.ts`
 - Test: `server/test/collections/collections.test.ts`
 
 **Interfaces:**
+
 - Consumes: `randomToken` (`util/ids.js`), `hashPassword` (`auth/passwords.js`), `ensureUserRoots` (`nodes/tree.js`), `nextSuffixedName` (`nodes/collisions.js`).
 - Produces:
   - `interface Collection` — verbatim row (see code).
@@ -271,8 +281,12 @@ beforeEach(() => {
   migrate(db);
 });
 afterEach(() => {
-  db?.close(); db = undefined;
-  if (dir) { fs.rmSync(dir, { recursive: true, force: true }); dir = undefined; }
+  db?.close();
+  db = undefined;
+  if (dir) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  }
 });
 
 const keys = ['DB_PATH', 'STORAGE_DIR', 'SESSION_SECRET', 'CSRF_SECRET', 'PUBLIC_BASE_URL'] as const;
@@ -294,7 +308,7 @@ function seedUser(): number {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, created_at, updated_at)
-       VALUES (?, 'x', 'user', 1, 0, ?, ?)`
+       VALUES (?, 'x', 'user', 1, 0, ?, ?)`,
     )
     .run(`user-${Math.random()}`, t, t);
   return Number(info.lastInsertRowid);
@@ -304,7 +318,7 @@ function seedFileNode(uid: number, now: number, trashedAt: number | null = null)
   const info = db!
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, trashed_at, created_at, updated_at)
-       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @trashedAt, @now, @now)`
+       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @trashedAt, @now, @now)`,
     )
     .run({ ownerId: uid, parentId: rootId, name: `f-${Math.random()}`, trashedAt, now });
   return Number(info.lastInsertRowid);
@@ -339,8 +353,11 @@ test('createCollection: token >= 43, is_active=1, folder under root, departments
   expect(c.deadline_at).toBeNull();
   expect(c.owner_id).toBe(uid);
 
-  const folder = db!.prepare('SELECT parent_id, kind, name FROM nodes WHERE id = ?').get(c.folder_node_id) as
-    { parent_id: number; kind: string; name: string };
+  const folder = db!.prepare('SELECT parent_id, kind, name FROM nodes WHERE id = ?').get(c.folder_node_id) as {
+    parent_id: number;
+    kind: string;
+    name: string;
+  };
   expect(folder.parent_id).toBe(rootId);
   expect(folder.kind).toBe('folder');
   expect(folder.name).toBe('طلب تجميع: تقرير الربع الأول');
@@ -375,28 +392,34 @@ test('createCollection accepts a valid template file; rejects foreign/trashed/fo
   expect(c.template_node_id).toBe(good);
 
   const foreign = seedFileNode(other, now);
-  await expect(createCollection(db!, uid, { title: 'T2', departments: ['A'], templateNodeId: foreign }, now))
-    .rejects.toThrow('bad_template');
+  await expect(
+    createCollection(db!, uid, { title: 'T2', departments: ['A'], templateNodeId: foreign }, now),
+  ).rejects.toThrow('bad_template');
 
   const trashed = seedFileNode(uid, now, now);
-  await expect(createCollection(db!, uid, { title: 'T3', departments: ['A'], templateNodeId: trashed }, now))
-    .rejects.toThrow('bad_template');
+  await expect(
+    createCollection(db!, uid, { title: 'T3', departments: ['A'], templateNodeId: trashed }, now),
+  ).rejects.toThrow('bad_template');
 
   const { rootId } = ensureUserRoots(db!, uid, now); // a folder is not a file
-  await expect(createCollection(db!, uid, { title: 'T4', departments: ['A'], templateNodeId: rootId }, now))
-    .rejects.toThrow('bad_template');
+  await expect(
+    createCollection(db!, uid, { title: 'T4', departments: ['A'], templateNodeId: rootId }, now),
+  ).rejects.toThrow('bad_template');
 });
 
 test('createCollection rejects an all-empty department list', async () => {
   const uid = seedUser();
-  await expect(createCollection(db!, uid, { title: 'T', departments: ['', '  '] }, Date.now()))
-    .rejects.toThrow('no_departments');
+  await expect(createCollection(db!, uid, { title: 'T', departments: ['', '  '] }, Date.now())).rejects.toThrow(
+    'no_departments',
+  );
 });
 
 test('createCollection dedupes duplicate department names', async () => {
   const uid = seedUser();
   const c = await createCollection(db!, uid, { title: 'T', departments: ['HR', 'HR', 'Finance'] }, Date.now());
-  const count = db!.prepare('SELECT COUNT(*) c FROM collection_departments WHERE collection_id = ?').get(c.id) as { c: number };
+  const count = db!.prepare('SELECT COUNT(*) c FROM collection_departments WHERE collection_id = ?').get(c.id) as {
+    c: number;
+  };
   expect(count.c).toBe(2);
 });
 
@@ -471,7 +494,7 @@ export interface CreateCollectionOptions {
  */
 export function collectionStatus(
   c: Pick<Collection, 'is_active' | 'deadline_at'>,
-  now: number
+  now: number,
 ): 'open' | 'closed' | 'expired' {
   if (!c.is_active) return 'closed';
   if (c.deadline_at != null && c.deadline_at < now) return 'expired';
@@ -504,7 +527,7 @@ export async function createCollection(
   db: Database.Database,
   ownerId: number,
   options: CreateCollectionOptions,
-  now: number
+  now: number,
 ): Promise<Collection> {
   const title = options.title.trim();
   if (title.length === 0) throw new Error('invalid_title');
@@ -514,19 +537,15 @@ export async function createCollection(
 
   const templateNodeId = options.templateNodeId ?? null;
   if (templateNodeId !== null) {
-    const t = db
-      .prepare('SELECT owner_id, kind, trashed_at FROM nodes WHERE id = @id')
-      .get({ id: templateNodeId }) as
-      | { owner_id: number; kind: string; trashed_at: number | null }
-      | undefined;
+    const t = db.prepare('SELECT owner_id, kind, trashed_at FROM nodes WHERE id = @id').get({ id: templateNodeId }) as
+      { owner_id: number; kind: string; trashed_at: number | null } | undefined;
     if (!t || t.owner_id !== ownerId || t.kind !== 'file' || t.trashed_at !== null) {
       throw new Error('bad_template');
     }
   }
 
   const { rootId } = ensureUserRoots(db, ownerId, now);
-  const passwordHash =
-    options.password && options.password.length > 0 ? await hashPassword(options.password) : null;
+  const passwordHash = options.password && options.password.length > 0 ? await hashPassword(options.password) : null;
   const token = randomToken(32);
   const deadlineAt = options.deadlineAt ?? null;
 
@@ -535,7 +554,7 @@ export async function createCollection(
     const folderInfo = db
       .prepare(
         `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
-         VALUES (@ownerId, @rootId, 'folder', @folderName, 0, @now, @now)`
+         VALUES (@ownerId, @rootId, 'folder', @folderName, 0, @now, @now)`,
       )
       .run({ ownerId, rootId, folderName, now });
     const folderNodeId = Number(folderInfo.lastInsertRowid);
@@ -543,14 +562,14 @@ export async function createCollection(
     const cInfo = db
       .prepare(
         `INSERT INTO collections(owner_id, token, title, template_node_id, folder_node_id, password_hash, is_active, deadline_at, created_at, updated_at)
-         VALUES (@ownerId, @token, @title, @templateNodeId, @folderNodeId, @passwordHash, 1, @deadlineAt, @now, @now)`
+         VALUES (@ownerId, @token, @title, @templateNodeId, @folderNodeId, @passwordHash, 1, @deadlineAt, @now, @now)`,
       )
       .run({ ownerId, token, title, templateNodeId, folderNodeId, passwordHash, deadlineAt, now });
     const collectionId = Number(cInfo.lastInsertRowid);
 
     const insertDept = db.prepare(
       `INSERT INTO collection_departments(collection_id, name, position, created_at)
-       VALUES (@collectionId, @name, @position, @now)`
+       VALUES (@collectionId, @name, @position, @now)`,
     );
     departments.forEach((name, i) => insertDept.run({ collectionId, name, position: i, now }));
 
@@ -561,11 +580,7 @@ export async function createCollection(
 }
 
 /** Owner-scoped fetch of one collection row, or undefined. */
-export function getCollection(
-  db: Database.Database,
-  ownerId: number,
-  collectionId: number
-): Collection | undefined {
+export function getCollection(db: Database.Database, ownerId: number, collectionId: number): Collection | undefined {
   return db
     .prepare('SELECT * FROM collections WHERE id = @id AND owner_id = @ownerId')
     .get({ id: collectionId, ownerId }) as Collection | undefined;
@@ -591,10 +606,12 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ### Task 3: `collections.ts` model — `listCollections`, `setCollectionState`, `deleteCollection`
 
 **Files:**
+
 - Modify: `server/src/collections/collections.ts` (add three functions + two interfaces)
 - Test: `server/test/collections/collections.test.ts` (add cases)
 
 **Interfaces:**
+
 - Consumes: `permanentDelete` (`nodes/trash.js`), `hashPassword` (`auth/passwords.js`).
 - Produces:
   - `interface CollectionSummaryRow extends Collection { department_count: number; responded_count: number }`
@@ -606,24 +623,36 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - [ ] **Step 1: Write the failing test** — add to `server/test/collections/collections.test.ts`. (Add imports for the three new functions; add a helper that seeds a response with a real file under a real subfolder.)
 
 ```ts
-import {
-  listCollections,
-  setCollectionState,
-  deleteCollection,
-} from '../../src/collections/collections.js';
+import { listCollections, setCollectionState, deleteCollection } from '../../src/collections/collections.js';
 
 /** Seeds a department response: a subfolder under the collection folder holding `fileBytes` file. */
-function seedResponse(collectionId: number, departmentId: number, collectionFolderId: number, uid: number, now: number, fileBytes = 10): number {
+function seedResponse(
+  collectionId: number,
+  departmentId: number,
+  collectionFolderId: number,
+  uid: number,
+  now: number,
+  fileBytes = 10,
+): number {
   const subInfo = db!
-    .prepare(`INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
-              VALUES (@uid, @parent, 'folder', @name, 0, @now, @now)`)
+    .prepare(
+      `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
+              VALUES (@uid, @parent, 'folder', @name, 0, @now, @now)`,
+    )
     .run({ uid, parent: collectionFolderId, name: `dept-${departmentId}`, now });
   const subId = Number(subInfo.lastInsertRowid);
-  db!.prepare(`INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
-               VALUES (@uid, @parent, 'file', @name, @bytes, @sp, @now, @now)`)
+  db!
+    .prepare(
+      `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
+               VALUES (@uid, @parent, 'file', @name, @bytes, @sp, @now, @now)`,
+    )
     .run({ uid, parent: subId, name: `r-${Math.random()}`, bytes: fileBytes, sp: `${uid}/${Math.random()}`, now });
-  db!.prepare(`INSERT INTO collection_responses(collection_id, department_id, folder_node_id, note, submitted_at)
-               VALUES (?, ?, ?, NULL, ?)`).run(collectionId, departmentId, subId, now);
+  db!
+    .prepare(
+      `INSERT INTO collection_responses(collection_id, department_id, folder_node_id, note, submitted_at)
+               VALUES (?, ?, ?, NULL, ?)`,
+    )
+    .run(collectionId, departmentId, subId, now);
   return subId;
 }
 
@@ -631,7 +660,11 @@ test('listCollections returns owner rows newest-first with department + responde
   const uid = seedUser();
   const now = Date.now();
   const c = await createCollection(db!, uid, { title: 'T', departments: ['A', 'B', 'C'] }, now);
-  const deptA = (db!.prepare('SELECT id FROM collection_departments WHERE collection_id=? ORDER BY position').get(c.id) as { id: number }).id;
+  const deptA = (
+    db!.prepare('SELECT id FROM collection_departments WHERE collection_id=? ORDER BY position').get(c.id) as {
+      id: number;
+    }
+  ).id;
   seedResponse(c.id, deptA, c.folder_node_id, uid, now);
 
   const rows = listCollections(db!, uid);
@@ -655,14 +688,17 @@ test('setCollectionState updates title/isActive/deadline, clears password with n
   // Foreign owner cannot touch it.
   const u3 = await setCollectionState(db!, other, c.id, { isActive: true }, 4000);
   expect(u3).toBeUndefined();
-  expect((db!.prepare('SELECT is_active FROM collections WHERE id=?').get(c.id) as { is_active: number }).is_active).toBe(0);
+  expect(
+    (db!.prepare('SELECT is_active FROM collections WHERE id=?').get(c.id) as { is_active: number }).is_active,
+  ).toBe(0);
 });
 
 test('deleteCollection removes the collection, its folder subtree, departments/responses, and returns blob paths', async () => {
   const uid = seedUser();
   const now = Date.now();
   const c = await createCollection(db!, uid, { title: 'T', departments: ['A'] }, now);
-  const deptA = (db!.prepare('SELECT id FROM collection_departments WHERE collection_id=?').get(c.id) as { id: number }).id;
+  const deptA = (db!.prepare('SELECT id FROM collection_departments WHERE collection_id=?').get(c.id) as { id: number })
+    .id;
   seedResponse(c.id, deptA, c.folder_node_id, uid, now, 42);
 
   const res = deleteCollection(db!, uid, c.id);
@@ -670,8 +706,12 @@ test('deleteCollection removes the collection, its folder subtree, departments/r
   expect(res.storagePaths.length).toBe(1);
 
   expect(db!.prepare('SELECT COUNT(*) c FROM collections WHERE id=?').get(c.id)).toMatchObject({ c: 0 });
-  expect(db!.prepare('SELECT COUNT(*) c FROM collection_departments WHERE collection_id=?').get(c.id)).toMatchObject({ c: 0 });
-  expect(db!.prepare('SELECT COUNT(*) c FROM collection_responses WHERE collection_id=?').get(c.id)).toMatchObject({ c: 0 });
+  expect(db!.prepare('SELECT COUNT(*) c FROM collection_departments WHERE collection_id=?').get(c.id)).toMatchObject({
+    c: 0,
+  });
+  expect(db!.prepare('SELECT COUNT(*) c FROM collection_responses WHERE collection_id=?').get(c.id)).toMatchObject({
+    c: 0,
+  });
   expect(db!.prepare('SELECT COUNT(*) c FROM nodes WHERE id=?').get(c.folder_node_id)).toMatchObject({ c: 0 });
 });
 
@@ -706,7 +746,7 @@ export function listCollections(db: Database.Database, ownerId: number): Collect
          (SELECT COUNT(*) FROM collection_responses r WHERE r.collection_id = c.id) AS responded_count
        FROM collections c
        WHERE c.owner_id = @ownerId
-       ORDER BY c.created_at DESC, c.id DESC`
+       ORDER BY c.created_at DESC, c.id DESC`,
     )
     .all({ ownerId }) as CollectionSummaryRow[];
 }
@@ -730,7 +770,7 @@ export async function setCollectionState(
   ownerId: number,
   collectionId: number,
   patch: SetCollectionStatePatch,
-  now: number
+  now: number,
 ): Promise<Collection | undefined> {
   const sets: string[] = ['updated_at = @now'];
   const params: Record<string, unknown> = { collectionId, ownerId, now };
@@ -752,9 +792,7 @@ export async function setCollectionState(
     params.deadlineAt = patch.deadlineAt;
   }
 
-  db.prepare(`UPDATE collections SET ${sets.join(', ')} WHERE id = @collectionId AND owner_id = @ownerId`).run(
-    params
-  );
+  db.prepare(`UPDATE collections SET ${sets.join(', ')} WHERE id = @collectionId AND owner_id = @ownerId`).run(params);
 
   return db
     .prepare('SELECT * FROM collections WHERE id = @collectionId AND owner_id = @ownerId')
@@ -771,7 +809,7 @@ export async function setCollectionState(
 export function deleteCollection(
   db: Database.Database,
   ownerId: number,
-  collectionId: number
+  collectionId: number,
 ): { deleted: boolean; storagePaths: string[] } {
   const row = db
     .prepare('SELECT folder_node_id FROM collections WHERE id = @id AND owner_id = @ownerId')
@@ -802,10 +840,12 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ### Task 4: `departments.ts` model — add / remove / list / roster
 
 **Files:**
+
 - Create: `server/src/collections/departments.ts`
 - Test: `server/test/collections/departments.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `interface Department { id; collection_id; name; position; created_at }`
   - `class DuplicateDepartmentError extends Error`
@@ -821,7 +861,11 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 // … same imports/harness/seedUser as collections.test.ts …
 import { createCollection } from '../../src/collections/collections.js';
 import {
-  addDepartment, removeDepartment, listDepartments, getRoster, DuplicateDepartmentError,
+  addDepartment,
+  removeDepartment,
+  listDepartments,
+  getRoster,
+  DuplicateDepartmentError,
 } from '../../src/collections/departments.js';
 
 async function mkCollection(uid: number, depts: string[], now = Date.now()) {
@@ -860,10 +904,20 @@ test('removeDepartment refuses a department that already has a response', async 
   const c = await mkCollection(uid, ['A']);
   const a = listDepartments(db!, c.id)[0];
   // seed a response subfolder + row for dept A
-  const sub = Number(db!.prepare(`INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
-    VALUES (?,?,'folder','A',0,?,?)`).run(uid, c.folder_node_id, now, now).lastInsertRowid);
-  db!.prepare(`INSERT INTO collection_responses(collection_id,department_id,folder_node_id,note,submitted_at)
-    VALUES (?,?,?,NULL,?)`).run(c.id, a.id, sub, now);
+  const sub = Number(
+    db!
+      .prepare(
+        `INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
+    VALUES (?,?,'folder','A',0,?,?)`,
+      )
+      .run(uid, c.folder_node_id, now, now).lastInsertRowid,
+  );
+  db!
+    .prepare(
+      `INSERT INTO collection_responses(collection_id,department_id,folder_node_id,note,submitted_at)
+    VALUES (?,?,?,NULL,?)`,
+    )
+    .run(c.id, a.id, sub, now);
   expect(removeDepartment(db!, uid, c.id, a.id)).toBe('has_response');
 });
 
@@ -873,13 +927,27 @@ test('getRoster lists every department, marks responded + file_count, ordered by
   const c = await mkCollection(uid, ['A', 'B']);
   const [a] = listDepartments(db!, c.id);
   // dept A responds with 2 files under its subfolder; B stays missing.
-  const sub = Number(db!.prepare(`INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
-    VALUES (?,?,'folder','A',0,?,?)`).run(uid, c.folder_node_id, now, now).lastInsertRowid);
+  const sub = Number(
+    db!
+      .prepare(
+        `INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
+    VALUES (?,?,'folder','A',0,?,?)`,
+      )
+      .run(uid, c.folder_node_id, now, now).lastInsertRowid,
+  );
   for (let i = 0; i < 2; i++)
-    db!.prepare(`INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,storage_path,created_at,updated_at)
-      VALUES (?,?,'file',?,3,?,?,?)`).run(uid, sub, `f${i}`, `${uid}/${i}`, now, now);
-  db!.prepare(`INSERT INTO collection_responses(collection_id,department_id,folder_node_id,note,submitted_at)
-    VALUES (?,?,?,'hi',?)`).run(c.id, a.id, sub, now);
+    db!
+      .prepare(
+        `INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,storage_path,created_at,updated_at)
+      VALUES (?,?,'file',?,3,?,?,?)`,
+      )
+      .run(uid, sub, `f${i}`, `${uid}/${i}`, now, now);
+  db!
+    .prepare(
+      `INSERT INTO collection_responses(collection_id,department_id,folder_node_id,note,submitted_at)
+    VALUES (?,?,?,'hi',?)`,
+    )
+    .run(c.id, a.id, sub, now);
 
   const roster = getRoster(db!, c.id);
   expect(roster.map((r) => r.name)).toEqual(['A', 'B']);
@@ -917,8 +985,7 @@ export class DuplicateDepartmentError extends Error {
 function isUniqueConstraintError(e: unknown): boolean {
   return (
     e instanceof Error &&
-    ((e as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT_UNIQUE' ||
-      /UNIQUE constraint failed/i.test(e.message))
+    ((e as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint failed/i.test(e.message))
   );
 }
 
@@ -939,7 +1006,7 @@ export function addDepartment(
   ownerId: number,
   collectionId: number,
   name: string,
-  now: number
+  now: number,
 ): Department {
   const owned = db
     .prepare('SELECT id FROM collections WHERE id = @collectionId AND owner_id = @ownerId')
@@ -951,7 +1018,9 @@ export function addDepartment(
 
   const pos = (
     db
-      .prepare('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM collection_departments WHERE collection_id = @collectionId')
+      .prepare(
+        'SELECT COALESCE(MAX(position), -1) + 1 AS p FROM collection_departments WHERE collection_id = @collectionId',
+      )
       .get({ collectionId }) as { p: number }
   ).p;
 
@@ -959,10 +1028,12 @@ export function addDepartment(
     const info = db
       .prepare(
         `INSERT INTO collection_departments(collection_id, name, position, created_at)
-         VALUES (@collectionId, @name, @position, @now)`
+         VALUES (@collectionId, @name, @position, @now)`,
       )
       .run({ collectionId, name: trimmed, position: pos, now });
-    return db.prepare('SELECT * FROM collection_departments WHERE id = @id').get({ id: Number(info.lastInsertRowid) }) as Department;
+    return db
+      .prepare('SELECT * FROM collection_departments WHERE id = @id')
+      .get({ id: Number(info.lastInsertRowid) }) as Department;
   } catch (e) {
     if (isUniqueConstraintError(e)) throw new DuplicateDepartmentError();
     throw e;
@@ -981,13 +1052,13 @@ export function removeDepartment(
   db: Database.Database,
   ownerId: number,
   collectionId: number,
-  departmentId: number
+  departmentId: number,
 ): RemoveDepartmentResult {
   const dept = db
     .prepare(
       `SELECT d.id FROM collection_departments d
        JOIN collections c ON c.id = d.collection_id
-       WHERE d.id = @departmentId AND d.collection_id = @collectionId AND c.owner_id = @ownerId`
+       WHERE d.id = @departmentId AND d.collection_id = @collectionId AND c.owner_id = @ownerId`,
     )
     .get({ departmentId, collectionId, ownerId });
   if (!dept) return 'not_found';
@@ -1028,11 +1099,16 @@ export function getRoster(db: Database.Database, collectionId: number): RosterEn
        FROM collection_departments d
        LEFT JOIN collection_responses r ON r.department_id = d.id AND r.collection_id = d.collection_id
        WHERE d.collection_id = @collectionId
-       ORDER BY d.position ASC, d.id ASC`
+       ORDER BY d.position ASC, d.id ASC`,
     )
     .all({ collectionId }) as Array<{
-    id: number; name: string; position: number;
-    folder_node_id: number | null; submitted_at: number | null; note: string | null; file_count: number;
+    id: number;
+    name: string;
+    position: number;
+    folder_node_id: number | null;
+    submitted_at: number | null;
+    note: string | null;
+    file_count: number;
   }>;
 
   return rows.map((r) => ({
@@ -1067,11 +1143,13 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ### Task 5: `routes/collections.ts` — GET list, POST create, GET :id; wire into app.ts
 
 **Files:**
+
 - Create: `server/src/routes/collections.ts`
 - Modify: `server/src/app.ts` (import + register the plugin with the shared `blobStore`)
 - Test: `server/test/routes/collections.test.ts`
 
 **Interfaces:**
+
 - Consumes: everything from Tasks 2–4; `Guards`, `Config`, `Clock`, `BlobStore`, `writeAudit`.
 - Produces: `default async function collectionsRoutes(app, deps: CollectionsRouteDeps)` and the DTO shapes below. `POST`/`GET :id` return a `CollectionDetailDto`; `GET /api/collections` returns `CollectionSummaryDto[]`.
 
@@ -1084,8 +1162,10 @@ test('POST /api/collections -> 201 detail with /c/<token> url, open status, depa
   const { session, csrf } = await login(built, 'alice', 'pw');
 
   const res = await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'POST',
+    url: '/api/collections',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { title: 'Q1', departments: ['HR', 'Finance', 'IT'] },
   });
   expect(res.statusCode).toBe(201);
@@ -1098,7 +1178,9 @@ test('POST /api/collections -> 201 detail with /c/<token> url, open status, depa
   expect(c.departments.map((d: any) => d.name)).toEqual(['HR', 'Finance', 'IT']);
   expect(c.departments.every((d: any) => d.responded === false)).toBe(true);
 
-  const list = (await built.inject({ method: 'GET', url: '/api/collections', cookies: { mirsal_session: session } })).json();
+  const list = (
+    await built.inject({ method: 'GET', url: '/api/collections', cookies: { mirsal_session: session } })
+  ).json();
   expect(list.some((x: any) => x.id === c.id && x.department_count === 3)).toBe(true);
 });
 
@@ -1107,8 +1189,10 @@ test('POST with a password -> has_password true, secret never echoed', async () 
   await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
   const res = await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'POST',
+    url: '/api/collections',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { title: 'P', departments: ['A'], password: 'secret-pw' },
   });
   expect(res.statusCode).toBe(201);
@@ -1124,8 +1208,10 @@ test('POST with a foreign/non-file template -> 400 bad_template', async () => {
   const { session, csrf } = await login(built, 'alice', 'pw');
   const foreign = seedFileNodeFor(bobId); // a file owned by bob (helper below)
   const res = await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'POST',
+    url: '/api/collections',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { title: 'T', departments: ['A'], template_node_id: foreign },
   });
   expect(res.statusCode).toBe(400);
@@ -1137,8 +1223,10 @@ test('POST with only blank departments -> 400', async () => {
   await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
   const res = await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'POST',
+    url: '/api/collections',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { title: 'T', departments: ['', '  '] },
   });
   expect(res.statusCode).toBe(400);
@@ -1146,7 +1234,11 @@ test('POST with only blank departments -> 400', async () => {
 
 test('POST /api/collections requires auth -> 401', async () => {
   const built = await makeApp();
-  const res = await built.inject({ method: 'POST', url: '/api/collections', payload: { title: 'T', departments: ['A'] } });
+  const res = await built.inject({
+    method: 'POST',
+    url: '/api/collections',
+    payload: { title: 'T', departments: ['A'] },
+  });
   expect(res.statusCode).toBe(401);
 });
 
@@ -1156,24 +1248,37 @@ test('GET /api/collections/:id is owner-scoped -> 404 for another user', async (
   await seedUser('bob', 'pw');
   const a = await login(built, 'alice', 'pw');
   const b = await login(built, 'bob', 'pw');
-  const c = (await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: a.session }, headers: { 'x-csrf-token': a.csrf },
-    payload: { title: 'T', departments: ['A'] },
-  })).json();
+  const c = (
+    await built.inject({
+      method: 'POST',
+      url: '/api/collections',
+      cookies: { mirsal_session: a.session },
+      headers: { 'x-csrf-token': a.csrf },
+      payload: { title: 'T', departments: ['A'] },
+    })
+  ).json();
 
-  expect((await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: a.session } })).statusCode).toBe(200);
-  expect((await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: b.session } })).statusCode).toBe(404);
+  expect(
+    (await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: a.session } }))
+      .statusCode,
+  ).toBe(200);
+  expect(
+    (await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: b.session } }))
+      .statusCode,
+  ).toBe(404);
 });
 ```
 
-  Add this helper near the other seeders in the test file (a file owned by an arbitrary uid):
+Add this helper near the other seeders in the test file (a file owned by an arbitrary uid):
+
 ```ts
 function seedFileNodeFor(uid: number): number {
   const { rootId } = ensureUserRoots(db!, uid, NOW);
   const info = db!
-    .prepare(`INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
-              VALUES (@uid, @rootId, 'file', @name, 5, 'u/1', @now, @now)`)
+    .prepare(
+      `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
+              VALUES (@uid, @rootId, 'file', @name, 5, 'u/1', @now, @now)`,
+    )
     .run({ uid, rootId, name: `f-${Math.random()}`, now: NOW });
   return Number(info.lastInsertRowid);
 }
@@ -1196,13 +1301,18 @@ import type { Config } from '../config.js';
 import type { BlobStore } from '../storage/blobs.js';
 import { writeAudit } from '../audit.js';
 import {
-  createCollection, getCollection, listCollections, setCollectionState, deleteCollection,
-  collectionStatus, normalizeDepartments,
-  type Collection, type CollectionSummaryRow, type SetCollectionStatePatch,
+  createCollection,
+  getCollection,
+  listCollections,
+  setCollectionState,
+  deleteCollection,
+  collectionStatus,
+  normalizeDepartments,
+  type Collection,
+  type CollectionSummaryRow,
+  type SetCollectionStatePatch,
 } from '../collections/collections.js';
-import {
-  addDepartment, removeDepartment, getRoster, DuplicateDepartmentError,
-} from '../collections/departments.js';
+import { addDepartment, removeDepartment, getRoster, DuplicateDepartmentError } from '../collections/departments.js';
 
 export interface CollectionsRouteDeps {
   db: Database.Database;
@@ -1213,23 +1323,40 @@ export interface CollectionsRouteDeps {
 }
 
 interface CollectionSummaryDto {
-  id: number; token: string; title: string;
-  is_active: boolean; has_password: boolean; has_template: boolean;
-  deadline_at: number | null; created_at: number;
+  id: number;
+  token: string;
+  title: string;
+  is_active: boolean;
+  has_password: boolean;
+  has_template: boolean;
+  deadline_at: number | null;
+  created_at: number;
   status: 'open' | 'closed' | 'expired';
-  department_count: number; responded_count: number;
+  department_count: number;
+  responded_count: number;
   url: string;
 }
 interface RosterDeptDto {
-  id: number; name: string; responded: boolean; file_count: number;
-  submitted_at: number | null; note: string | null; folder_node_id: number | null;
+  id: number;
+  name: string;
+  responded: boolean;
+  file_count: number;
+  submitted_at: number | null;
+  note: string | null;
+  folder_node_id: number | null;
 }
 interface CollectionDetailDto {
-  id: number; token: string; title: string;
-  is_active: boolean; has_password: boolean; has_template: boolean;
-  deadline_at: number | null; created_at: number;
+  id: number;
+  token: string;
+  title: string;
+  is_active: boolean;
+  has_password: boolean;
+  has_template: boolean;
+  deadline_at: number | null;
+  created_at: number;
   status: 'open' | 'closed' | 'expired';
-  department_count: number; responded_count: number;
+  department_count: number;
+  responded_count: number;
   departments: RosterDeptDto[];
   template: { node_id: number; name: string } | null;
   url: string;
@@ -1237,11 +1364,17 @@ interface CollectionDetailDto {
 
 function toSummaryDto(row: CollectionSummaryRow, base: string, nowMs: number): CollectionSummaryDto {
   return {
-    id: row.id, token: row.token, title: row.title,
-    is_active: !!row.is_active, has_password: row.password_hash !== null, has_template: row.template_node_id !== null,
-    deadline_at: row.deadline_at, created_at: row.created_at,
+    id: row.id,
+    token: row.token,
+    title: row.title,
+    is_active: !!row.is_active,
+    has_password: row.password_hash !== null,
+    has_template: row.template_node_id !== null,
+    deadline_at: row.deadline_at,
+    created_at: row.created_at,
     status: collectionStatus(row, nowMs),
-    department_count: row.department_count, responded_count: row.responded_count,
+    department_count: row.department_count,
+    responded_count: row.responded_count,
     url: `${base}/c/${row.token}`,
   };
 }
@@ -1249,22 +1382,34 @@ function toSummaryDto(row: CollectionSummaryRow, base: string, nowMs: number): C
 function buildDetailDto(db: Database.Database, c: Collection, base: string, nowMs: number): CollectionDetailDto {
   const roster = getRoster(db, c.id);
   const departments: RosterDeptDto[] = roster.map((r) => ({
-    id: r.id, name: r.name, responded: r.responded, file_count: r.file_count,
-    submitted_at: r.submitted_at, note: r.note, folder_node_id: r.folder_node_id,
+    id: r.id,
+    name: r.name,
+    responded: r.responded,
+    file_count: r.file_count,
+    submitted_at: r.submitted_at,
+    note: r.note,
+    folder_node_id: r.folder_node_id,
   }));
   let template: { node_id: number; name: string } | null = null;
   if (c.template_node_id !== null) {
-    const t = db.prepare('SELECT name FROM nodes WHERE id = @id').get({ id: c.template_node_id }) as { name: string } | undefined;
+    const t = db.prepare('SELECT name FROM nodes WHERE id = @id').get({ id: c.template_node_id }) as
+      { name: string } | undefined;
     if (t) template = { node_id: c.template_node_id, name: t.name };
   }
   return {
-    id: c.id, token: c.token, title: c.title,
-    is_active: !!c.is_active, has_password: c.password_hash !== null, has_template: c.template_node_id !== null,
-    deadline_at: c.deadline_at, created_at: c.created_at,
+    id: c.id,
+    token: c.token,
+    title: c.title,
+    is_active: !!c.is_active,
+    has_password: c.password_hash !== null,
+    has_template: c.template_node_id !== null,
+    deadline_at: c.deadline_at,
+    created_at: c.created_at,
     status: collectionStatus(c, nowMs),
     department_count: departments.length,
     responded_count: departments.filter((d) => d.responded).length,
-    departments, template,
+    departments,
+    template,
     url: `${base}/c/${c.token}`,
   };
 }
@@ -1296,51 +1441,83 @@ export default async function collectionsRoutes(app: FastifyInstance, deps: Coll
 
   app.post('/api/collections', { preHandler: guards.requireAuth }, async (req, reply) => {
     const parsed = createSchema.safeParse(req.body);
-    if (!parsed.success) { reply.code(400).send({ error: 'invalid_body' }); return; }
+    if (!parsed.success) {
+      reply.code(400).send({ error: 'invalid_body' });
+      return;
+    }
     const uid = req.user!.id;
     if (normalizeDepartments(parsed.data.departments).length === 0) {
       reply.code(400).send({ code: 'no_departments' });
       return;
     }
     try {
-      const c = await createCollection(db, uid, {
-        title: parsed.data.title,
-        departments: parsed.data.departments,
-        templateNodeId: parsed.data.template_node_id ?? null,
-        password: parsed.data.password ?? null,
-        deadlineAt: parsed.data.deadline_at ?? null,
-      }, now());
-      writeAudit(db, {
-        actorId: uid, action: 'collection_created', target: c.token,
-        detail: JSON.stringify({ collection_id: c.id, departments: normalizeDepartments(parsed.data.departments).length }),
-      }, now);
+      const c = await createCollection(
+        db,
+        uid,
+        {
+          title: parsed.data.title,
+          departments: parsed.data.departments,
+          templateNodeId: parsed.data.template_node_id ?? null,
+          password: parsed.data.password ?? null,
+          deadlineAt: parsed.data.deadline_at ?? null,
+        },
+        now(),
+      );
+      writeAudit(
+        db,
+        {
+          actorId: uid,
+          action: 'collection_created',
+          target: c.token,
+          detail: JSON.stringify({
+            collection_id: c.id,
+            departments: normalizeDepartments(parsed.data.departments).length,
+          }),
+        },
+        now,
+      );
       reply.code(201).send(buildDetailDto(db, c, base, now()));
     } catch (e) {
       const msg = e instanceof Error ? e.message : '';
-      if (msg === 'bad_template') { reply.code(400).send({ code: 'bad_template' }); return; }
-      if (msg === 'no_departments' || msg === 'invalid_title') { reply.code(400).send({ error: 'invalid_body' }); return; }
+      if (msg === 'bad_template') {
+        reply.code(400).send({ code: 'bad_template' });
+        return;
+      }
+      if (msg === 'no_departments' || msg === 'invalid_title') {
+        reply.code(400).send({ error: 'invalid_body' });
+        return;
+      }
       throw e;
     }
   });
 
   app.get('/api/collections/:id', { preHandler: guards.requireAuth }, async (req, reply) => {
     const id = parseIdParam(req);
-    if (id === null) { reply.code(404).send({ error: 'not_found' }); return; }
+    if (id === null) {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
     const uid = req.user!.id;
     const c = getCollection(db, uid, id);
-    if (!c) { reply.code(404).send({ error: 'not_found' }); return; }
+    if (!c) {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
     reply.code(200).send(buildDetailDto(db, c, base, now()));
   });
 }
 ```
 
-  Then **wire it into `app.ts`** — add the import beside the other route imports:
+Then **wire it into `app.ts`** — add the import beside the other route imports:
+
 ```ts
 import collectionsRoutes from './routes/collections.js';
 ```
-  and register it inside `registerRoutes`, right after the `sharesRoutes` registration (the shared `blobStore` is in scope there):
+
+and register it inside `registerRoutes`, right after the `sharesRoutes` registration (the shared `blobStore` is in scope there):
+
 ```ts
-  await app.register(collectionsRoutes, { db: deps.db, now: deps.now, guards, config: deps.config, blobStore });
+await app.register(collectionsRoutes, { db: deps.db, now: deps.now, guards, config: deps.config, blobStore });
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1362,10 +1539,12 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ### Task 6: `routes/collections.ts` — PATCH and DELETE a collection
 
 **Files:**
+
 - Modify: `server/src/routes/collections.ts` (add PATCH + DELETE handlers + patch schema)
 - Test: `server/test/routes/collections.test.ts` (add cases)
 
 **Interfaces:**
+
 - Consumes: `setCollectionState`, `deleteCollection`, `getCollection` (Task 3), `writeAudit`, `blobStore.deleteBlob`.
 - Produces: `PATCH /api/collections/:id` → `CollectionDetailDto`; `DELETE /api/collections/:id` → `{ ok: true }`.
 
@@ -1373,10 +1552,15 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 ```ts
 async function mkCollection(built: FastifyInstance, session: string, csrf: string, payload: any) {
-  return (await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf }, payload,
-  })).json();
+  return (
+    await built.inject({
+      method: 'POST',
+      url: '/api/collections',
+      cookies: { mirsal_session: session },
+      headers: { 'x-csrf-token': csrf },
+      payload,
+    })
+  ).json();
 }
 
 test('PATCH is_active:false -> closed; past deadline -> expired; title updates', async () => {
@@ -1386,16 +1570,20 @@ test('PATCH is_active:false -> closed; past deadline -> expired; title updates',
   const c = await mkCollection(built, session, csrf, { title: 'Old', departments: ['A'] });
 
   const stop = await built.inject({
-    method: 'PATCH', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'PATCH',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { is_active: false, title: 'New' },
   });
   expect(stop.statusCode).toBe(200);
   expect(stop.json()).toMatchObject({ status: 'closed', title: 'New' });
 
   const exp = await built.inject({
-    method: 'PATCH', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'PATCH',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { is_active: true, deadline_at: NOW - 1000 },
   });
   expect(exp.json()).toMatchObject({ status: 'expired' });
@@ -1409,15 +1597,29 @@ test('PATCH with an empty body -> 400; foreign collection -> 404', async () => {
   const b = await login(built, 'bob', 'pw');
   const c = await mkCollection(built, a.session, a.csrf, { title: 'T', departments: ['A'] });
 
-  expect((await built.inject({
-    method: 'PATCH', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: a.session }, headers: { 'x-csrf-token': a.csrf }, payload: {},
-  })).statusCode).toBe(400);
+  expect(
+    (
+      await built.inject({
+        method: 'PATCH',
+        url: `/api/collections/${c.id}`,
+        cookies: { mirsal_session: a.session },
+        headers: { 'x-csrf-token': a.csrf },
+        payload: {},
+      })
+    ).statusCode,
+  ).toBe(400);
 
-  expect((await built.inject({
-    method: 'PATCH', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: b.session }, headers: { 'x-csrf-token': b.csrf }, payload: { is_active: false },
-  })).statusCode).toBe(404);
+  expect(
+    (
+      await built.inject({
+        method: 'PATCH',
+        url: `/api/collections/${c.id}`,
+        cookies: { mirsal_session: b.session },
+        headers: { 'x-csrf-token': b.csrf },
+        payload: { is_active: false },
+      })
+    ).statusCode,
+  ).toBe(404);
 });
 
 test('DELETE removes the collection (gone from list, folder node gone); 2nd DELETE -> 404', async () => {
@@ -1428,18 +1630,24 @@ test('DELETE removes the collection (gone from list, folder node gone); 2nd DELE
   const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
 
   const del = await built.inject({
-    method: 'DELETE', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'DELETE',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
   });
   expect(del.statusCode).toBe(200);
   expect(db!.prepare('SELECT COUNT(*) c FROM nodes WHERE id=?').get(folderId)).toMatchObject({ c: 0 });
 
-  const list = (await built.inject({ method: 'GET', url: '/api/collections', cookies: { mirsal_session: session } })).json();
+  const list = (
+    await built.inject({ method: 'GET', url: '/api/collections', cookies: { mirsal_session: session } })
+  ).json();
   expect(list.some((x: any) => x.id === c.id)).toBe(false);
 
   const again = await built.inject({
-    method: 'DELETE', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'DELETE',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
   });
   expect(again.statusCode).toBe(404);
 });
@@ -1463,44 +1671,64 @@ const patchSchema = z
     is_active: z.boolean().optional(),
   })
   .refine(
-    (v) => v.title !== undefined || v.password !== undefined || v.deadline_at !== undefined || v.is_active !== undefined,
-    { message: 'at least one field is required' }
+    (v) =>
+      v.title !== undefined || v.password !== undefined || v.deadline_at !== undefined || v.is_active !== undefined,
+    { message: 'at least one field is required' },
   );
 ```
 
-  and add both handlers inside `collectionsRoutes` (after the `GET :id` handler):
+and add both handlers inside `collectionsRoutes` (after the `GET :id` handler):
 
 ```ts
-  app.patch('/api/collections/:id', { preHandler: guards.requireAuth }, async (req, reply) => {
-    const id = parseIdParam(req);
-    if (id === null) { reply.code(404).send({ error: 'not_found' }); return; }
-    const parsed = patchSchema.safeParse(req.body);
-    if (!parsed.success) { reply.code(400).send({ error: 'invalid_body' }); return; }
-    const uid = req.user!.id;
+app.patch('/api/collections/:id', { preHandler: guards.requireAuth }, async (req, reply) => {
+  const id = parseIdParam(req);
+  if (id === null) {
+    reply.code(404).send({ error: 'not_found' });
+    return;
+  }
+  const parsed = patchSchema.safeParse(req.body);
+  if (!parsed.success) {
+    reply.code(400).send({ error: 'invalid_body' });
+    return;
+  }
+  const uid = req.user!.id;
 
-    const patch: SetCollectionStatePatch = {};
-    if (parsed.data.title !== undefined) patch.title = parsed.data.title;
-    if (parsed.data.is_active !== undefined) patch.isActive = parsed.data.is_active;
-    if (parsed.data.password !== undefined) patch.password = parsed.data.password;
-    if (parsed.data.deadline_at !== undefined) patch.deadlineAt = parsed.data.deadline_at;
+  const patch: SetCollectionStatePatch = {};
+  if (parsed.data.title !== undefined) patch.title = parsed.data.title;
+  if (parsed.data.is_active !== undefined) patch.isActive = parsed.data.is_active;
+  if (parsed.data.password !== undefined) patch.password = parsed.data.password;
+  if (parsed.data.deadline_at !== undefined) patch.deadlineAt = parsed.data.deadline_at;
 
-    const updated = await setCollectionState(db, uid, id, patch, now());
-    if (!updated) { reply.code(404).send({ error: 'not_found' }); return; }
-    reply.code(200).send(buildDetailDto(db, updated, base, now()));
-  });
+  const updated = await setCollectionState(db, uid, id, patch, now());
+  if (!updated) {
+    reply.code(404).send({ error: 'not_found' });
+    return;
+  }
+  reply.code(200).send(buildDetailDto(db, updated, base, now()));
+});
 
-  app.delete('/api/collections/:id', { preHandler: guards.requireAuth }, async (req, reply) => {
-    const id = parseIdParam(req);
-    if (id === null) { reply.code(404).send({ error: 'not_found' }); return; }
-    const uid = req.user!.id;
-    const c = getCollection(db, uid, id);
-    if (!c) { reply.code(404).send({ error: 'not_found' }); return; }
+app.delete('/api/collections/:id', { preHandler: guards.requireAuth }, async (req, reply) => {
+  const id = parseIdParam(req);
+  if (id === null) {
+    reply.code(404).send({ error: 'not_found' });
+    return;
+  }
+  const uid = req.user!.id;
+  const c = getCollection(db, uid, id);
+  if (!c) {
+    reply.code(404).send({ error: 'not_found' });
+    return;
+  }
 
-    const { storagePaths } = deleteCollection(db, uid, id);
-    for (const p of storagePaths) blobStore.deleteBlob(p);
-    writeAudit(db, { actorId: uid, action: 'collection_deleted', target: c.token, detail: JSON.stringify({ collection_id: id }) }, now);
-    reply.code(200).send({ ok: true });
-  });
+  const { storagePaths } = deleteCollection(db, uid, id);
+  for (const p of storagePaths) blobStore.deleteBlob(p);
+  writeAudit(
+    db,
+    { actorId: uid, action: 'collection_deleted', target: c.token, detail: JSON.stringify({ collection_id: id }) },
+    now,
+  );
+  reply.code(200).send({ ok: true });
+});
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -1522,10 +1750,12 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ### Task 7: `routes/collections.ts` — add / remove a department
 
 **Files:**
+
 - Modify: `server/src/routes/collections.ts` (two handlers + add-dept schema)
 - Test: `server/test/routes/collections.test.ts` (add cases)
 
 **Interfaces:**
+
 - Consumes: `addDepartment`, `removeDepartment`, `DuplicateDepartmentError` (Task 4).
 - Produces: `POST /api/collections/:id/departments` → `201 { id, name, position }`; `DELETE /api/collections/:id/departments/:deptId` → `{ ok: true }` / `409 { code: 'has_response' }` / `409 { code: 'duplicate' }`.
 
@@ -1541,22 +1771,31 @@ test('POST department -> 201; duplicate -> 409; foreign collection -> 404', asyn
   const c = await mkCollection(built, a.session, a.csrf, { title: 'T', departments: ['A'] });
 
   const add = await built.inject({
-    method: 'POST', url: `/api/collections/${c.id}/departments`,
-    cookies: { mirsal_session: a.session }, headers: { 'x-csrf-token': a.csrf }, payload: { name: 'B' },
+    method: 'POST',
+    url: `/api/collections/${c.id}/departments`,
+    cookies: { mirsal_session: a.session },
+    headers: { 'x-csrf-token': a.csrf },
+    payload: { name: 'B' },
   });
   expect(add.statusCode).toBe(201);
   expect(add.json()).toMatchObject({ name: 'B', position: 1 });
 
   const dup = await built.inject({
-    method: 'POST', url: `/api/collections/${c.id}/departments`,
-    cookies: { mirsal_session: a.session }, headers: { 'x-csrf-token': a.csrf }, payload: { name: 'A' },
+    method: 'POST',
+    url: `/api/collections/${c.id}/departments`,
+    cookies: { mirsal_session: a.session },
+    headers: { 'x-csrf-token': a.csrf },
+    payload: { name: 'A' },
   });
   expect(dup.statusCode).toBe(409);
   expect(dup.json()).toMatchObject({ code: 'duplicate' });
 
   const foreign = await built.inject({
-    method: 'POST', url: `/api/collections/${c.id}/departments`,
-    cookies: { mirsal_session: b.session }, headers: { 'x-csrf-token': b.csrf }, payload: { name: 'Z' },
+    method: 'POST',
+    url: `/api/collections/${c.id}/departments`,
+    cookies: { mirsal_session: b.session },
+    headers: { 'x-csrf-token': b.csrf },
+    payload: { name: 'Z' },
   });
   expect(foreign.statusCode).toBe(404);
 });
@@ -1566,26 +1805,42 @@ test('DELETE department -> 200; a department with a response -> 409 has_response
   const uid = await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
   const c = await mkCollection(built, session, csrf, { title: 'T', departments: ['A', 'B'] });
-  const depts = db!.prepare('SELECT id, name FROM collection_departments WHERE collection_id=? ORDER BY position').all(c.id) as { id: number; name: string }[];
+  const depts = db!
+    .prepare('SELECT id, name FROM collection_departments WHERE collection_id=? ORDER BY position')
+    .all(c.id) as { id: number; name: string }[];
   const b = depts.find((d) => d.name === 'B')!;
 
   const del = await built.inject({
-    method: 'DELETE', url: `/api/collections/${c.id}/departments/${b.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'DELETE',
+    url: `/api/collections/${c.id}/departments/${b.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
   });
   expect(del.statusCode).toBe(200);
 
   // Give dept A a response, then try to delete it.
   const a = depts.find((d) => d.name === 'A')!;
   const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
-  const sub = Number(db!.prepare(`INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
-    VALUES (?,?,'folder','A',0,?,?)`).run(uid, folderId, NOW, NOW).lastInsertRowid);
-  db!.prepare(`INSERT INTO collection_responses(collection_id,department_id,folder_node_id,note,submitted_at)
-    VALUES (?,?,?,NULL,?)`).run(c.id, a.id, sub, NOW);
+  const sub = Number(
+    db!
+      .prepare(
+        `INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
+    VALUES (?,?,'folder','A',0,?,?)`,
+      )
+      .run(uid, folderId, NOW, NOW).lastInsertRowid,
+  );
+  db!
+    .prepare(
+      `INSERT INTO collection_responses(collection_id,department_id,folder_node_id,note,submitted_at)
+    VALUES (?,?,?,NULL,?)`,
+    )
+    .run(c.id, a.id, sub, NOW);
 
   const blocked = await built.inject({
-    method: 'DELETE', url: `/api/collections/${c.id}/departments/${a.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'DELETE',
+    url: `/api/collections/${c.id}/departments/${a.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
   });
   expect(blocked.statusCode).toBe(409);
   expect(blocked.json()).toMatchObject({ code: 'has_response' });
@@ -1603,37 +1858,61 @@ Expected: FAIL — department routes 404.
 const addDeptSchema = z.object({ name: z.string().min(1).max(200) });
 ```
 
-  and the two handlers inside `collectionsRoutes` (after DELETE collection):
+and the two handlers inside `collectionsRoutes` (after DELETE collection):
 
 ```ts
-  app.post('/api/collections/:id/departments', { preHandler: guards.requireAuth }, async (req, reply) => {
-    const id = parseIdParam(req);
-    if (id === null) { reply.code(404).send({ error: 'not_found' }); return; }
-    const parsed = addDeptSchema.safeParse(req.body);
-    if (!parsed.success) { reply.code(400).send({ error: 'invalid_body' }); return; }
-    const uid = req.user!.id;
-    try {
-      const dept = addDepartment(db, uid, id, parsed.data.name, now());
-      reply.code(201).send({ id: dept.id, name: dept.name, position: dept.position });
-    } catch (e) {
-      if (e instanceof DuplicateDepartmentError) { reply.code(409).send({ code: 'duplicate' }); return; }
-      const msg = e instanceof Error ? e.message : '';
-      if (msg === 'not_found') { reply.code(404).send({ error: 'not_found' }); return; }
-      if (msg === 'invalid_name') { reply.code(400).send({ error: 'invalid_body' }); return; }
-      throw e;
+app.post('/api/collections/:id/departments', { preHandler: guards.requireAuth }, async (req, reply) => {
+  const id = parseIdParam(req);
+  if (id === null) {
+    reply.code(404).send({ error: 'not_found' });
+    return;
+  }
+  const parsed = addDeptSchema.safeParse(req.body);
+  if (!parsed.success) {
+    reply.code(400).send({ error: 'invalid_body' });
+    return;
+  }
+  const uid = req.user!.id;
+  try {
+    const dept = addDepartment(db, uid, id, parsed.data.name, now());
+    reply.code(201).send({ id: dept.id, name: dept.name, position: dept.position });
+  } catch (e) {
+    if (e instanceof DuplicateDepartmentError) {
+      reply.code(409).send({ code: 'duplicate' });
+      return;
     }
-  });
+    const msg = e instanceof Error ? e.message : '';
+    if (msg === 'not_found') {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
+    if (msg === 'invalid_name') {
+      reply.code(400).send({ error: 'invalid_body' });
+      return;
+    }
+    throw e;
+  }
+});
 
-  app.delete('/api/collections/:id/departments/:deptId', { preHandler: guards.requireAuth }, async (req, reply) => {
-    const id = parseIdParam(req, 'id');
-    const deptId = parseIdParam(req, 'deptId');
-    if (id === null || deptId === null) { reply.code(404).send({ error: 'not_found' }); return; }
-    const uid = req.user!.id;
-    const result = removeDepartment(db, uid, id, deptId);
-    if (result === 'not_found') { reply.code(404).send({ error: 'not_found' }); return; }
-    if (result === 'has_response') { reply.code(409).send({ code: 'has_response' }); return; }
-    reply.code(200).send({ ok: true });
-  });
+app.delete('/api/collections/:id/departments/:deptId', { preHandler: guards.requireAuth }, async (req, reply) => {
+  const id = parseIdParam(req, 'id');
+  const deptId = parseIdParam(req, 'deptId');
+  if (id === null || deptId === null) {
+    reply.code(404).send({ error: 'not_found' });
+    return;
+  }
+  const uid = req.user!.id;
+  const result = removeDepartment(db, uid, id, deptId);
+  if (result === 'not_found') {
+    reply.code(404).send({ error: 'not_found' });
+    return;
+  }
+  if (result === 'has_response') {
+    reply.code(409).send({ code: 'has_response' });
+    return;
+  }
+  reply.code(200).send({ ok: true });
+});
 ```
 
 - [ ] **Step 4: Run test to verify it passes**

@@ -34,7 +34,7 @@ function seedUser(): number {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, created_at, updated_at)
-       VALUES (?, 'x', 'user', 1, 0, ?, ?)`
+       VALUES (?, 'x', 'user', 1, 0, ?, ?)`,
     )
     .run(`user-${Math.random()}`, t, t);
   return Number(info.lastInsertRowid);
@@ -45,7 +45,7 @@ function insertFile(ownerId: number, parentId: number, name: string, now: number
   const info = db!
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
-       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @now, @now)`
+       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @now, @now)`,
     )
     .run({ ownerId, parentId, name, now });
   return db!.prepare('SELECT * FROM nodes WHERE id = @id').get({ id: info.lastInsertRowid }) as Node;

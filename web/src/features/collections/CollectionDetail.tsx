@@ -89,13 +89,7 @@ export default function CollectionDetail() {
 
 /* ── The loaded console: header, controls, edit, rosters, delete ────────── */
 
-function Detail({
-  collection,
-  onDeleted,
-}: {
-  collection: CollectionDetailDto;
-  onDeleted: () => void;
-}) {
+function Detail({ collection, onDeleted }: { collection: CollectionDetailDto; onDeleted: () => void }) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const patch = usePatchCollection();
@@ -112,7 +106,7 @@ function Detail({
             message: t(next ? 'collections.toast.reopened' : 'collections.toast.closed'),
           }),
         onError: () => toast({ kind: 'error', message: t('collections.toast.error') }),
-      }
+      },
     );
   }
 
@@ -142,10 +136,7 @@ function Detail({
           })}
         </p>
         {collection.responded_count > 0 && (
-          <a
-            href={zipUrl(collection.folder_node_id)}
-            className="inline-flex w-fit items-center gap-1 text-teal"
-          >
+          <a href={zipUrl(collection.folder_node_id)} className="inline-flex w-fit items-center gap-1 text-teal">
             <DownloadArrow size={16} />
             {t('collections.detail.downloadAllZip')}
           </a>
@@ -257,18 +248,13 @@ function RespondedRow({ dept }: { dept: RosterDeptDto }) {
           {expanded ? t('collections.detail.hideFiles') : t('collections.detail.showFiles')}
         </button>
         {dept.folder_node_id != null && (
-          <a
-            href={zipUrl(dept.folder_node_id)}
-            className="inline-flex items-center gap-1 text-teal"
-          >
+          <a href={zipUrl(dept.folder_node_id)} className="inline-flex items-center gap-1 text-teal">
             <DownloadArrow size={16} />
             {t('collections.detail.downloadDeptZip')}
           </a>
         )}
       </div>
-      {expanded && dept.folder_node_id != null && (
-        <DepartmentFiles folderNodeId={dept.folder_node_id} />
-      )}
+      {expanded && dept.folder_node_id != null && <DepartmentFiles folderNodeId={dept.folder_node_id} />}
     </li>
   );
 }
@@ -281,19 +267,26 @@ function DepartmentFiles({ folderNodeId }: { folderNodeId: number }) {
     queryFn: () => listNodes(folderNodeId),
   });
   if (isPending) return <p className="font-body text-xs text-ink-2">{t('collections.detail.filesLoading')}</p>;
-  if (isError) return <p role="alert" className="font-body text-xs text-clay">{t('collections.detail.filesError')}</p>;
+  if (isError)
+    return (
+      <p role="alert" className="font-body text-xs text-clay">
+        {t('collections.detail.filesError')}
+      </p>
+    );
   return (
     <ul className="mt-1 flex flex-col gap-1">
-      {(data ?? []).filter((n) => n.kind === 'file').map((f) => (
-        <li key={f.id} className="flex items-center justify-between gap-2">
-          <bdi className="min-w-0 truncate font-body text-sm text-ink">{f.name}</bdi>
-          <span className="shrink-0 font-mono text-xs text-ink-2">{formatBytes(f.size_bytes)}</span>
-          <a href={downloadUrl(f.id)} className="inline-flex shrink-0 items-center gap-1 text-teal">
-            <DownloadArrow size={16} />
-            {t('collections.detail.download')}
-          </a>
-        </li>
-      ))}
+      {(data ?? [])
+        .filter((n) => n.kind === 'file')
+        .map((f) => (
+          <li key={f.id} className="flex items-center justify-between gap-2">
+            <bdi className="min-w-0 truncate font-body text-sm text-ink">{f.name}</bdi>
+            <span className="shrink-0 font-mono text-xs text-ink-2">{formatBytes(f.size_bytes)}</span>
+            <a href={downloadUrl(f.id)} className="inline-flex shrink-0 items-center gap-1 text-teal">
+              <DownloadArrow size={16} />
+              {t('collections.detail.download')}
+            </a>
+          </li>
+        ))}
     </ul>
   );
 }
@@ -314,13 +307,10 @@ function MissingRow({ collectionId, dept }: { collectionId: number; dept: Roster
           const code = collectionErrorCode(err);
           toast({
             kind: 'error',
-            message:
-              code === 'has_response'
-                ? t('collections.detail.removeBlocked')
-                : t('collections.toast.error'),
+            message: code === 'has_response' ? t('collections.detail.removeBlocked') : t('collections.toast.error'),
           });
         },
-      }
+      },
     );
   }
 
@@ -361,13 +351,10 @@ function AddDepartmentForm({ collectionId }: { collectionId: number }) {
           const code = collectionErrorCode(err);
           toast({
             kind: 'error',
-            message:
-              code === 'duplicate'
-                ? t('collections.detail.duplicateDepartment')
-                : t('collections.toast.error'),
+            message: code === 'duplicate' ? t('collections.detail.duplicateDepartment') : t('collections.toast.error'),
           });
         },
-      }
+      },
     );
   }
 
@@ -410,7 +397,7 @@ function TitleSection({ collection }: { collection: CollectionDetailDto }) {
       {
         onSuccess: () => toast({ kind: 'success', message: t('collections.toast.titleUpdated') }),
         onError: () => toast({ kind: 'error', message: t('collections.toast.error') }),
-      }
+      },
     );
   }
 
@@ -459,7 +446,7 @@ function PasswordSection({ collection }: { collection: CollectionDetailDto }) {
           setValue('');
         },
         onError: () => toast({ kind: 'error', message: t('collections.toast.error') }),
-      }
+      },
     );
   }
 
@@ -469,7 +456,7 @@ function PasswordSection({ collection }: { collection: CollectionDetailDto }) {
       {
         onSuccess: () => toast({ kind: 'success', message: t('collections.toast.passwordCleared') }),
         onError: () => toast({ kind: 'error', message: t('collections.toast.error') }),
-      }
+      },
     );
   }
 
@@ -519,7 +506,7 @@ function DeadlineSection({ collection }: { collection: CollectionDetailDto }) {
   const patch = usePatchCollection();
   const inputId = useId();
   const [value, setValue] = useState(
-    collection.deadline_at != null ? utcMsToDamascusInput(collection.deadline_at) : ''
+    collection.deadline_at != null ? utcMsToDamascusInput(collection.deadline_at) : '',
   );
   const [error, setError] = useState<string | null>(null);
 
@@ -540,7 +527,7 @@ function DeadlineSection({ collection }: { collection: CollectionDetailDto }) {
       {
         onSuccess: () => toast({ kind: 'success', message: t('collections.toast.deadlineUpdated') }),
         onError: () => toast({ kind: 'error', message: t('collections.toast.error') }),
-      }
+      },
     );
   }
 
@@ -554,7 +541,7 @@ function DeadlineSection({ collection }: { collection: CollectionDetailDto }) {
           setValue('');
         },
         onError: () => toast({ kind: 'error', message: t('collections.toast.error') }),
-      }
+      },
     );
   }
 
@@ -606,13 +593,7 @@ function DeadlineSection({ collection }: { collection: CollectionDetailDto }) {
 
 /* ── Delete (destructive, confirmed) → navigate back to the register ────── */
 
-function DeleteSection({
-  collection,
-  onDeleted,
-}: {
-  collection: CollectionDetailDto;
-  onDeleted: () => void;
-}) {
+function DeleteSection({ collection, onDeleted }: { collection: CollectionDetailDto; onDeleted: () => void }) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const del = useDeleteCollection();

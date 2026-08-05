@@ -19,8 +19,7 @@ export class DuplicateDepartmentError extends Error {
 function isUniqueConstraintError(e: unknown): boolean {
   return (
     e instanceof Error &&
-    ((e as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT_UNIQUE' ||
-      /UNIQUE constraint failed/i.test(e.message))
+    ((e as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint failed/i.test(e.message))
   );
 }
 
@@ -41,7 +40,7 @@ export function addDepartment(
   ownerId: number,
   collectionId: number,
   name: string,
-  now: number
+  now: number,
 ): Department {
   const owned = db
     .prepare('SELECT id FROM collections WHERE id = @collectionId AND owner_id = @ownerId')
@@ -53,7 +52,9 @@ export function addDepartment(
 
   const pos = (
     db
-      .prepare('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM collection_departments WHERE collection_id = @collectionId')
+      .prepare(
+        'SELECT COALESCE(MAX(position), -1) + 1 AS p FROM collection_departments WHERE collection_id = @collectionId',
+      )
       .get({ collectionId }) as { p: number }
   ).p;
 
@@ -61,10 +62,12 @@ export function addDepartment(
     const info = db
       .prepare(
         `INSERT INTO collection_departments(collection_id, name, position, created_at)
-         VALUES (@collectionId, @name, @position, @now)`
+         VALUES (@collectionId, @name, @position, @now)`,
       )
       .run({ collectionId, name: trimmed, position: pos, now });
-    return db.prepare('SELECT * FROM collection_departments WHERE id = @id').get({ id: Number(info.lastInsertRowid) }) as Department;
+    return db
+      .prepare('SELECT * FROM collection_departments WHERE id = @id')
+      .get({ id: Number(info.lastInsertRowid) }) as Department;
   } catch (e) {
     if (isUniqueConstraintError(e)) throw new DuplicateDepartmentError();
     throw e;
@@ -83,13 +86,13 @@ export function removeDepartment(
   db: Database.Database,
   ownerId: number,
   collectionId: number,
-  departmentId: number
+  departmentId: number,
 ): RemoveDepartmentResult {
   const dept = db
     .prepare(
       `SELECT d.id FROM collection_departments d
        JOIN collections c ON c.id = d.collection_id
-       WHERE d.id = @departmentId AND d.collection_id = @collectionId AND c.owner_id = @ownerId`
+       WHERE d.id = @departmentId AND d.collection_id = @collectionId AND c.owner_id = @ownerId`,
     )
     .get({ departmentId, collectionId, ownerId });
   if (!dept) return 'not_found';
@@ -130,11 +133,16 @@ export function getRoster(db: Database.Database, collectionId: number): RosterEn
        FROM collection_departments d
        LEFT JOIN collection_responses r ON r.department_id = d.id AND r.collection_id = d.collection_id
        WHERE d.collection_id = @collectionId
-       ORDER BY d.position ASC, d.id ASC`
+       ORDER BY d.position ASC, d.id ASC`,
     )
     .all({ collectionId }) as Array<{
-    id: number; name: string; position: number;
-    folder_node_id: number | null; submitted_at: number | null; note: string | null; file_count: number;
+    id: number;
+    name: string;
+    position: number;
+    folder_node_id: number | null;
+    submitted_at: number | null;
+    note: string | null;
+    file_count: number;
   }>;
 
   return rows.map((r) => ({

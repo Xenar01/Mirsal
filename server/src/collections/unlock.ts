@@ -24,7 +24,9 @@ export interface UnlockGate {
  */
 export function createUnlockGate(secret: string): UnlockGate {
   function sign(token: string, passwordHash: string | null, issuedAtStr: string): string {
-    return createHmac('sha256', secret).update(`${token}.${passwordHash ?? ''}.${issuedAtStr}`).digest('base64url');
+    return createHmac('sha256', secret)
+      .update(`${token}.${passwordHash ?? ''}.${issuedAtStr}`)
+      .digest('base64url');
   }
 
   function cookieValue(token: string, passwordHash: string | null, issuedAtMs: number): string {

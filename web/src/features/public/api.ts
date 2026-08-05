@@ -55,10 +55,7 @@ function tokenPath(token: string): string {
   return `${PUBLIC_BASE}/${encodeURIComponent(token)}`;
 }
 
-export async function fetchPublicMeta(
-  token: string,
-  opts?: { reveal?: boolean }
-): Promise<PublicMetaResult> {
+export async function fetchPublicMeta(token: string, opts?: { reveal?: boolean }): Promise<PublicMetaResult> {
   const res = await fetch(tokenPath(token), {
     // Until the recipient unlocks IN THIS page-load, omit the unlock cookie so a
     // still-valid cookie can't silently reveal a password share — the gate must
@@ -107,10 +104,7 @@ export async function fetchPublicList(token: string, path: number | null): Promi
 
 /** The result of a password-unlock attempt. `remaining` is the per-token attempts left (from the header), or null if unreadable. */
 export type UnlockResult =
-  | { kind: 'ok' }
-  | { kind: 'wrong'; remaining: number | null }
-  | { kind: 'rateLimited' }
-  | { kind: 'error' };
+  { kind: 'ok' } | { kind: 'wrong'; remaining: number | null } | { kind: 'rateLimited' } | { kind: 'error' };
 
 export async function unlockShare(token: string, password: string): Promise<UnlockResult> {
   const res = await fetch(`${tokenPath(token)}/unlock`, {

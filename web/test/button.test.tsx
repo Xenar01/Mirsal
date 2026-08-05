@@ -26,7 +26,7 @@ describe('Button', () => {
     rerender(
       <Button onClick={onClick} disabled>
         تم
-      </Button>
+      </Button>,
     );
     const btn = screen.getByRole('button', { name: 'تم' });
     expect(btn).toBeDisabled();

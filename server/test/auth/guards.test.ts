@@ -37,7 +37,7 @@ function seedUser(role: string): number {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, created_at, updated_at)
-       VALUES (?, 'x', ?, 1, 0, ?, ?)`
+       VALUES (?, 'x', ?, 1, 0, ?, ?)`,
     )
     .run(`user-${role}-${t}`, role, t, t);
   return Number(info.lastInsertRowid);

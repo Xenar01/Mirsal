@@ -76,14 +76,18 @@ export default function UsersTable() {
             <span>{t('admin.users.summary.count', { count: users.length })}</span>
             <span>
               {t('admin.users.summary.used')}{' '}
-              <bdi dir="ltr" className="font-mono text-ink">{formatBytes(totalUsed)}</bdi>
+              <bdi dir="ltr" className="font-mono text-ink">
+                {formatBytes(totalUsed)}
+              </bdi>
             </span>
             <span>
               {t('admin.users.summary.allocated')}{' '}
               {anyUnlimited ? (
                 <span className="text-ink">{t('admin.users.unlimited')}</span>
               ) : (
-                <bdi dir="ltr" className="font-mono text-ink">{formatBytes(totalQuota)}</bdi>
+                <bdi dir="ltr" className="font-mono text-ink">
+                  {formatBytes(totalQuota)}
+                </bdi>
               )}
             </span>
           </div>
@@ -162,9 +166,7 @@ export default function UsersTable() {
 function StateBadge({ active }: { active: boolean }) {
   const { t } = useTranslation();
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 ${active ? 'text-emerald' : 'text-ink-2'}`}
-    >
+    <span className={`inline-flex items-center gap-1.5 ${active ? 'text-emerald' : 'text-ink-2'}`}>
       {active ? <Stamp size={15} /> : <Pause size={15} />}
       <span>{active ? t('admin.users.state.active') : t('admin.users.state.inactive')}</span>
     </span>
@@ -206,10 +208,7 @@ function UsageCell({ user }: { user: AdminUserDto }) {
         {/* Brass is a decorative FILL here (§4.1 legal use); clay flags over-quota,
             but the numeric used/quota text below carries the same signal so it is
             never colour-only. */}
-        <div
-          className={`h-full ${over ? 'bg-clay' : 'bg-brass'}`}
-          style={{ inlineSize: `${pct}%` }}
-        />
+        <div className={`h-full ${over ? 'bg-clay' : 'bg-brass'}`} style={{ inlineSize: `${pct}%` }} />
       </div>
       <bdi dir="ltr" className={`font-mono text-xs ${over ? 'text-clay' : 'text-ink-2'}`}>
         {used} / {formatBytes(quota)}
@@ -268,15 +267,7 @@ function GuardedAction({
  * consumes). Shared verbatim between the desktop row and the mobile card — the
  * ONLY place this note is written; only the alignment class differs per layout.
  */
-function GuardReasonNote({
-  reasonId,
-  reason,
-  className,
-}: {
-  reasonId: string;
-  reason: string;
-  className?: string;
-}) {
+function GuardReasonNote({ reasonId, reason, className }: { reasonId: string; reason: string; className?: string }) {
   return (
     <p id={reasonId} className={`font-body text-xs text-ink-2 ${className ?? ''}`}>
       {reason}
@@ -375,12 +366,7 @@ function UserActionButtons({
       <button type="button" onClick={onLabel} className={ADMIN_ACTION}>
         {t('admin.users.action.label')}
       </button>
-      <GuardedAction
-        onAct={onDelete}
-        guardBlocked={guard.blocked}
-        reasonId={reasonId}
-        className={ADMIN_ACTION_DANGER}
-      >
+      <GuardedAction onAct={onDelete} guardBlocked={guard.blocked} reasonId={reasonId} className={ADMIN_ACTION_DANGER}>
         {t('admin.users.action.delete')}
       </GuardedAction>
       {/* Clearing space wipes files/shares but keeps the account, so it is
@@ -450,7 +436,7 @@ function UserRow({
             message: next ? t('admin.users.toast.activated') : t('admin.users.toast.deactivated'),
           }),
         onError: onMutError,
-      }
+      },
     );
   }
 
@@ -465,16 +451,13 @@ function UserRow({
             message: next === 'admin' ? t('admin.users.toast.promoted') : t('admin.users.toast.demoted'),
           }),
         onError: onMutError,
-      }
+      },
     );
   }
 
   if (variant === 'card') {
     return (
-      <div
-        data-testid={`user-card-${row.id}`}
-        className="rounded-[10px] border border-line bg-surface p-3"
-      >
+      <div data-testid={`user-card-${row.id}`} className="rounded-[10px] border border-line bg-surface p-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <bdi dir="ltr" className="block truncate font-mono text-ink">
@@ -528,9 +511,7 @@ function UserRow({
               onClearSpace={onClearSpace}
             />
           </div>
-          {guard.blocked && guardReason && (
-            <GuardReasonNote reasonId={reasonId} reason={guardReason} />
-          )}
+          {guard.blocked && guardReason && <GuardReasonNote reasonId={reasonId} reason={guardReason} />}
         </div>
       </div>
     );
@@ -555,9 +536,7 @@ function UserRow({
           <span className="font-body text-ink-2">{t('admin.users.noName')}</span>
         )}
       </td>
-      <td className="ps-3 pe-3 py-2 text-ink">
-        {isAdmin ? t('admin.users.role.admin') : t('admin.users.role.user')}
-      </td>
+      <td className="ps-3 pe-3 py-2 text-ink">{isAdmin ? t('admin.users.role.admin') : t('admin.users.role.user')}</td>
       <td className="ps-3 pe-3 py-2">
         <StateBadge active={active} />
       </td>
@@ -682,7 +661,7 @@ function QuotaModal({ user, onClose }: { user: AdminUserDto; onClose: () => void
           onClose();
         },
         onError: () => toast({ kind: 'error', message: t('admin.quota.error') }),
-      }
+      },
     );
   }
 
@@ -744,7 +723,7 @@ function LabelModal({ user, onClose }: { user: AdminUserDto; onClose: () => void
           onClose();
         },
         onError: () => toast({ kind: 'error', message: t('admin.label.error') }),
-      }
+      },
     );
   }
 
@@ -818,9 +797,7 @@ function DeleteUserModal({ user, onClose }: { user: AdminUserDto; onClose: () =>
         </>
       }
     >
-      <p className="font-body text-sm text-ink">
-        {t('admin.delete.body', { username: user.username })}
-      </p>
+      <p className="font-body text-sm text-ink">{t('admin.delete.body', { username: user.username })}</p>
     </Modal>
   );
 }
@@ -861,9 +838,7 @@ function ClearSpaceModal({ user, onClose }: { user: AdminUserDto; onClose: () =>
         </>
       }
     >
-      <p className="font-body text-sm text-ink">
-        {t('admin.clearSpace.body', { username: user.username })}
-      </p>
+      <p className="font-body text-sm text-ink">{t('admin.clearSpace.body', { username: user.username })}</p>
     </Modal>
   );
 }

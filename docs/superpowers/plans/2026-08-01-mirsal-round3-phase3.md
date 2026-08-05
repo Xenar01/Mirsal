@@ -48,14 +48,16 @@ Expected: all green (server 350/350, web 157/157 as of `62fb5ab`; counts may dif
 ## Task 1: Server — `POST /api/nodes/trash/empty` (empty the whole Trash)
 
 **Files:**
+
 - Modify: `server/src/routes/nodes.ts` (add one route inside `nodesRoutes`, after the existing `DELETE /api/nodes/:id` handler ~line 590)
 - Test: `server/test/routes/nodes.test.ts` (append tests at end of file)
 
 **Interfaces:**
+
 - Consumes: `permanentDelete(db, ownerId, nodeId): { freedBytes: number; storagePaths: string[] }` from `../nodes/trash.js` (already imported at line 22); `blobStore.deleteBlob(path)`; `writeAudit(db, { actorId, action, target }, now)`.
 - Produces: `POST /api/nodes/trash/empty` → `200 { freedBytes: number }`. Permanently deletes every **top-level** trashed node the caller owns (each such node's subtree cascades via `permanentDelete`). Idempotent: empty trash → `200 { freedBytes: 0 }`.
 
-**Why top-level only:** the same reason `GET /api/nodes/trash` lists only top-level trashed items — a node nested inside a trashed folder is stamped trashed in the same op, but its bytes already roll up into the ancestor. Iterating `permanentDelete` over the *top-level* trashed nodes deletes every trashed subtree exactly once (each top-level trashed node is an independent subtree, since its parent is not trashed).
+**Why top-level only:** the same reason `GET /api/nodes/trash` lists only top-level trashed items — a node nested inside a trashed folder is stamped trashed in the same op, but its bytes already roll up into the ancestor. Iterating `permanentDelete` over the _top-level_ trashed nodes deletes every trashed subtree exactly once (each top-level trashed node is an independent subtree, since its parent is not trashed).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -92,10 +94,21 @@ test('POST /api/nodes/trash/empty permanently deletes all trashed nodes, frees q
     data: Buffer.from('worldwide'),
   }); // 9
 
-  await built.inject({ method: 'POST', url: `/api/nodes/${folder.id}/trash`, cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf } });
-  await built.inject({ method: 'POST', url: `/api/nodes/${looseUp.body.id}/trash`, cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf } });
+  await built.inject({
+    method: 'POST',
+    url: `/api/nodes/${folder.id}/trash`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+  });
+  await built.inject({
+    method: 'POST',
+    url: `/api/nodes/${looseUp.body.id}/trash`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+  });
 
-  const usedBefore = (db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number }).used_bytes;
+  const usedBefore = (db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number })
+    .used_bytes;
   expect(usedBefore).toBe(6 + 5 + 9);
 
   const res = await built.inject({
@@ -108,13 +121,18 @@ test('POST /api/nodes/trash/empty permanently deletes all trashed nodes, frees q
   expect(res.json().freedBytes).toBe(5 + 9); // the two trashed subtrees, not the live file
 
   // Trash now empty; live file still listed.
-  const trashList = (await built.inject({ method: 'GET', url: '/api/nodes/trash', cookies: { mirsal_session: session } })).json();
+  const trashList = (
+    await built.inject({ method: 'GET', url: '/api/nodes/trash', cookies: { mirsal_session: session } })
+  ).json();
   expect(trashList).toEqual([]);
-  const rootList = (await built.inject({ method: 'GET', url: '/api/nodes', cookies: { mirsal_session: session } })).json() as Array<{ id: number }>;
+  const rootList = (
+    await built.inject({ method: 'GET', url: '/api/nodes', cookies: { mirsal_session: session } })
+  ).json() as Array<{ id: number }>;
   expect(rootList.some((n) => n.id === liveId)).toBe(true);
 
   // Quota dropped by exactly the trashed bytes; live file's blob still on disk.
-  const usedAfter = (db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number }).used_bytes;
+  const usedAfter = (db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number })
+    .used_bytes;
   expect(usedAfter).toBe(6);
   expect(fs.existsSync(path.join(storageDir!, String(uid), String(liveId)))).toBe(true);
 });
@@ -134,7 +152,7 @@ test('POST /api/nodes/trash/empty is a no-op 200 on an already-empty trash', asy
   expect(res.json().freedBytes).toBe(0);
 });
 
-test('POST /api/nodes/trash/empty is owner-scoped — never touches another user\'s trash', async () => {
+test("POST /api/nodes/trash/empty is owner-scoped — never touches another user's trash", async () => {
   const built = await makeApp();
   const aliceId = await seedUser('alice', 'pw');
   const bobId = await seedUser('bob', 'pw');
@@ -142,13 +160,29 @@ test('POST /api/nodes/trash/empty is owner-scoped — never touches another user
   const bob = await login(built, 'bob', 'pw');
 
   // Bob trashes a file.
-  const bobUp = await uploadFile(built, bob.session, bob.csrf, { parentId: rootIdFor(bobId), filename: 'b.txt', data: Buffer.from('bob') });
-  await built.inject({ method: 'POST', url: `/api/nodes/${bobUp.body.id}/trash`, cookies: { mirsal_session: bob.session }, headers: { 'x-csrf-token': bob.csrf } });
+  const bobUp = await uploadFile(built, bob.session, bob.csrf, {
+    parentId: rootIdFor(bobId),
+    filename: 'b.txt',
+    data: Buffer.from('bob'),
+  });
+  await built.inject({
+    method: 'POST',
+    url: `/api/nodes/${bobUp.body.id}/trash`,
+    cookies: { mirsal_session: bob.session },
+    headers: { 'x-csrf-token': bob.csrf },
+  });
 
   // Alice empties HER trash (empty) — Bob's trashed file must remain.
-  await built.inject({ method: 'POST', url: '/api/nodes/trash/empty', cookies: { mirsal_session: alice.session }, headers: { 'x-csrf-token': alice.csrf } });
+  await built.inject({
+    method: 'POST',
+    url: '/api/nodes/trash/empty',
+    cookies: { mirsal_session: alice.session },
+    headers: { 'x-csrf-token': alice.csrf },
+  });
 
-  const bobTrash = (await built.inject({ method: 'GET', url: '/api/nodes/trash', cookies: { mirsal_session: bob.session } })).json() as Array<{ id: number }>;
+  const bobTrash = (
+    await built.inject({ method: 'GET', url: '/api/nodes/trash', cookies: { mirsal_session: bob.session } })
+  ).json() as Array<{ id: number }>;
   expect(bobTrash.some((n) => n.id === bobUp.body.id)).toBe(true);
   expect(aliceId).not.toBe(bobId);
 });
@@ -164,46 +198,46 @@ Expected: FAIL — the route does not exist (404 → assertions fail).
 In `server/src/routes/nodes.ts`, add immediately **after** the `app.delete('/api/nodes/:id', …)` handler (ends ~line 590), still inside `nodesRoutes`:
 
 ```ts
-  app.post('/api/nodes/trash/empty', { preHandler: guards.requireAuth }, async (req, reply) => {
-    const uid = req.user!.id;
+app.post('/api/nodes/trash/empty', { preHandler: guards.requireAuth }, async (req, reply) => {
+  const uid = req.user!.id;
 
-    // Top-level trashed nodes only — the same shape GET /api/nodes/trash uses.
-    // Each is an independent subtree (its parent is not trashed), so
-    // permanentDelete over each deletes every trashed subtree exactly once;
-    // a file nested inside a trashed folder is removed by its ancestor's cascade.
-    const topLevel = db
-      .prepare(
-        `SELECT n.id FROM nodes n
+  // Top-level trashed nodes only — the same shape GET /api/nodes/trash uses.
+  // Each is an independent subtree (its parent is not trashed), so
+  // permanentDelete over each deletes every trashed subtree exactly once;
+  // a file nested inside a trashed folder is removed by its ancestor's cascade.
+  const topLevel = db
+    .prepare(
+      `SELECT n.id FROM nodes n
          WHERE n.owner_id = @uid AND n.trashed_at IS NOT NULL
            AND (n.parent_id IS NULL OR NOT EXISTS (
              SELECT 1 FROM nodes p WHERE p.id = n.parent_id AND p.trashed_at IS NOT NULL
-           ))`
-      )
-      .all({ uid }) as { id: number }[];
+           ))`,
+    )
+    .all({ uid }) as { id: number }[];
 
-    // Per-node transactions (permanentDelete opens its own) — never wrap in one
-    // outer transaction (better-sqlite3 forbids nesting).
-    let freedBytes = 0;
-    const storagePaths: string[] = [];
-    for (const { id } of topLevel) {
-      const result = permanentDelete(db, uid, id);
-      freedBytes += result.freedBytes;
-      storagePaths.push(...result.storagePaths);
-    }
+  // Per-node transactions (permanentDelete opens its own) — never wrap in one
+  // outer transaction (better-sqlite3 forbids nesting).
+  let freedBytes = 0;
+  const storagePaths: string[] = [];
+  for (const { id } of topLevel) {
+    const result = permanentDelete(db, uid, id);
+    freedBytes += result.freedBytes;
+    storagePaths.push(...result.storagePaths);
+  }
 
-    // Unlink blobs AFTER every commit (mirrors DELETE /api/nodes/:id): the rows
-    // and used_bytes are already gone, so a disk error here must not be mapped
-    // to a 404. Idempotent no-op when the trash was empty.
-    for (const p of storagePaths) {
-      blobStore.deleteBlob(p);
-    }
+  // Unlink blobs AFTER every commit (mirrors DELETE /api/nodes/:id): the rows
+  // and used_bytes are already gone, so a disk error here must not be mapped
+  // to a 404. Idempotent no-op when the trash was empty.
+  for (const p of storagePaths) {
+    blobStore.deleteBlob(p);
+  }
 
-    if (topLevel.length > 0) {
-      writeAudit(db, { actorId: uid, action: 'empty_trash', target: String(topLevel.length) }, now);
-    }
+  if (topLevel.length > 0) {
+    writeAudit(db, { actorId: uid, action: 'empty_trash', target: String(topLevel.length) }, now);
+  }
 
-    reply.code(200).send({ freedBytes });
-  });
+  reply.code(200).send({ freedBytes });
+});
 ```
 
 Note: `empty_trash` is deliberately **not** in the admin audit view's `AUDIT_TARGET_IS_ID` allowlist, so its `target` (a count) is displayed verbatim and never mis-resolved to a username — no admin-side change is needed.
@@ -231,6 +265,7 @@ git commit -m "feat(server): POST /api/nodes/trash/empty — empty the whole Tra
 ## Task 2: Web — empty-Trash button + `useEmptyTrash`
 
 **Files:**
+
 - Modify: `web/src/features/dashboard/api.ts` (add `emptyTrash`)
 - Modify: `web/src/features/dashboard/queries.ts` (add `useEmptyTrash`)
 - Modify: `web/src/features/dashboard/TrashView.tsx` (top-of-view button + confirm modal)
@@ -238,6 +273,7 @@ git commit -m "feat(server): POST /api/nodes/trash/empty — empty the whole Tra
 - Test: `web/test/dashboard.test.tsx` (append tests in the existing `TrashView` describe area)
 
 **Interfaces:**
+
 - Consumes: `apiPost` from `../../lib/api`; `useMutation`/`useQueryClient` + the existing `invalidateNodes(client)` (already invalidates `['nodes']` + `trashKey` + `meKey`); the existing `Modal` + `Button` (`variant="danger"`) components; `useToast`.
 - Produces: `emptyTrash(): Promise<{ freedBytes: number }>` (api); `useEmptyTrash()` mutation (queries); an "إفراغ سلة المهملات" button in `TrashView` shown only when `items.length > 0`.
 
@@ -249,7 +285,17 @@ Append inside `web/test/dashboard.test.tsx` (near the existing `describe('TrashV
 describe('TrashView — empty whole trash (#6)', () => {
   test('shows an empty-trash button only when the trash is non-empty, and calls the endpoint on confirm', async () => {
     const trashed: NodeDto[] = [
-      { id: 10, parent_id: 2, kind: 'file', name: 'old.txt', size_bytes: 5, mime_type: 'text/plain', auto_delete_at: null, created_at: NOW, updated_at: NOW },
+      {
+        id: 10,
+        parent_id: 2,
+        kind: 'file',
+        name: 'old.txt',
+        size_bytes: 5,
+        mime_type: 'text/plain',
+        auto_delete_at: null,
+        created_at: NOW,
+        updated_at: NOW,
+      },
     ];
     const calls: string[] = [];
     const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -367,26 +413,28 @@ import { useTrash, useRestoreNode, useDeleteNode, useEmptyTrash } from './querie
 2. In the `TrashView` component, add empty-trash confirm state next to `deleteTarget` (~line 28):
 
 ```ts
-  const [emptyOpen, setEmptyOpen] = useState(false);
+const [emptyOpen, setEmptyOpen] = useState(false);
 ```
 
 3. Replace the header `<h1>` block (~lines 40) so the button sits beside the title, shown only when there are items:
 
 ```tsx
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h1 className="font-display text-lg text-ink">{t('trash.title')}</h1>
-          {!isPending && !isError && items.length > 0 && (
-            <Button variant="danger" onClick={() => setEmptyOpen(true)}>
-              {t('trash.emptyAll')}
-            </Button>
-          )}
-        </div>
+<div className="flex flex-wrap items-center justify-between gap-3">
+  <h1 className="font-display text-lg text-ink">{t('trash.title')}</h1>
+  {!isPending && !isError && items.length > 0 && (
+    <Button variant="danger" onClick={() => setEmptyOpen(true)}>
+      {t('trash.emptyAll')}
+    </Button>
+  )}
+</div>
 ```
 
 4. Render the confirm modal next to the existing `ConfirmDeleteModal` (~line 58):
 
 ```tsx
-      {emptyOpen && <ConfirmEmptyModal onClose={() => setEmptyOpen(false)} />}
+{
+  emptyOpen && <ConfirmEmptyModal onClose={() => setEmptyOpen(false)} />;
+}
 ```
 
 5. Add the `ConfirmEmptyModal` component at the end of the file (mirrors `ConfirmDeleteModal`):
@@ -455,12 +503,14 @@ git commit -m "feat(web): empty-whole-Trash button + useEmptyTrash (#6)"
 ## Task 3: Web — sorting for files and folders
 
 **Files:**
+
 - Create: `web/src/features/dashboard/sort.ts` (pure sort helper)
 - Modify: `web/src/features/dashboard/DriveView.tsx` (sort state + sortable headers + mobile sort control in `Register`)
 - Modify: `web/src/i18n/ar.json` (keys under `dashboard.sort`)
 - Test: `web/test/dashboard.test.tsx` (a pure-helper `describe` + a render assertion)
 
 **Interfaces:**
+
 - Produces:
   - `type SortKey = 'name' | 'size' | 'date'`; `type SortDir = 'asc' | 'desc'`; `interface SortState { key: SortKey; dir: SortDir }`.
   - `sortNodes(nodes: NodeDto[], sort: SortState): NodeDto[]` — pure, returns a NEW array; **folders always before files**, then within each group by the chosen key/dir. Name via `Intl.Collator('ar', { numeric: true, sensitivity: 'base' })`; size via `size_bytes`; date via `updated_at`; ties break by name.
@@ -479,7 +529,15 @@ Then append a describe block:
 ```ts
 describe('sortNodes — folders first, then by key/direction (#7)', () => {
   const mk = (id: number, kind: 'folder' | 'file', name: string, size: number, updated: number): NodeDto => ({
-    id, parent_id: 1, kind, name, size_bytes: size, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: updated,
+    id,
+    parent_id: 1,
+    kind,
+    name,
+    size_bytes: size,
+    mime_type: null,
+    auto_delete_at: null,
+    created_at: 0,
+    updated_at: updated,
   });
   const nodes: NodeDto[] = [
     mk(1, 'file', 'banana', 30, 100),
@@ -582,6 +640,7 @@ In `web/src/features/dashboard/DriveView.tsx`:
 ```ts
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 ```
+
 ```ts
 import { sortNodes, type SortKey, type SortState } from './sort';
 ```
@@ -589,14 +648,14 @@ import { sortNodes, type SortKey, type SortState } from './sort';
 2. Inside `Register` (after the `useTranslation()` line ~243, before the `isPending` guard), add sort state + the sorted list:
 
 ```ts
-  const [sort, setSort] = useState<SortState>({ key: 'name', dir: 'asc' });
-  const sorted = useMemo(() => sortNodes(nodes, sort), [nodes, sort]);
+const [sort, setSort] = useState<SortState>({ key: 'name', dir: 'asc' });
+const sorted = useMemo(() => sortNodes(nodes, sort), [nodes, sort]);
 
-  function onSortKey(key: SortKey) {
-    setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
-  }
-  const ariaSort = (key: SortKey): 'ascending' | 'descending' | 'none' =>
-    sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+function onSortKey(key: SortKey) {
+  setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+}
+const ariaSort = (key: SortKey): 'ascending' | 'descending' | 'none' =>
+  sort.key === key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none';
 ```
 
 3. Render `sorted` instead of `nodes` in BOTH the desktop `<tbody>` map (~278) and the mobile card map (~299): change `{nodes.map((node) => (` → `{sorted.map((node) => (`.
@@ -627,29 +686,29 @@ import { sortNodes, type SortKey, type SortState } from './sort';
 5. Add a compact mobile sort control (the mobile card list has no table header). Immediately **before** the mobile `<div className="flex flex-col gap-3 md:hidden">` block (~298), add:
 
 ```tsx
-      <div className="flex items-center gap-2 md:hidden">
-        <label htmlFor="mobile-sort-key" className="font-body text-xs text-ink-2">
-          {t('dashboard.sort.label')}
-        </label>
-        <select
-          id="mobile-sort-key"
-          value={sort.key}
-          onChange={(e) => setSort((s) => ({ key: e.target.value as SortKey, dir: s.dir }))}
-          className="rounded-md border border-line bg-surface ps-2 pe-2 py-1 font-body text-xs text-ink"
-        >
-          <option value="name">{t('dashboard.sort.byName')}</option>
-          <option value="size">{t('dashboard.sort.bySize')}</option>
-          <option value="date">{t('dashboard.sort.byDate')}</option>
-        </select>
-        <button
-          type="button"
-          aria-label={t('dashboard.sort.toggleDir')}
-          onClick={() => setSort((s) => ({ key: s.key, dir: s.dir === 'asc' ? 'desc' : 'asc' }))}
-          className="inline-flex min-h-10 items-center rounded-md border border-line px-2 py-1 font-body text-xs text-ink"
-        >
-          {sort.dir === 'asc' ? '↑' : '↓'}
-        </button>
-      </div>
+<div className="flex items-center gap-2 md:hidden">
+  <label htmlFor="mobile-sort-key" className="font-body text-xs text-ink-2">
+    {t('dashboard.sort.label')}
+  </label>
+  <select
+    id="mobile-sort-key"
+    value={sort.key}
+    onChange={(e) => setSort((s) => ({ key: e.target.value as SortKey, dir: s.dir }))}
+    className="rounded-md border border-line bg-surface ps-2 pe-2 py-1 font-body text-xs text-ink"
+  >
+    <option value="name">{t('dashboard.sort.byName')}</option>
+    <option value="size">{t('dashboard.sort.bySize')}</option>
+    <option value="date">{t('dashboard.sort.byDate')}</option>
+  </select>
+  <button
+    type="button"
+    aria-label={t('dashboard.sort.toggleDir')}
+    onClick={() => setSort((s) => ({ key: s.key, dir: s.dir === 'asc' ? 'desc' : 'asc' }))}
+    className="inline-flex min-h-10 items-center rounded-md border border-line px-2 py-1 font-body text-xs text-ink"
+  >
+    {sort.dir === 'asc' ? '↑' : '↓'}
+  </button>
+</div>
 ```
 
 - [ ] **Step 4: Write + run a render assertion for header-click sorting**
@@ -659,9 +718,39 @@ Append inside the existing `describe('DriveView …')` in `web/test/dashboard.te
 ```tsx
 test('clicking the Size column header reorders the rows (folders stay first) (#7)', async () => {
   const listing: NodeDto[] = [
-    { id: 1, parent_id: 9, kind: 'file', name: 'big.bin', size_bytes: 900, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 100 },
-    { id: 2, parent_id: 9, kind: 'file', name: 'small.txt', size_bytes: 10, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 200 },
-    { id: 3, parent_id: 9, kind: 'folder', name: 'Docs', size_bytes: 0, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 300 },
+    {
+      id: 1,
+      parent_id: 9,
+      kind: 'file',
+      name: 'big.bin',
+      size_bytes: 900,
+      mime_type: null,
+      auto_delete_at: null,
+      created_at: 0,
+      updated_at: 100,
+    },
+    {
+      id: 2,
+      parent_id: 9,
+      kind: 'file',
+      name: 'small.txt',
+      size_bytes: 10,
+      mime_type: null,
+      auto_delete_at: null,
+      created_at: 0,
+      updated_at: 200,
+    },
+    {
+      id: 3,
+      parent_id: 9,
+      kind: 'folder',
+      name: 'Docs',
+      size_bytes: 0,
+      mime_type: null,
+      auto_delete_at: null,
+      created_at: 0,
+      updated_at: 300,
+    },
   ];
   stubFetch({ '/api/nodes': listing, '/api/shares': [] });
   renderDrive(['/']);
@@ -673,7 +762,9 @@ test('clicking the Size column header reorders the rows (folders stay first) (#7
     fireEvent.click(sizeHeaderBtn); // size asc
   });
 
-  const nameCells = within(table).getAllByText(/big\.bin|small\.txt|Docs/).map((el) => el.textContent);
+  const nameCells = within(table)
+    .getAllByText(/big\.bin|small\.txt|Docs/)
+    .map((el) => el.textContent);
   // Folder first, then files ascending by size: Docs, small.txt, big.bin
   expect(nameCells).toEqual(['Docs', 'small.txt', 'big.bin']);
 });
@@ -700,11 +791,13 @@ git commit -m "feat(web): sort files/folders by name/size/date, folders-first (#
 ## Task 4: Web — multi-select rows → bulk move to Trash
 
 **Files:**
+
 - Modify: `web/src/features/dashboard/DriveView.tsx` (selection state in `DriveView`, cleared on folder nav; checkbox column + select-all + bulk action bar in `Register`/`NodeRow`)
 - Modify: `web/src/i18n/ar.json` (keys under `dashboard.select` + two `toast` keys)
 - Test: `web/test/dashboard.test.tsx` (append tests in the `DriveView` describe)
 
 **Interfaces:**
+
 - Consumes: the existing `useTrashNode()` mutation (already created in `DriveView` as `trashMutation`) — bulk delete loops `trashMutation.mutateAsync(id)` over the selected ids (spec: "reusing the existing single-row trash mutation (`Promise.all` over the ids)"). No new server route (the optional `POST /api/nodes/trash-bulk` is explicitly out of scope for v1).
 - Produces: a `Set<number>` selection owned by `DriveView`, cleared whenever `parentId` changes; a bulk action bar shown when `selected.size > 0`.
 
@@ -715,8 +808,28 @@ Append inside `describe('DriveView …')` in `web/test/dashboard.test.tsx`:
 ```tsx
 test('selecting rows shows a bulk bar; confirming bulk-trashes each selected id (#8)', async () => {
   const listing: NodeDto[] = [
-    { id: 1, parent_id: 9, kind: 'file', name: 'a.txt', size_bytes: 5, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 100 },
-    { id: 2, parent_id: 9, kind: 'file', name: 'b.txt', size_bytes: 6, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 200 },
+    {
+      id: 1,
+      parent_id: 9,
+      kind: 'file',
+      name: 'a.txt',
+      size_bytes: 5,
+      mime_type: null,
+      auto_delete_at: null,
+      created_at: 0,
+      updated_at: 100,
+    },
+    {
+      id: 2,
+      parent_id: 9,
+      kind: 'file',
+      name: 'b.txt',
+      size_bytes: 6,
+      mime_type: null,
+      auto_delete_at: null,
+      created_at: 0,
+      updated_at: 200,
+    },
   ];
   const trashed: number[] = [];
   const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -725,7 +838,10 @@ test('selecting rows shows a bulk bar; confirming bulk-trashes each selected id 
     if (path === '/api/nodes' && method === 'GET') return jsonResponse(200, listing);
     if (path === '/api/shares') return jsonResponse(200, []);
     const m = path.match(/^\/api\/nodes\/(\d+)\/trash$/);
-    if (m && method === 'POST') { trashed.push(Number(m[1])); return jsonResponse(200, {}); }
+    if (m && method === 'POST') {
+      trashed.push(Number(m[1]));
+      return jsonResponse(200, {});
+    }
     return jsonResponse(200, {});
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -755,8 +871,28 @@ test('selecting rows shows a bulk bar; confirming bulk-trashes each selected id 
 
 test('the select-all checkbox toggles every row in the current folder (#8)', async () => {
   const listing: NodeDto[] = [
-    { id: 1, parent_id: 9, kind: 'file', name: 'a.txt', size_bytes: 5, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 100 },
-    { id: 2, parent_id: 9, kind: 'folder', name: 'Docs', size_bytes: 0, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 200 },
+    {
+      id: 1,
+      parent_id: 9,
+      kind: 'file',
+      name: 'a.txt',
+      size_bytes: 5,
+      mime_type: null,
+      auto_delete_at: null,
+      created_at: 0,
+      updated_at: 100,
+    },
+    {
+      id: 2,
+      parent_id: 9,
+      kind: 'folder',
+      name: 'Docs',
+      size_bytes: 0,
+      mime_type: null,
+      auto_delete_at: null,
+      created_at: 0,
+      updated_at: 200,
+    },
   ];
   stubFetch({ '/api/nodes': listing, '/api/shares': [] });
   renderDrive(['/']);
@@ -804,39 +940,39 @@ And add to the existing `"dashboard.toast"` block (~line 113):
 In `DriveView` (after the modal-target `useState`s ~line 94):
 
 ```ts
-  const [selected, setSelected] = useState<Set<number>>(() => new Set());
-  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
+const [selected, setSelected] = useState<Set<number>>(() => new Set());
+const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
 
-  // Selection is per-folder — clear it whenever the listing's parent changes
-  // (drill in / breadcrumb / back button all change parentId).
-  useEffect(() => {
+// Selection is per-folder — clear it whenever the listing's parent changes
+// (drill in / breadcrumb / back button all change parentId).
+useEffect(() => {
+  setSelected(new Set());
+}, [parentId]);
+
+function toggleSelect(id: number) {
+  setSelected((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+}
+function toggleSelectAll(ids: number[]) {
+  setSelected((prev) => (prev.size === ids.length ? new Set() : new Set(ids)));
+}
+
+async function runBulkTrash() {
+  const ids = [...selected];
+  try {
+    await Promise.all(ids.map((id) => trashMutation.mutateAsync(id)));
+    toast({ kind: 'success', message: t('dashboard.toast.bulkTrashed') });
+  } catch {
+    toast({ kind: 'error', message: t('dashboard.toast.bulkTrashFailed') });
+  } finally {
     setSelected(new Set());
-  }, [parentId]);
-
-  function toggleSelect(id: number) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setBulkConfirmOpen(false);
   }
-  function toggleSelectAll(ids: number[]) {
-    setSelected((prev) => (prev.size === ids.length ? new Set() : new Set(ids)));
-  }
-
-  async function runBulkTrash() {
-    const ids = [...selected];
-    try {
-      await Promise.all(ids.map((id) => trashMutation.mutateAsync(id)));
-      toast({ kind: 'success', message: t('dashboard.toast.bulkTrashed') });
-    } catch {
-      toast({ kind: 'error', message: t('dashboard.toast.bulkTrashFailed') });
-    } finally {
-      setSelected(new Set());
-      setBulkConfirmOpen(false);
-    }
-  }
+}
 ```
 
 - [ ] **Step 3c: Pass selection props to `Register`**
@@ -844,49 +980,49 @@ In `DriveView` (after the modal-target `useState`s ~line 94):
 Extend the `<Register … />` usage (~126) with:
 
 ```tsx
-        <Register
-          isPending={isPending}
-          isError={isError}
-          nodes={children}
-          shareByNode={shareByNode}
-          selected={selected}
-          onToggleSelect={toggleSelect}
-          onToggleSelectAll={toggleSelectAll}
-          onBulkTrash={() => setBulkConfirmOpen(true)}
-          onClearSelection={() => setSelected(new Set())}
-          onOpen={openFolder}
-          onRename={setRenameTarget}
-          onMove={setMoveTarget}
-          onShare={setShareTarget}
-          onAutoDelete={setAutoDeleteTarget}
-          onTrash={onTrash}
-        />
+<Register
+  isPending={isPending}
+  isError={isError}
+  nodes={children}
+  shareByNode={shareByNode}
+  selected={selected}
+  onToggleSelect={toggleSelect}
+  onToggleSelectAll={toggleSelectAll}
+  onBulkTrash={() => setBulkConfirmOpen(true)}
+  onClearSelection={() => setSelected(new Set())}
+  onOpen={openFolder}
+  onRename={setRenameTarget}
+  onMove={setMoveTarget}
+  onShare={setShareTarget}
+  onAutoDelete={setAutoDeleteTarget}
+  onTrash={onTrash}
+/>
 ```
 
 And render a bulk confirm modal near the other modals (~140):
 
 ```tsx
-      {bulkConfirmOpen && (
-        <Modal
-          open
-          onClose={() => setBulkConfirmOpen(false)}
-          title={t('dashboard.select.confirmTitle')}
-          footer={
-            <>
-              <Button variant="secondary" onClick={() => setBulkConfirmOpen(false)}>
-                {t('common.cancel')}
-              </Button>
-              <Button variant="danger" onClick={runBulkTrash} disabled={trashMutation.isPending}>
-                {t('dashboard.select.confirmSubmit')}
-              </Button>
-            </>
-          }
-        >
-          <p className="font-body text-sm text-ink">
-            {t('dashboard.select.confirmBody', { n: selected.size })}
-          </p>
-        </Modal>
-      )}
+{
+  bulkConfirmOpen && (
+    <Modal
+      open
+      onClose={() => setBulkConfirmOpen(false)}
+      title={t('dashboard.select.confirmTitle')}
+      footer={
+        <>
+          <Button variant="secondary" onClick={() => setBulkConfirmOpen(false)}>
+            {t('common.cancel')}
+          </Button>
+          <Button variant="danger" onClick={runBulkTrash} disabled={trashMutation.isPending}>
+            {t('dashboard.select.confirmSubmit')}
+          </Button>
+        </>
+      }
+    >
+      <p className="font-body text-sm text-ink">{t('dashboard.select.confirmBody', { n: selected.size })}</p>
+    </Modal>
+  );
+}
 ```
 
 - [ ] **Step 3d: Add the checkbox column + select-all + bulk bar to `Register`**
@@ -902,6 +1038,7 @@ Extend `Register`'s prop type and body:
   onBulkTrash,
   onClearSelection,
 ```
+
 ```ts
   selected: Set<number>;
   onToggleSelect: (id: number) => void;
@@ -913,36 +1050,38 @@ Extend `Register`'s prop type and body:
 2. Inside `Register`, after `sorted` is computed (Task 3), derive the id list + all-selected flag:
 
 ```ts
-  const allIds = sorted.map((n) => n.id);
-  const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
+const allIds = sorted.map((n) => n.id);
+const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
 ```
 
 3. Render a bulk action bar above the table/cards (inside the returned fragment, right after `return (` `<>`):
 
 ```tsx
-      {selected.size > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-[10px] border border-line bg-paper px-3 py-2">
-          <Button variant="danger" onClick={onBulkTrash}>
-            {t('dashboard.select.bulkTrash', { n: selected.size })}
-          </Button>
-          <button type="button" onClick={onClearSelection} className="font-body text-sm text-teal">
-            {t('dashboard.select.cancel')}
-          </button>
-        </div>
-      )}
+{
+  selected.size > 0 && (
+    <div className="flex flex-wrap items-center gap-2 rounded-[10px] border border-line bg-paper px-3 py-2">
+      <Button variant="danger" onClick={onBulkTrash}>
+        {t('dashboard.select.bulkTrash', { n: selected.size })}
+      </Button>
+      <button type="button" onClick={onClearSelection} className="font-body text-sm text-teal">
+        {t('dashboard.select.cancel')}
+      </button>
+    </div>
+  );
+}
 ```
 
 4. Add a leading select-all `<th>` in the desktop header row (before the Name `<th>`):
 
 ```tsx
-              <th className="ps-3 pe-1 py-2 text-start font-medium">
-                <input
-                  type="checkbox"
-                  aria-label={t('dashboard.select.all')}
-                  checked={allSelected}
-                  onChange={() => onToggleSelectAll(allIds)}
-                />
-              </th>
+<th className="ps-3 pe-1 py-2 text-start font-medium">
+  <input
+    type="checkbox"
+    aria-label={t('dashboard.select.all')}
+    checked={allSelected}
+    onChange={() => onToggleSelectAll(allIds)}
+  />
+</th>
 ```
 
 5. Pass `selected`/`onToggleSelect` into each `NodeRow` (both desktop and mobile maps):
@@ -957,28 +1096,28 @@ Extend `Register`'s prop type and body:
 Desktop leading `<td>` (before the name `<td>` ~557):
 
 ```tsx
-      <td className="ps-3 pe-1 py-2 align-top">
-        <input
-          type="checkbox"
-          aria-label={t('dashboard.select.row')}
-          checked={selected}
-          onChange={() => onToggleSelect(node.id)}
-        />
-      </td>
+<td className="ps-3 pe-1 py-2 align-top">
+  <input
+    type="checkbox"
+    aria-label={t('dashboard.select.row')}
+    checked={selected}
+    onChange={() => onToggleSelect(node.id)}
+  />
+</td>
 ```
 
 Mobile card — wrap the existing header row so the checkbox sits beside the icon/name (inside the `variant === 'card'` block, as the first child of the card `<div>`):
 
 ```tsx
-        <div className="mb-2 flex items-center gap-2">
-          <input
-            type="checkbox"
-            aria-label={t('dashboard.select.row')}
-            checked={selected}
-            onChange={() => onToggleSelect(node.id)}
-          />
-          <span className="font-body text-xs text-ink-2">{t('dashboard.select.row')}</span>
-        </div>
+<div className="mb-2 flex items-center gap-2">
+  <input
+    type="checkbox"
+    aria-label={t('dashboard.select.row')}
+    checked={selected}
+    onChange={() => onToggleSelect(node.id)}
+  />
+  <span className="font-body text-xs text-ink-2">{t('dashboard.select.row')}</span>
+</div>
 ```
 
 `NodeRow` prop additions:

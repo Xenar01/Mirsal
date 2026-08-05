@@ -50,10 +50,7 @@ export default function StorageMeter() {
             aria-valuenow={Math.round(fraction * 100)}
             className="h-1.5 w-full overflow-hidden rounded-full border border-line bg-paper"
           >
-            <div
-              className={`h-full ${over ? 'bg-clay' : 'bg-brass'}`}
-              style={{ width: `${fraction * 100}%` }}
-            />
+            <div className={`h-full ${over ? 'bg-clay' : 'bg-brass'}`} style={{ width: `${fraction * 100}%` }} />
           </div>
           <p className="mt-1 font-body text-xs text-ink-2">
             <bdi dir="ltr" className="font-mono">

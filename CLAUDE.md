@@ -45,7 +45,7 @@ cd web && npm run dev
 - **i18n is Arabic-only**: add UI strings to `web/src/i18n/ar.json` only; never
   `en.json` (it's a fallback stub for the public share page). Keep it valid JSON.
 - **Server data safety**: routes are owner-scoped + `requireAuth`; destructive
-  ops re-validate ownership; blobs are unlinked *after* the DB commit;
+  ops re-validate ownership; blobs are unlinked _after_ the DB commit;
   `permanentDelete` opens its own transaction (better-sqlite3 forbids nesting —
   never wrap a loop of them in another `db.transaction`).
 - **RTL/ledger UI conventions**: use `text-start`/`ps-*`/`pe-*` (never
@@ -84,4 +84,5 @@ terminates TLS and reverse-proxies to it. Config comes from `.env` (see
   enable the vhost / expose the domain without intent.
 
 Full ops/restore: `docs/RUNBOOK.md`. Release: **`v1.0.0`** (MVP + download-limit
-+ round-3 dashboard features + mobile/PWA + the `deploy/fresh` kit).
+
+- round-3 dashboard features + mobile/PWA + the `deploy/fresh` kit).

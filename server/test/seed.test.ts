@@ -96,9 +96,7 @@ test('a failure while writing the credential file rolls back the admin row + roo
     throw new Error('simulated disk-full failure');
   });
 
-  await expect(ensureAdmin(db!, testConfig, () => 1000)).rejects.toThrow(
-    'simulated disk-full failure'
-  );
+  await expect(ensureAdmin(db!, testConfig, () => 1000)).rejects.toThrow('simulated disk-full failure');
   writeSpy.mockRestore();
 
   // The INSERT + ensureUserRoots ran inside the same db.transaction() as the

@@ -51,7 +51,7 @@ export async function ensureAdmin(db: Database.Database, config: Config, now: Cl
     const info = db
       .prepare(
         `INSERT INTO users(username, password_hash, role, is_active, must_change_password, created_at, updated_at)
-         VALUES ('admin', @passwordHash, 'admin', 1, 1, @t, @t)`
+         VALUES ('admin', @passwordHash, 'admin', 1, 1, @t, @t)`,
       )
       .run({ passwordHash, t });
 

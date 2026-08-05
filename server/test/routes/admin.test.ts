@@ -66,14 +66,14 @@ async function makeApp(): Promise<FastifyInstance> {
 async function seedUser(
   username: string,
   password: string,
-  overrides: Partial<{ role: string; isActive: number; quotaBytes: number | null }> = {}
+  overrides: Partial<{ role: string; isActive: number; quotaBytes: number | null }> = {},
 ): Promise<number> {
   const passwordService = createPasswordService(TEST_ARGON);
   const hash = await passwordService.hashPassword(password);
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, quota_bytes, used_bytes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 0, ?, 0, ?, ?)`
+       VALUES (?, ?, ?, ?, 0, ?, 0, ?, ?)`,
     )
     .run(
       username,
@@ -82,7 +82,7 @@ async function seedUser(
       overrides.isActive ?? 1,
       overrides.quotaBytes === undefined ? null : overrides.quotaBytes,
       NOW,
-      NOW
+      NOW,
     );
   return Number(info.lastInsertRowid);
 }
@@ -94,7 +94,7 @@ function findCookie(cookies: InjectedCookie[], name: string): InjectedCookie | u
 async function login(
   built: FastifyInstance,
   username: string,
-  password: string
+  password: string,
 ): Promise<{ statusCode: number; session?: string; csrf?: string }> {
   const res = await built.inject({ method: 'POST', url: '/api/auth/login', payload: { username, password } });
   const session = findCookie(res.cookies as InjectedCookie[], 'mirsal_session')?.value;
@@ -108,7 +108,7 @@ function adminReq(
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   url: string,
   auth: { session: string; csrf: string },
-  payload?: unknown
+  payload?: unknown,
 ) {
   const opts: InjectOptions = {
     method,
@@ -459,17 +459,17 @@ test('GET /api/admin/users/:id/nodes returns metadata (names/sizes) but never st
   const folderId = Number(
     db!
       .prepare(
-        `INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at) VALUES (?, ?, 'folder', ?, ?, ?)`
+        `INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at) VALUES (?, ?, 'folder', ?, ?, ?)`,
       )
-      .run(aliceId, rootId, 'Photos', NOW, NOW).lastInsertRowid
+      .run(aliceId, rootId, 'Photos', NOW, NOW).lastInsertRowid,
   );
   const fileId = Number(
     db!
       .prepare(
         `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, mime_type, storage_path, created_at, updated_at)
-         VALUES (?, ?, 'file', ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, 'file', ?, ?, ?, ?, ?, ?)`,
       )
-      .run(aliceId, folderId, 'secret.txt', 1234, 'text/plain', `${aliceId}/999`, NOW, NOW).lastInsertRowid
+      .run(aliceId, folderId, 'secret.txt', 1234, 'text/plain', `${aliceId}/999`, NOW, NOW).lastInsertRowid,
   );
 
   const res = await built.inject({
@@ -533,15 +533,13 @@ test('POST /users/:id/clear wipes the user drive, frees quota, keeps roots, unli
   // A folder + a file inside it, and used_bytes set to the file size.
   const folderId = Number(
     db!
-      .prepare(
-        `INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at) VALUES (?,?,?,?,?,?)`
-      )
-      .run(uid, roots.rootId, 'folder', 'Docs', NOW, NOW).lastInsertRowid
+      .prepare(`INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
+      .run(uid, roots.rootId, 'folder', 'Docs', NOW, NOW).lastInsertRowid,
   );
   db!
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?)`
+       VALUES (?,?,?,?,?,?,?,?)`,
     )
     .run(uid, folderId, 'file', 'a.txt', 5, blobRel, NOW, NOW);
   db!.prepare('UPDATE users SET used_bytes = 5 WHERE id = ?').run(uid);
@@ -578,14 +576,12 @@ test('POST /users/:id/clear cascades the user shares', async () => {
     db!
       .prepare(
         `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?)`
+         VALUES (?,?,?,?,?,?,?,?)`,
       )
-      .run(uid, roots.rootId, 'file', 'b.txt', 0, `${uid}/b`, NOW, NOW).lastInsertRowid
+      .run(uid, roots.rootId, 'file', 'b.txt', 0, `${uid}/b`, NOW, NOW).lastInsertRowid,
   );
   db!
-    .prepare(
-      `INSERT INTO shares(node_id, owner_id, token, is_active, allow_download, created_at) VALUES (?,?,?,?,?,?)`
-    )
+    .prepare(`INSERT INTO shares(node_id, owner_id, token, is_active, allow_download, created_at) VALUES (?,?,?,?,?,?)`)
     .run(fileId, uid, 'tok-clear-test', 1, 1, NOW);
 
   await adminReq(built, 'POST', `/api/admin/users/${uid}/clear`, auth);
@@ -615,22 +611,20 @@ test('POST /users/:id/clear only wipes the target user, leaving another user unt
   function seedDrive(uid: number, rootId: number, tag: string) {
     const folderId = Number(
       db!
-        .prepare(
-          `INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at) VALUES (?,?,?,?,?,?)`
-        )
-        .run(uid, rootId, 'folder', `Docs-${tag}`, NOW, NOW).lastInsertRowid
+        .prepare(`INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
+        .run(uid, rootId, 'folder', `Docs-${tag}`, NOW, NOW).lastInsertRowid,
     );
     const fileId = Number(
       db!
         .prepare(
           `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
-           VALUES (?,?,?,?,?,?,?,?)`
+           VALUES (?,?,?,?,?,?,?,?)`,
         )
-        .run(uid, folderId, 'file', `a-${tag}.txt`, 5, `${uid}/blob-${tag}`, NOW, NOW).lastInsertRowid
+        .run(uid, folderId, 'file', `a-${tag}.txt`, 5, `${uid}/blob-${tag}`, NOW, NOW).lastInsertRowid,
     );
     db!
       .prepare(
-        `INSERT INTO shares(node_id, owner_id, token, is_active, allow_download, created_at) VALUES (?,?,?,?,?,?)`
+        `INSERT INTO shares(node_id, owner_id, token, is_active, allow_download, created_at) VALUES (?,?,?,?,?,?)`,
       )
       .run(fileId, uid, `tok-${tag}`, 1, 1, NOW);
     db!.prepare('UPDATE users SET used_bytes = 5 WHERE id = ?').run(uid);
@@ -744,7 +738,12 @@ test('admin state-changing actions write audit rows; GET /api/admin/audit return
     cookies: { mirsal_session: admin.session! },
   });
   expect(auditRes.statusCode).toBe(200);
-  const rows = auditRes.json() as Array<{ action: string; actor_id: number; target: string | null; created_at: number }>;
+  const rows = auditRes.json() as Array<{
+    action: string;
+    actor_id: number;
+    target: string | null;
+    created_at: number;
+  }>;
   const actions = rows.map((r) => r.action);
   expect(actions).toContain('user_create');
   expect(actions).toContain('user_update');

@@ -41,7 +41,7 @@ export interface CreateCollectionOptions {
  */
 export function collectionStatus(
   c: Pick<Collection, 'is_active' | 'deadline_at'>,
-  now: number
+  now: number,
 ): 'open' | 'closed' | 'expired' {
   if (!c.is_active) return 'closed';
   if (c.deadline_at != null && c.deadline_at < now) return 'expired';
@@ -74,7 +74,7 @@ export async function createCollection(
   db: Database.Database,
   ownerId: number,
   options: CreateCollectionOptions,
-  now: number
+  now: number,
 ): Promise<Collection> {
   const title = options.title.trim();
   if (title.length === 0) throw new Error('invalid_title');
@@ -84,19 +84,15 @@ export async function createCollection(
 
   const templateNodeId = options.templateNodeId ?? null;
   if (templateNodeId !== null) {
-    const t = db
-      .prepare('SELECT owner_id, kind, trashed_at FROM nodes WHERE id = @id')
-      .get({ id: templateNodeId }) as
-      | { owner_id: number; kind: string; trashed_at: number | null }
-      | undefined;
+    const t = db.prepare('SELECT owner_id, kind, trashed_at FROM nodes WHERE id = @id').get({ id: templateNodeId }) as
+      { owner_id: number; kind: string; trashed_at: number | null } | undefined;
     if (!t || t.owner_id !== ownerId || t.kind !== 'file' || t.trashed_at !== null) {
       throw new Error('bad_template');
     }
   }
 
   const { rootId } = ensureUserRoots(db, ownerId, now);
-  const passwordHash =
-    options.password && options.password.length > 0 ? await hashPassword(options.password) : null;
+  const passwordHash = options.password && options.password.length > 0 ? await hashPassword(options.password) : null;
   const token = randomToken(32);
   const deadlineAt = options.deadlineAt ?? null;
 
@@ -105,7 +101,7 @@ export async function createCollection(
     const folderInfo = db
       .prepare(
         `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
-         VALUES (@ownerId, @rootId, 'folder', @folderName, 0, @now, @now)`
+         VALUES (@ownerId, @rootId, 'folder', @folderName, 0, @now, @now)`,
       )
       .run({ ownerId, rootId, folderName, now });
     const folderNodeId = Number(folderInfo.lastInsertRowid);
@@ -113,14 +109,14 @@ export async function createCollection(
     const cInfo = db
       .prepare(
         `INSERT INTO collections(owner_id, token, title, template_node_id, folder_node_id, password_hash, is_active, deadline_at, created_at, updated_at)
-         VALUES (@ownerId, @token, @title, @templateNodeId, @folderNodeId, @passwordHash, 1, @deadlineAt, @now, @now)`
+         VALUES (@ownerId, @token, @title, @templateNodeId, @folderNodeId, @passwordHash, 1, @deadlineAt, @now, @now)`,
       )
       .run({ ownerId, token, title, templateNodeId, folderNodeId, passwordHash, deadlineAt, now });
     const collectionId = Number(cInfo.lastInsertRowid);
 
     const insertDept = db.prepare(
       `INSERT INTO collection_departments(collection_id, name, position, created_at)
-       VALUES (@collectionId, @name, @position, @now)`
+       VALUES (@collectionId, @name, @position, @now)`,
     );
     departments.forEach((name, i) => insertDept.run({ collectionId, name, position: i, now }));
 
@@ -131,11 +127,7 @@ export async function createCollection(
 }
 
 /** Owner-scoped fetch of one collection row, or undefined. */
-export function getCollection(
-  db: Database.Database,
-  ownerId: number,
-  collectionId: number
-): Collection | undefined {
+export function getCollection(db: Database.Database, ownerId: number, collectionId: number): Collection | undefined {
   return db
     .prepare('SELECT * FROM collections WHERE id = @id AND owner_id = @ownerId')
     .get({ id: collectionId, ownerId }) as Collection | undefined;
@@ -156,7 +148,7 @@ export function listCollections(db: Database.Database, ownerId: number): Collect
          (SELECT COUNT(*) FROM collection_responses r WHERE r.collection_id = c.id) AS responded_count
        FROM collections c
        WHERE c.owner_id = @ownerId
-       ORDER BY c.created_at DESC, c.id DESC`
+       ORDER BY c.created_at DESC, c.id DESC`,
     )
     .all({ ownerId }) as CollectionSummaryRow[];
 }
@@ -180,7 +172,7 @@ export async function setCollectionState(
   ownerId: number,
   collectionId: number,
   patch: SetCollectionStatePatch,
-  now: number
+  now: number,
 ): Promise<Collection | undefined> {
   const sets: string[] = ['updated_at = @now'];
   const params: Record<string, unknown> = { collectionId, ownerId, now };
@@ -202,9 +194,7 @@ export async function setCollectionState(
     params.deadlineAt = patch.deadlineAt;
   }
 
-  db.prepare(`UPDATE collections SET ${sets.join(', ')} WHERE id = @collectionId AND owner_id = @ownerId`).run(
-    params
-  );
+  db.prepare(`UPDATE collections SET ${sets.join(', ')} WHERE id = @collectionId AND owner_id = @ownerId`).run(params);
 
   return db
     .prepare('SELECT * FROM collections WHERE id = @collectionId AND owner_id = @ownerId')
@@ -221,7 +211,7 @@ export async function setCollectionState(
 export function deleteCollection(
   db: Database.Database,
   ownerId: number,
-  collectionId: number
+  collectionId: number,
 ): { deleted: boolean; storagePaths: string[] } {
   const row = db
     .prepare('SELECT folder_node_id FROM collections WHERE id = @id AND owner_id = @ownerId')

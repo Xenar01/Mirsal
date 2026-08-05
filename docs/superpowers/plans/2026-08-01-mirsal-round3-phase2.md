@@ -25,6 +25,7 @@
 ## File Structure
 
 **Server (create none — all modifications):**
+
 - `server/src/db/migrate.ts` — bump `LATEST_VERSION` to 3, add the v3 step.
 - `server/src/db/schema.sql` — add `display_name TEXT` as the last `users` column.
 - `server/src/routes/admin.ts` — display_name in DTO/columns/schemas/INSERT/PATCH; audit id→username resolution; new `POST /users/:id/clear` route; `blobStore` added to deps.
@@ -33,6 +34,7 @@
 - `server/test/routes/admin.test.ts` — display_name, audit resolution, and clear-space tests.
 
 **Web (create one modal, rest modifications):**
+
 - `web/src/features/admin/types.ts` — add `display_name` to `AdminUserDto`; add resolved-name fields to `AuditRowDto`.
 - `web/src/features/admin/api.ts` — thread `display_name` through create/patch vars; add `clearUserSpace`; add a `USER_TARGET_ACTIONS` constant.
 - `web/src/features/admin/queries.ts` — add `useClearUserSpace`.
@@ -47,11 +49,13 @@
 ## Task 1: Migration v2→v3 — `users.display_name`
 
 **Files:**
+
 - Modify: `server/src/db/migrate.ts:4` (`LATEST_VERSION`) and `:10-23` (`STEPS`)
 - Modify: `server/src/db/schema.sql:5-19` (users table — append column)
 - Test: `server/test/db/migrate.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing `migrate(db)`, `STEPS`, `LATEST_VERSION` from `migrate.ts`.
 - Produces: after `migrate(db)`, the `users` table has a `display_name TEXT` (nullable) column and `MAX(version)` in `schema_version` is `3`. Fresh and v2-upgraded `users` `PRAGMA table_info` converge.
 
@@ -99,20 +103,23 @@ describe('migrate v3 users.display_name column', () => {
   });
 
   it('fresh and upgraded users schemas converge (identical table_info)', () => {
-    const fresh = new Database(':memory:'); migrate(fresh);
+    const fresh = new Database(':memory:');
+    migrate(fresh);
     const upgraded = new Database(':memory:');
     upgraded.exec(V2_USERS);
     upgraded.exec('CREATE TABLE schema_version(version INTEGER NOT NULL, applied_at INTEGER NOT NULL)');
     upgraded.prepare('INSERT INTO schema_version(version, applied_at) VALUES (2, 0)').run();
     migrate(upgraded);
-    expect(fresh.prepare('PRAGMA table_info(users)').all()).toEqual(
-      upgraded.prepare('PRAGMA table_info(users)').all()
-    );
+    expect(fresh.prepare('PRAGMA table_info(users)').all()).toEqual(upgraded.prepare('PRAGMA table_info(users)').all());
   });
 
   it('is idempotent across repeated boots at v3', () => {
-    const db = new Database(':memory:'); migrate(db);
-    expect(() => { migrate(db); migrate(db); }).not.toThrow();
+    const db = new Database(':memory:');
+    migrate(db);
+    expect(() => {
+      migrate(db);
+      migrate(db);
+    }).not.toThrow();
     expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
   });
 });
@@ -175,10 +182,12 @@ git commit -m "feat(server): migrate v2→v3 adding users.display_name column"
 ## Task 2: Display name — server (DTO, schemas, INSERT, PATCH)
 
 **Files:**
+
 - Modify: `server/src/routes/admin.ts` — `AdminUserDto` (`:27-36`), `USER_DTO_COLUMNS` (`:50-51`), `createUserSchema` (`:97-103`), create INSERT (`:210-216`), `patchUserSchema` (`:105-113`), PATCH set-builder (`:270-284`)
 - Test: `server/test/routes/admin.test.ts`
 
 **Interfaces:**
+
 - Consumes: the v3 `users.display_name` column from Task 1.
 - Produces: `AdminUserDto` now includes `display_name: string | null`. `POST /api/admin/users` accepts an optional `display_name` (free text, trimmed, ≤120 chars, no control chars; empty/whitespace → `null`). `PATCH /api/admin/users/:id` accepts the same optional field (explicit `null` clears it) and still requires ≥1 field. Both echo the stored `display_name` in the returned DTO.
 
@@ -261,7 +270,14 @@ const displayNameSchema = z
   .string()
   .transform((s) => s.trim())
   .refine((s) => s.length <= DISPLAY_NAME_MAX, { message: 'display_name too long' })
-  .refine((s) => ![...s].some((c) => { const n = c.charCodeAt(0); return n < 0x20 || n === 0x7f; }), { message: 'display_name has control chars' })
+  .refine(
+    (s) =>
+      ![...s].some((c) => {
+        const n = c.charCodeAt(0);
+        return n < 0x20 || n === 0x7f;
+      }),
+    { message: 'display_name has control chars' },
+  )
   .transform((s) => (s.length === 0 ? null : s))
   .nullable()
   .optional();
@@ -314,11 +330,8 @@ const patchUserSchema = z
   })
   .refine(
     (v) =>
-      v.is_active !== undefined ||
-      v.role !== undefined ||
-      v.quota_bytes !== undefined ||
-      v.display_name !== undefined,
-    { message: 'at least one field is required' }
+      v.is_active !== undefined || v.role !== undefined || v.quota_bytes !== undefined || v.display_name !== undefined,
+    { message: 'at least one field is required' },
   );
 ```
 
@@ -327,18 +340,18 @@ const patchUserSchema = z
 In the `POST /api/admin/users` handler, after `const quotaBytes = parsed.data.quota_bytes ?? null;` add:
 
 ```ts
-    const displayName = parsed.data.display_name ?? null;
+const displayName = parsed.data.display_name ?? null;
 ```
 
 Change the INSERT to include the column (both the column list and the `@displayName` param):
 
 ```ts
-      const info = db
-        .prepare(
-          `INSERT INTO users(username, password_hash, role, quota_bytes, used_bytes, is_active, must_change_password, display_name, created_by, created_at, updated_at)
-           VALUES (@username, @hash, @role, @quotaBytes, 0, 1, 1, @displayName, @actor, @now, @now)`
-        )
-        .run({ username, hash, role, quotaBytes, displayName, actor: req.user!.id, now: nowMs });
+const info = db
+  .prepare(
+    `INSERT INTO users(username, password_hash, role, quota_bytes, used_bytes, is_active, must_change_password, display_name, created_by, created_at, updated_at)
+           VALUES (@username, @hash, @role, @quotaBytes, 0, 1, 1, @displayName, @actor, @now, @now)`,
+  )
+  .run({ username, hash, role, quotaBytes, displayName, actor: req.user!.id, now: nowMs });
 ```
 
 - [ ] **Step 5: Persist display_name on patch**
@@ -346,10 +359,10 @@ Change the INSERT to include the column (both the column list and the `@displayN
 In the `PATCH /api/admin/users/:id` set-builder (after the `quota_bytes` block, before `sets.push('updated_at = @now')`) add:
 
 ```ts
-    if (parsed.data.display_name !== undefined) {
-      sets.push('display_name = @displayName');
-      params.displayName = parsed.data.display_name; // string | null (null clears)
-    }
+if (parsed.data.display_name !== undefined) {
+  sets.push('display_name = @displayName');
+  params.displayName = parsed.data.display_name; // string | null (null clears)
+}
 ```
 
 - [ ] **Step 6: Run the server tests to verify they pass**
@@ -371,6 +384,7 @@ git commit -m "feat(server): admin create/patch accept & return users.display_na
 ## Task 3: Display name — web (type, api/queries, create form, table column, label-edit modal)
 
 **Files:**
+
 - Modify: `web/src/features/admin/types.ts:13-22` (`AdminUserDto`)
 - Modify: `web/src/features/admin/api.ts:30-64` (`CreateUserVars`/`createUser`, `PatchUserVars`/`patchUser`)
 - Modify: `web/src/features/admin/CreateUserModal.tsx` (add input + state)
@@ -379,6 +393,7 @@ git commit -m "feat(server): admin create/patch accept & return users.display_na
 - Test: `web/test/admin.test.tsx`
 
 **Interfaces:**
+
 - Consumes: server `display_name` from Task 2.
 - Produces: `AdminUserDto.display_name: string | null` (client mirror). `CreateUserVars.displayName?: string | null` and `PatchUserVars.displayName?: string | null` thread through to the request body as `display_name`. `UsersTable` renders a "الاسم" column and a "تسمية" row action opening `LabelModal`.
 
@@ -502,10 +517,11 @@ In `web/src/features/admin/CreateUserModal.tsx`:
 Add a `nameId` alongside the other `useId()` calls and a `displayName` state:
 
 ```ts
-  const nameId = useId();
+const nameId = useId();
 ```
+
 ```ts
-  const [displayName, setDisplayName] = useState('');
+const [displayName, setDisplayName] = useState('');
 ```
 
 Reset it on open (inside the `useEffect(open)` block): add `setDisplayName('');`.
@@ -521,19 +537,19 @@ In `submit`, pass it to the mutation (send `null` when blank so the server store
 Add the input to the form, immediately after the username `<div>` block (before the role block):
 
 ```tsx
-          <div>
-            <label htmlFor={nameId} className="block font-body text-sm text-ink-2">
-              {t('admin.create.nameLabel')}
-            </label>
-            <input
-              id={nameId}
-              type="text"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-body text-sm text-ink"
-            />
-            <p className="mt-1 font-body text-xs text-ink-2">{t('admin.create.nameHint')}</p>
-          </div>
+<div>
+  <label htmlFor={nameId} className="block font-body text-sm text-ink-2">
+    {t('admin.create.nameLabel')}
+  </label>
+  <input
+    id={nameId}
+    type="text"
+    value={displayName}
+    onChange={(e) => setDisplayName(e.target.value)}
+    className="mt-1 w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-body text-sm text-ink"
+  />
+  <p className="mt-1 font-body text-xs text-ink-2">{t('admin.create.nameHint')}</p>
+</div>
 ```
 
 - [ ] **Step 6: Add the "الاسم" column and the label-edit action to `UsersTable`**
@@ -543,13 +559,13 @@ In `web/src/features/admin/UsersTable.tsx`:
 Add a `labelTarget` state alongside the others in `UsersTable`:
 
 ```ts
-  const [labelTarget, setLabelTarget] = useState<AdminUserDto | null>(null);
+const [labelTarget, setLabelTarget] = useState<AdminUserDto | null>(null);
 ```
 
 Add the column header after the `username` `<th>` (before `role`):
 
 ```tsx
-                <th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.name')}</th>
+<th className="ps-3 pe-3 py-2 text-start font-medium">{t('admin.users.col.name')}</th>
 ```
 
 Pass an `onLabel` prop to `UserRow` (in the `.map`) and render the label modal near the others:
@@ -557,28 +573,31 @@ Pass an `onLabel` prop to `UserRow` (in the `.map`) and render the label modal n
 ```tsx
                   onLabel={() => setLabelTarget(row)}
 ```
+
 ```tsx
-      {labelTarget && <LabelModal user={labelTarget} onClose={() => setLabelTarget(null)} />}
+{
+  labelTarget && <LabelModal user={labelTarget} onClose={() => setLabelTarget(null)} />;
+}
 ```
 
 In `UserRow`'s prop list add `onLabel: () => void;` and destructure it. Add the name **cell** right after the username `<td>` (before the role `<td>`):
 
 ```tsx
-      <td className="ps-3 pe-3 py-2">
-        {row.display_name ? (
-          <span className="font-body text-ink">{row.display_name}</span>
-        ) : (
-          <span className="font-body text-ink-2">{t('admin.users.noName')}</span>
-        )}
-      </td>
+<td className="ps-3 pe-3 py-2">
+  {row.display_name ? (
+    <span className="font-body text-ink">{row.display_name}</span>
+  ) : (
+    <span className="font-body text-ink-2">{t('admin.users.noName')}</span>
+  )}
+</td>
 ```
 
 Add a "تسمية" chip to the row actions (a plain, non-guarded action — placed next to the quota chip):
 
 ```tsx
-            <button type="button" onClick={onLabel} className={ADMIN_ACTION}>
-              {t('admin.users.action.label')}
-            </button>
+<button type="button" onClick={onLabel} className={ADMIN_ACTION}>
+  {t('admin.users.action.label')}
+</button>
 ```
 
 Add the `LabelModal` component (after `QuotaModal`, mirroring its shape):
@@ -603,7 +622,7 @@ function LabelModal({ user, onClose }: { user: AdminUserDto; onClose: () => void
           onClose();
         },
         onError: () => toast({ kind: 'error', message: t('admin.label.error') }),
-      }
+      },
     );
   }
 
@@ -681,10 +700,12 @@ git commit -m "feat(web): admin display-name column, create field, and label-edi
 ## Task 4: Audit log shows usernames — server (id→username resolution)
 
 **Files:**
+
 - Modify: `server/src/routes/admin.ts` — audit handler (`:493-518`); add a `USER_TARGET_ACTIONS` constant near `AUDIT_TARGET_IS_SECRET` (`:154`)
 - Test: `server/test/routes/admin.test.ts`
 
 **Interfaces:**
+
 - Consumes: `users.display_name` (Task 1/2), the existing `redactAuditTarget`.
 - Produces: each `GET /api/admin/audit` row DTO gains `actor_username: string | null`, `actor_display_name: string | null`, `target_username: string | null`, `target_display_name: string | null`. Target names are resolved **only** for the user-target action set; `share_unlock_failure` targets stay redacted and are never resolved. The `target` field itself is unchanged (still `redactAuditTarget(action, target)`).
 
@@ -776,41 +797,41 @@ const USER_TARGET_ACTIONS = new Set([
 Replace the DTO-mapping tail of the `GET /api/admin/audit` handler (the part after the `rows` SELECT, i.e. the `const dtos = rows.map(...)` line) with:
 
 ```ts
-    // Collect the distinct user ids we can resolve: every non-null actor, plus
-    // every numeric target of a user-target action (never a secret/username
-    // target). One lookup, then attach names to each DTO.
-    const ids = new Set<number>();
-    for (const r of rows) {
-      if (r.actor_id !== null) ids.add(r.actor_id);
-      if (USER_TARGET_ACTIONS.has(r.action) && r.target !== null && /^\d+$/.test(r.target)) {
-        ids.add(Number(r.target));
-      }
-    }
+// Collect the distinct user ids we can resolve: every non-null actor, plus
+// every numeric target of a user-target action (never a secret/username
+// target). One lookup, then attach names to each DTO.
+const ids = new Set<number>();
+for (const r of rows) {
+  if (r.actor_id !== null) ids.add(r.actor_id);
+  if (USER_TARGET_ACTIONS.has(r.action) && r.target !== null && /^\d+$/.test(r.target)) {
+    ids.add(Number(r.target));
+  }
+}
 
-    const nameById = new Map<number, { username: string; display_name: string | null }>();
-    if (ids.size > 0) {
-      const idList = [...ids];
-      const placeholders = idList.map(() => '?').join(',');
-      const nameRows = db
-        .prepare(`SELECT id, username, display_name FROM users WHERE id IN (${placeholders})`)
-        .all(...idList) as { id: number; username: string; display_name: string | null }[];
-      for (const nr of nameRows) nameById.set(nr.id, { username: nr.username, display_name: nr.display_name });
-    }
+const nameById = new Map<number, { username: string; display_name: string | null }>();
+if (ids.size > 0) {
+  const idList = [...ids];
+  const placeholders = idList.map(() => '?').join(',');
+  const nameRows = db
+    .prepare(`SELECT id, username, display_name FROM users WHERE id IN (${placeholders})`)
+    .all(...idList) as { id: number; username: string; display_name: string | null }[];
+  for (const nr of nameRows) nameById.set(nr.id, { username: nr.username, display_name: nr.display_name });
+}
 
-    const dtos = rows.map((r) => {
-      const actor = r.actor_id !== null ? nameById.get(r.actor_id) : undefined;
-      const isUserTarget = USER_TARGET_ACTIONS.has(r.action) && r.target !== null && /^\d+$/.test(r.target);
-      const targetUser = isUserTarget ? nameById.get(Number(r.target)) : undefined;
-      return {
-        ...r,
-        target: redactAuditTarget(r.action, r.target),
-        actor_username: actor?.username ?? null,
-        actor_display_name: actor?.display_name ?? null,
-        target_username: targetUser?.username ?? null,
-        target_display_name: targetUser?.display_name ?? null,
-      };
-    });
-    reply.code(200).send(dtos);
+const dtos = rows.map((r) => {
+  const actor = r.actor_id !== null ? nameById.get(r.actor_id) : undefined;
+  const isUserTarget = USER_TARGET_ACTIONS.has(r.action) && r.target !== null && /^\d+$/.test(r.target);
+  const targetUser = isUserTarget ? nameById.get(Number(r.target)) : undefined;
+  return {
+    ...r,
+    target: redactAuditTarget(r.action, r.target),
+    actor_username: actor?.username ?? null,
+    actor_display_name: actor?.display_name ?? null,
+    target_username: targetUser?.username ?? null,
+    target_display_name: targetUser?.display_name ?? null,
+  };
+});
+reply.code(200).send(dtos);
 ```
 
 (The `redactAuditTarget` call is preserved verbatim; `USER_TARGET_ACTIONS` excludes `share_unlock_failure`, so a secret target is never used as a lookup id.)
@@ -834,6 +855,7 @@ git commit -m "feat(server): resolve audit actor/target ids to usernames (secret
 ## Task 5: Audit log shows usernames — web (render resolved names)
 
 **Files:**
+
 - Modify: `web/src/features/admin/types.ts:44-52` (`AuditRowDto`)
 - Modify: `web/src/features/admin/api.ts` (add `USER_TARGET_ACTIONS` client mirror)
 - Modify: `web/src/features/admin/AuditLog.tsx` (actor + target cells)
@@ -841,6 +863,7 @@ git commit -m "feat(server): resolve audit actor/target ids to usernames (secret
 - Test: `web/test/admin.test.tsx`
 
 **Interfaces:**
+
 - Consumes: the resolved-name fields from Task 4.
 - Produces: `AuditRowDto` gains `actor_username`, `actor_display_name`, `target_username`, `target_display_name` (all `string | null`). The actor cell renders `display_name || username || '#'+id` (or "النظام" for a null actor); the target cell renders the resolved name for user-target actions (with a "(محذوف)" hint when unresolved) and the raw redacted/plain target otherwise.
 
@@ -931,41 +954,37 @@ import { AUDIT_PAGE_SIZE, USER_TARGET_ACTIONS } from './api';
 Replace the **actor** `<td>` body with:
 
 ```tsx
-                  <td className="ps-3 pe-3 py-2">
-                    {entry.actor_id === null ? (
-                      <span className="text-ink-2">{t('admin.audit.system')}</span>
-                    ) : entry.actor_display_name || entry.actor_username ? (
-                      <span className="font-body text-ink">
-                        {entry.actor_display_name || entry.actor_username}
-                      </span>
-                    ) : (
-                      <bdi dir="ltr" className="font-mono text-ink">
-                        {`#${entry.actor_id}`}
-                      </bdi>
-                    )}
-                  </td>
+<td className="ps-3 pe-3 py-2">
+  {entry.actor_id === null ? (
+    <span className="text-ink-2">{t('admin.audit.system')}</span>
+  ) : entry.actor_display_name || entry.actor_username ? (
+    <span className="font-body text-ink">{entry.actor_display_name || entry.actor_username}</span>
+  ) : (
+    <bdi dir="ltr" className="font-mono text-ink">
+      {`#${entry.actor_id}`}
+    </bdi>
+  )}
+</td>
 ```
 
 Replace the **target** `<td>` body with:
 
 ```tsx
-                  <td className="ps-3 pe-3 py-2">
-                    {entry.target === null ? (
-                      <span className="text-ink-2">—</span>
-                    ) : entry.target_display_name || entry.target_username ? (
-                      <span className="font-body text-ink-2">
-                        {entry.target_display_name || entry.target_username}
-                      </span>
-                    ) : USER_TARGET_ACTIONS.has(entry.action) ? (
-                      <bdi dir="ltr" className="font-mono text-ink-2 break-all">
-                        {`#${entry.target} ${t('admin.audit.deleted')}`}
-                      </bdi>
-                    ) : (
-                      <bdi dir="ltr" className="font-mono text-ink-2 break-all">
-                        {entry.target}
-                      </bdi>
-                    )}
-                  </td>
+<td className="ps-3 pe-3 py-2">
+  {entry.target === null ? (
+    <span className="text-ink-2">—</span>
+  ) : entry.target_display_name || entry.target_username ? (
+    <span className="font-body text-ink-2">{entry.target_display_name || entry.target_username}</span>
+  ) : USER_TARGET_ACTIONS.has(entry.action) ? (
+    <bdi dir="ltr" className="font-mono text-ink-2 break-all">
+      {`#${entry.target} ${t('admin.audit.deleted')}`}
+    </bdi>
+  ) : (
+    <bdi dir="ltr" className="font-mono text-ink-2 break-all">
+      {entry.target}
+    </bdi>
+  )}
+</td>
 ```
 
 - [ ] **Step 6: Add i18n keys**
@@ -991,11 +1010,13 @@ git commit -m "feat(web): audit log renders resolved usernames/display-names, no
 ## Task 6: Total space used by all users — web (summary strip)
 
 **Files:**
+
 - Modify: `web/src/features/admin/UsersTable.tsx` (summary strip above the table)
 - Modify: `web/src/i18n/ar.json` (`admin.users.summary.*`)
 - Test: `web/test/admin.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `AdminUserDto.used_bytes` / `quota_bytes` (already returned by `GET /api/admin/users`; no server change).
 - Produces: a summary strip in `UsersTable` showing the user count, `Σ used_bytes` (formatted via `formatBytes`), and total allocated quota (`Σ quota_bytes`, with any null quota making the total read "غير محدودة").
 
@@ -1028,32 +1049,36 @@ Expected: FAIL — no `admin-users-summary` element.
 In `web/src/features/admin/UsersTable.tsx`, compute totals inside `UsersTable` (after `const users = …`):
 
 ```ts
-  const totalUsed = users.reduce((sum, u) => sum + u.used_bytes, 0);
-  const anyUnlimited = users.some((u) => u.quota_bytes === null);
-  const totalQuota = users.reduce((sum, u) => sum + (u.quota_bytes ?? 0), 0);
+const totalUsed = users.reduce((sum, u) => sum + u.used_bytes, 0);
+const anyUnlimited = users.some((u) => u.quota_bytes === null);
+const totalQuota = users.reduce((sum, u) => sum + (u.quota_bytes ?? 0), 0);
 ```
 
 Render a strip immediately above the table block (inside the `!isPending && !isError && users.length > 0` region, before the `<div className="overflow-x-auto …">`):
 
 ```tsx
-          <div
-            data-testid="admin-users-summary"
-            className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-[10px] border border-line bg-surface ps-3 pe-3 py-2 font-body text-sm text-ink-2"
-          >
-            <span>{t('admin.users.summary.count', { count: users.length })}</span>
-            <span>
-              {t('admin.users.summary.used')}{' '}
-              <bdi dir="ltr" className="font-mono text-ink">{formatBytes(totalUsed)}</bdi>
-            </span>
-            <span>
-              {t('admin.users.summary.allocated')}{' '}
-              {anyUnlimited ? (
-                <span className="text-ink">{t('admin.users.unlimited')}</span>
-              ) : (
-                <bdi dir="ltr" className="font-mono text-ink">{formatBytes(totalQuota)}</bdi>
-              )}
-            </span>
-          </div>
+<div
+  data-testid="admin-users-summary"
+  className="flex flex-wrap items-center gap-x-6 gap-y-1 rounded-[10px] border border-line bg-surface ps-3 pe-3 py-2 font-body text-sm text-ink-2"
+>
+  <span>{t('admin.users.summary.count', { count: users.length })}</span>
+  <span>
+    {t('admin.users.summary.used')}{' '}
+    <bdi dir="ltr" className="font-mono text-ink">
+      {formatBytes(totalUsed)}
+    </bdi>
+  </span>
+  <span>
+    {t('admin.users.summary.allocated')}{' '}
+    {anyUnlimited ? (
+      <span className="text-ink">{t('admin.users.unlimited')}</span>
+    ) : (
+      <bdi dir="ltr" className="font-mono text-ink">
+        {formatBytes(totalQuota)}
+      </bdi>
+    )}
+  </span>
+</div>
 ```
 
 (`formatBytes` is already imported at the top of the file.)
@@ -1089,11 +1114,13 @@ git commit -m "feat(web): admin users total-space summary strip"
 ## Task 7: Clear a user's space — server (`POST /api/admin/users/:id/clear`)
 
 **Files:**
+
 - Modify: `server/src/routes/admin.ts` — imports, `AdminRouteDeps`, new route
 - Modify: `server/src/app.ts:106-114` — thread `blobStore` into `adminRoutes`
 - Test: `server/test/routes/admin.test.ts`
 
 **Interfaces:**
+
 - Consumes: `blobStore.deleteBlob(storagePath)` (from `server/src/storage/blobs.ts`), `ensureUserRoots(db, userId, now)` (from `server/src/nodes/tree.js`), `writeAudit`.
 - Produces: `POST /api/admin/users/:id/clear` (requireAdmin, CSRF, audited). Permanently deletes every `folder`/`file` node the user owns (cascading their shares), unlinks the file blobs, resets `used_bytes = 0`, guarantees an empty root/trash, and returns the refreshed `AdminUserDto`. 404 for an unknown user. Writes a `user_clear_space` audit row (target = user id).
 
@@ -1119,15 +1146,13 @@ test('POST /users/:id/clear wipes the user drive, frees quota, keeps roots, unli
   // A folder + a file inside it, and used_bytes set to the file size.
   const folderId = Number(
     db!
-      .prepare(
-        `INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at) VALUES (?,?,?,?,?,?)`
-      )
-      .run(uid, roots.rootId, 'folder', 'Docs', NOW, NOW).lastInsertRowid
+      .prepare(`INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at) VALUES (?,?,?,?,?,?)`)
+      .run(uid, roots.rootId, 'folder', 'Docs', NOW, NOW).lastInsertRowid,
   );
   db!
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?)`
+       VALUES (?,?,?,?,?,?,?,?)`,
     )
     .run(uid, folderId, 'file', 'a.txt', 5, blobRel, NOW, NOW);
   db!.prepare('UPDATE users SET used_bytes = 5 WHERE id = ?').run(uid);
@@ -1164,14 +1189,12 @@ test('POST /users/:id/clear cascades the user shares', async () => {
     db!
       .prepare(
         `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
-         VALUES (?,?,?,?,?,?,?,?)`
+         VALUES (?,?,?,?,?,?,?,?)`,
       )
-      .run(uid, roots.rootId, 'file', 'b.txt', 0, `${uid}/b`, NOW, NOW).lastInsertRowid
+      .run(uid, roots.rootId, 'file', 'b.txt', 0, `${uid}/b`, NOW, NOW).lastInsertRowid,
   );
   db!
-    .prepare(
-      `INSERT INTO shares(node_id, owner_id, token, is_active, allow_download, created_at) VALUES (?,?,?,?,?,?)`
-    )
+    .prepare(`INSERT INTO shares(node_id, owner_id, token, is_active, allow_download, created_at) VALUES (?,?,?,?,?,?)`)
     .run(fileId, uid, 'tok-clear-test', 1, 1, NOW);
 
   await adminReq(built, 'POST', `/api/admin/users/${uid}/clear`, auth);
@@ -1217,7 +1240,7 @@ export interface AdminRouteDeps {
 Destructure it in the plugin body (`const { db, now, guards, passwordService } = deps;` → add `blobStore`):
 
 ```ts
-  const { db, now, guards, passwordService, blobStore } = deps;
+const { db, now, guards, passwordService, blobStore } = deps;
 ```
 
 - [ ] **Step 4: Wire the existing `blobStore` instance in `app.ts`**
@@ -1225,19 +1248,19 @@ Destructure it in the plugin body (`const { db, now, guards, passwordService } =
 In `server/src/app.ts`, move the `blobStore` creation **above** the `adminRoutes` registration and pass it in. Change the block at lines ~104-114 so it reads:
 
 ```ts
-  const blobStore = createBlobStore({ storageDir: deps.config.STORAGE_DIR });
+const blobStore = createBlobStore({ storageDir: deps.config.STORAGE_DIR });
 
-  // H5: admin control panel — every route `guards.requireAdmin` + CSRF
-  // (inherited) + audited. Same single `passwordService`/`guards`/`blobStore`.
-  await app.register(adminRoutes, {
-    db: deps.db,
-    now: deps.now,
-    guards,
-    passwordService,
-    blobStore,
-  });
+// H5: admin control panel — every route `guards.requireAdmin` + CSRF
+// (inherited) + audited. Same single `passwordService`/`guards`/`blobStore`.
+await app.register(adminRoutes, {
+  db: deps.db,
+  now: deps.now,
+  guards,
+  passwordService,
+  blobStore,
+});
 
-  await app.register(nodesRoutes, { db: deps.db, now: deps.now, guards, blobStore });
+await app.register(nodesRoutes, { db: deps.db, now: deps.now, guards, blobStore });
 ```
 
 (There is now a single `createBlobStore` call shared by admin, nodes, and public — remove the second `const blobStore = createBlobStore(...)` that previously sat between admin and nodes so it is not declared twice.)
@@ -1247,60 +1270,58 @@ In `server/src/app.ts`, move the `blobStore` creation **above** the `adminRoutes
 In `server/src/routes/admin.ts`, add this handler in the `// --- Users ---` section (e.g. after the `DELETE /api/admin/users/:id` handler, before `GET /users/:id/nodes`):
 
 ```ts
-  // Permanently wipe a user's whole drive (live + trashed): delete every
-  // folder/file they own (FK cascade removes subtrees + their shares), unlink
-  // the file blobs, reset used_bytes to 0, and guarantee an empty root/trash.
-  // The account/login/role/quota are preserved. Audited (metadata-only — no
-  // content is ever read).
-  app.post('/api/admin/users/:id/clear', { preHandler: guards.requireAdmin }, async (req, reply) => {
-    const id = parseIdParam(req);
-    if (id === null) {
-      reply.code(404).send({ error: 'not_found' });
-      return;
-    }
-    const target = db.prepare('SELECT id FROM users WHERE id = ?').get(id) as { id: number } | undefined;
-    if (!target) {
-      reply.code(404).send({ error: 'not_found' });
-      return;
-    }
+// Permanently wipe a user's whole drive (live + trashed): delete every
+// folder/file they own (FK cascade removes subtrees + their shares), unlink
+// the file blobs, reset used_bytes to 0, and guarantee an empty root/trash.
+// The account/login/role/quota are preserved. Audited (metadata-only — no
+// content is ever read).
+app.post('/api/admin/users/:id/clear', { preHandler: guards.requireAdmin }, async (req, reply) => {
+  const id = parseIdParam(req);
+  if (id === null) {
+    reply.code(404).send({ error: 'not_found' });
+    return;
+  }
+  const target = db.prepare('SELECT id FROM users WHERE id = ?').get(id) as { id: number } | undefined;
+  if (!target) {
+    reply.code(404).send({ error: 'not_found' });
+    return;
+  }
 
-    // Collect blob paths BEFORE deletion (unlink is post-commit — a rollback
-    // must never orphan a still-referenced blob).
-    const blobRows = db
-      .prepare(
-        `SELECT storage_path FROM nodes WHERE owner_id = ? AND kind = 'file' AND storage_path IS NOT NULL`
-      )
-      .all(id) as { storage_path: string }[];
-    const storagePaths = blobRows.map((r) => r.storage_path);
+  // Collect blob paths BEFORE deletion (unlink is post-commit — a rollback
+  // must never orphan a still-referenced blob).
+  const blobRows = db
+    .prepare(`SELECT storage_path FROM nodes WHERE owner_id = ? AND kind = 'file' AND storage_path IS NOT NULL`)
+    .all(id) as { storage_path: string }[];
+  const storagePaths = blobRows.map((r) => r.storage_path);
 
-    const nowMs = now();
-    const run = db.transaction(() => {
-      db.prepare(`DELETE FROM nodes WHERE owner_id = @id AND kind IN ('folder','file')`).run({ id });
-      db.prepare('UPDATE users SET used_bytes = 0, updated_at = @now WHERE id = @id').run({ id, now: nowMs });
-      writeAudit(
-        db,
-        { actorId: req.user!.id, action: 'user_clear_space', target: String(id), detail: `${storagePaths.length} files` },
-        now
-      );
-    });
-    run();
-
-    // Best-effort blob unlink (non-fatal; the scheduler's orphan sweep reaps
-    // any straggler, same as the user-delete path).
-    for (const p of storagePaths) {
-      try {
-        blobStore.deleteBlob(p);
-      } catch {
-        // ignore — orphan sweep handles it
-      }
-    }
-    // Root/trash are kind 'root'/'trash' (never deleted above), so this is
-    // idempotent; call it to guarantee the pair exists.
-    ensureUserRoots(db, id, nowMs);
-
-    const dto = db.prepare(`SELECT ${USER_DTO_COLUMNS} FROM users WHERE id = ?`).get(id) as AdminUserDto;
-    reply.code(200).send(dto);
+  const nowMs = now();
+  const run = db.transaction(() => {
+    db.prepare(`DELETE FROM nodes WHERE owner_id = @id AND kind IN ('folder','file')`).run({ id });
+    db.prepare('UPDATE users SET used_bytes = 0, updated_at = @now WHERE id = @id').run({ id, now: nowMs });
+    writeAudit(
+      db,
+      { actorId: req.user!.id, action: 'user_clear_space', target: String(id), detail: `${storagePaths.length} files` },
+      now,
+    );
   });
+  run();
+
+  // Best-effort blob unlink (non-fatal; the scheduler's orphan sweep reaps
+  // any straggler, same as the user-delete path).
+  for (const p of storagePaths) {
+    try {
+      blobStore.deleteBlob(p);
+    } catch {
+      // ignore — orphan sweep handles it
+    }
+  }
+  // Root/trash are kind 'root'/'trash' (never deleted above), so this is
+  // idempotent; call it to guarantee the pair exists.
+  ensureUserRoots(db, id, nowMs);
+
+  const dto = db.prepare(`SELECT ${USER_DTO_COLUMNS} FROM users WHERE id = ?`).get(id) as AdminUserDto;
+  reply.code(200).send(dto);
+});
 ```
 
 - [ ] **Step 6: Run the server suite to verify pass**
@@ -1322,6 +1343,7 @@ git commit -m "feat(server): POST /admin/users/:id/clear wipes a user drive (aud
 ## Task 8: Clear a user's space — web (chip + confirm modal + mutation)
 
 **Files:**
+
 - Modify: `web/src/features/admin/api.ts` (add `clearUserSpace`)
 - Modify: `web/src/features/admin/queries.ts` (add `useClearUserSpace`)
 - Modify: `web/src/features/admin/UsersTable.tsx` (clear-space chip + `ClearSpaceModal`)
@@ -1329,6 +1351,7 @@ git commit -m "feat(server): POST /admin/users/:id/clear wipes a user drive (aud
 - Test: `web/test/admin.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `POST /api/admin/users/:id/clear` (Task 7).
 - Produces: `clearUserSpace(id): Promise<AdminUserDto>` and `useClearUserSpace()` (invalidates `['admin','users']`). A "تفريغ المساحة" danger chip in each user row opens a danger `ConfirmModal` that calls the mutation.
 
@@ -1399,7 +1422,7 @@ import { useAdminUsers, usePatchUser, useResetPassword, useDeleteUser, useClearU
 Add a `clearTarget` state in `UsersTable`:
 
 ```ts
-  const [clearTarget, setClearTarget] = useState<AdminUserDto | null>(null);
+const [clearTarget, setClearTarget] = useState<AdminUserDto | null>(null);
 ```
 
 Pass `onClearSpace` into `UserRow` in the `.map`:
@@ -1411,15 +1434,17 @@ Pass `onClearSpace` into `UserRow` in the `.map`:
 Render the modal near the others:
 
 ```tsx
-      {clearTarget && <ClearSpaceModal user={clearTarget} onClose={() => setClearTarget(null)} />}
+{
+  clearTarget && <ClearSpaceModal user={clearTarget} onClose={() => setClearTarget(null)} />;
+}
 ```
 
 In `UserRow`'s props add `onClearSpace: () => void;`, destructure it, and add a danger chip next to the delete action:
 
 ```tsx
-            <button type="button" onClick={onClearSpace} className={ADMIN_ACTION_DANGER}>
-              {t('admin.users.action.clearSpace')}
-            </button>
+<button type="button" onClick={onClearSpace} className={ADMIN_ACTION_DANGER}>
+  {t('admin.users.action.clearSpace')}
+</button>
 ```
 
 Add the modal (mirroring `DeleteUserModal`, danger variant):
@@ -1461,9 +1486,7 @@ function ClearSpaceModal({ user, onClose }: { user: AdminUserDto; onClose: () =>
         </>
       }
     >
-      <p className="font-body text-sm text-ink">
-        {t('admin.clearSpace.body', { username: user.username })}
-      </p>
+      <p className="font-body text-sm text-ink">{t('admin.clearSpace.body', { username: user.username })}</p>
     </Modal>
   );
 }

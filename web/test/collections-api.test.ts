@@ -3,7 +3,8 @@ import * as api from '../src/features/collections/api';
 
 function jsonResponse(status: number, body?: unknown): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), {
-    status, headers: { 'content-type': 'application/json' },
+    status,
+    headers: { 'content-type': 'application/json' },
   });
 }
 function stubFetch(map: Record<string, unknown>) {
@@ -21,7 +22,10 @@ function stubFetch(map: Record<string, unknown>) {
   return mock;
 }
 const calls: Array<{ path: string; method: string; body: BodyInit | null | undefined }> = [];
-afterEach(() => { vi.unstubAllGlobals(); calls.length = 0; });
+afterEach(() => {
+  vi.unstubAllGlobals();
+  calls.length = 0;
+});
 
 describe('collections api', () => {
   test('createCollection POSTs /api/collections with the mapped snake_case body', async () => {
@@ -30,7 +34,10 @@ describe('collections api', () => {
     const call = calls.find((c) => c.method === 'POST');
     expect(call?.path).toBe('/api/collections');
     expect(JSON.parse(String(call?.body))).toEqual({
-      title: 'مسح', departments: ['المالية', 'الموارد'], deadline_at: 123, password: 'pw',
+      title: 'مسح',
+      departments: ['المالية', 'الموارد'],
+      deadline_at: 123,
+      password: 'pw',
     });
   });
 

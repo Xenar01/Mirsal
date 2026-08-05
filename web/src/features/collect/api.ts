@@ -61,10 +61,7 @@ interface CollectMetaBody {
   departments?: { id: number; name: string }[];
 }
 
-export async function fetchCollectMeta(
-  token: string,
-  opts?: { reveal?: boolean }
-): Promise<CollectMetaResult> {
+export async function fetchCollectMeta(token: string, opts?: { reveal?: boolean }): Promise<CollectMetaResult> {
   const res = await fetch(tokenPath(token), {
     // Until the recipient unlocks IN THIS page-load, omit the unlock cookie so
     // a still-valid cookie can't silently reveal a password collection — the
@@ -105,10 +102,7 @@ export async function fetchCollectMeta(
 
 /** The result of a password-unlock attempt. `remaining` is the per-token attempts left (from the header), or null if unreadable. */
 export type UnlockResult =
-  | { kind: 'ok' }
-  | { kind: 'wrong'; remaining: number | null }
-  | { kind: 'rateLimited' }
-  | { kind: 'error' };
+  { kind: 'ok' } | { kind: 'wrong'; remaining: number | null } | { kind: 'rateLimited' } | { kind: 'error' };
 
 export async function unlockCollection(token: string, password: string): Promise<UnlockResult> {
   const res = await fetch(`${tokenPath(token)}/unlock`, {
@@ -174,7 +168,7 @@ function mapSubmitResult(status: number, responseText: string): SubmitResult {
 export function submitResponse(
   token: string,
   input: { departmentId: number; files: File[]; note?: string },
-  opts?: { onProgress?: (fraction: number) => void }
+  opts?: { onProgress?: (fraction: number) => void },
 ): Promise<SubmitResult> {
   const form = new FormData();
   form.set('departmentId', String(input.departmentId));

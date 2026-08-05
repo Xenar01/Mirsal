@@ -16,11 +16,12 @@ lifecycle control:
 - **Auto-delete date** — the file/folder self-destructs at a chosen time.
 - **Manual delete** — trash → restore, then permanent delete.
 - **Start / stop sharing** — instant on/off toggle for a share link.
-- **Scheduled stop-sharing** — a link auto-expires at a chosen time (the *file remains*).
+- **Scheduled stop-sharing** — a link auto-expires at a chosen time (the _file remains_).
 
 The two lifecycle axes are **independent**: deleting the file vs. expiring the share.
 
 ### Goals
+
 - Admin control panel: create/manage users, optional quotas, usage visibility, audit trail.
 - Per-user Drive-like dashboard: folders, files, upload/download, move/rename/trash.
 - Public share links for files and whole folders, with password option, expiry, and on/off toggle.
@@ -29,6 +30,7 @@ The two lifecycle axes are **independent**: deleting the file vs. expiring the s
 - Arabic-first, full RTL; distinctive "sealed dispatch" visual identity.
 
 ### Confirmed product decisions (user-confirmed 2026-07-25)
+
 - **Brand name: Mirsal / مِرسال.**
 - **Admin cannot read user file contents.** Admin manages users/quotas/shares and sees metadata
   (names, sizes, dates, share status) only — never opens/downloads another user's file.
@@ -39,6 +41,7 @@ The two lifecycle axes are **independent**: deleting the file vs. expiring the s
 - **Folder shares offer a streamed "Download all as ZIP"** plus per-file download.
 
 ### Non-goals (v1 — YAGNI)
+
 - No real-time collaborative editing / in-browser document editing.
 - No self-service signup (admin provisions all accounts).
 - No file versioning / history.
@@ -51,11 +54,11 @@ The two lifecycle axes are **independent**: deleting the file vs. expiring the s
 
 ## 2. Personas & roles
 
-| Role | Can |
-|------|-----|
-| **admin** | Everything a user can with their OWN files, **plus**: create/disable/delete users, set optional quotas, reset passwords, view every user's storage usage + file *metadata* (not contents), view audit log, view/force-revoke any share. **Cannot** open/download another user's file contents. |
-| **user** | Manage only their own files/folders/shares; set auto-delete and share-expiry on their own items. Cannot see other users' content. |
-| **public recipient** | Anonymous holder of a share URL. Views/browses (read-only) and downloads **iff** the share is live (see §9 gate) and, if set, the correct password is supplied. |
+| Role                 | Can                                                                                                                                                                                                                                                                                            |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **admin**            | Everything a user can with their OWN files, **plus**: create/disable/delete users, set optional quotas, reset passwords, view every user's storage usage + file _metadata_ (not contents), view audit log, view/force-revoke any share. **Cannot** open/download another user's file contents. |
+| **user**             | Manage only their own files/folders/shares; set auto-delete and share-expiry on their own items. Cannot see other users' content.                                                                                                                                                              |
+| **public recipient** | Anonymous holder of a share URL. Views/browses (read-only) and downloads **iff** the share is live (see §9 gate) and, if set, the correct password is supplied.                                                                                                                                |
 
 **Invariant (§3.1):** the system always retains ≥1 active admin; an admin cannot demote/deactivate/delete
 themselves or the last active admin.
@@ -65,6 +68,7 @@ themselves or the last active admin.
 ## 3. Functional requirements
 
 ### 3.1 Admin control panel
+
 - List users (username, role, active, used / quota, created).
 - Create user: username, initial password (generated), role, optional quota. New users are seeded
   `must_change_password=1`.
@@ -75,6 +79,7 @@ themselves or the last active admin.
   reset, quota change, share force-revoke, admin-any cross-user metadata access.
 
 ### 3.2 User dashboard (Drive-like)
+
 - **Nav:** My Files (tree + breadcrumb), Shared (items I've shared), Trash.
 - **Browse:** grid or list; sort by name/size/date; open folder.
 - **Create:** new folder; upload files (drag-drop + picker; ≤100 MB each; multiple).
@@ -88,17 +93,19 @@ themselves or the last active admin.
   permanent delete).
 
 ### 3.3 Sharing (per file or per folder)
+
 - Create share → `/s/<token>` (32-byte CSPRNG, URL-safe).
 - **Active toggle** (`is_active`): start/stop instantly without deleting the link.
 - **Password** (optional): argon2id-hashed; rate-limited (per-IP **and** per-token global) on the public page.
 - **Expiry** (optional `expires_at`): scheduled auto-stop-sharing.
-- **Owner-facing status is distinct:** *active* / *stopped* (is_active=0) / *expired* (expires_at≤now).
+- **Owner-facing status is distinct:** _active_ / _stopped_ (is_active=0) / _expired_ (expires_at≤now).
   "Restart sharing" on an expired link requires setting a new future expiry (or clearing it), else it
   stays expired.
 - Copy-link, revoke (hard delete). Folder shares: read-only browse of the **current non-trashed** subtree,
   per-file download, and "Download all as ZIP" (streamed).
 
 ### 3.4 Lifecycle scheduling
+
 - **Auto-delete** (`nodes.auto_delete_at`, epoch-ms, must be future when set): at the time it passes the
   item is **trashed** (subtree stamped atomically), its shares go 410; the blob is purged after a 7-day
   grace. Applies even to items already in Trash (self-destruct honored). Clearable.
@@ -107,24 +114,27 @@ themselves or the last active admin.
 - Scheduler (§9) is **cleanup/UX only**, never the access gate.
 
 ### 3.5 Public share page `/s/<token>`
+
 - Bilingual (AR default; **AR/EN toggle** that flips `dir` to LTR for English; Accept-Language seeds default).
 - Live file: sealed-dispatch framing, name, size, type, **Download** as the unambiguous primary action.
 - Live folder: read-only subtree browser + per-file + "Download all as ZIP".
 - **Password gate:** the pre-unlock response reveals only "password required" + branding — **no** name,
   size, type, or listing. After unlock (§9) it issues a short-lived scoped cookie.
-- **410** distinguishes *stopped* vs *expired* with different copy; **404** for unknown token; wrong
+- **410** distinguishes _stopped_ vs _expired_ with different copy; **404** for unknown token; wrong
   password shows attempts-remaining. `Referrer-Policy: no-referrer` on these responses.
 
 ---
 
 ## 4. Visual design system ("Ink & Brass" — sealed dispatch)
 
-Grounded in the subject: *Mirsal = envoy/dispatch* — the **seal (ختم)**, Kufic inscription, dispatch
+Grounded in the subject: _Mirsal = envoy/dispatch_ — the **seal (ختم)**, Kufic inscription, dispatch
 register. Avoids the three generic AI-design defaults (cream+serif+terracotta / near-black+acid-green /
 broadsheet hairlines). The theme carries the **primary working surface**, not just the public page (§4.6).
 
 ### 4.1 Color tokens + **contrast contract** (WCAG: text ≥4.5:1, non-text ≥3:1)
+
 Light:
+
 ```
 --paper       #F4F5F3   app background (cool paper — not warm cream)
 --surface     #FFFFFF   cards / panels
@@ -139,15 +149,19 @@ Light:
 --clay        #A13D28   destructive / expiry            on paper      ≈  5.6:1 ✓
 --focus       #0E5A63   focus ring (2px + 2px offset; clears 3:1 on paper, brass, teal)
 ```
+
 Dark:
+
 ```
 --paper #0C1622  --surface #12212F  --ink #EAF0F2  --ink-2 #93A4B5  --line #23384B
 --brass #D2A24C (fill/decorative)  --brass-ink #0C1622  --teal #6FC5CE  --emerald #5FBF92  --clay #E08A74
 ```
+
 **Rule:** primary CTA = brass fill + `--brass-ink` label (never white-on-brass). Brass is never the
 foreground of essential text or a standalone icon on paper/white; the seal always has a `--brass-ring`.
 
 ### 4.2 Typography (self-hosted woff2 — no CDN, offline-safe, CSP-clean)
+
 - **Display / brand:** **Reem Kufi** (Kufic) — restrained: brand, page titles, dispatch moments.
 - **Body / UI:** **IBM Plex Sans Arabic** — all interface text (AR + Latin). Also carries any Arabic-Indic
   digits if ever used.
@@ -155,6 +169,7 @@ foreground of essential text or a standalone icon on paper/white; the seal alway
 - Scale (rem): 0.75 · 0.875 · 1 · 1.125 · 1.375 · 1.75 · 2.25 · 3. Weights: Kufi 500/700; Sans 400/500/600; Mono 400/500.
 
 ### 4.3 Layout — **logical properties only** (correct RTL)
+
 - Root `dir="rtl"`. **Nav rail = inline-start** (visually right in RTL); **details drawer = inline-end**
   (visually left) — never the same edge. All spacing/positioning uses `margin/padding/inset-inline`,
   `border-inline-start`, `text-align:start`. No physical `left/right` in layout CSS.
@@ -163,6 +178,7 @@ foreground of essential text or a standalone icon on paper/white; the seal alway
 - Radius 10px cards / 8px controls / circular seal. Subtle single soft shadow; lean on hairlines + spacing.
 
 ### 4.4 Signature — the brass seal (ختم), specified
+
 - **Concrete artifact:** a circular seal — outer `--brass-ring` ring (2px), brass body, carrying a **Kufic
   "م" / مِرسال** monogram. One built reference component; two sizes: **badge** (18px, on shared items in
   lists) and **dispatch seal** (72px, public page + share-created moment).
@@ -172,21 +188,25 @@ foreground of essential text or a standalone icon on paper/white; the seal alway
   (disambiguates brass-seal "shared" vs emerald "active").
 
 ### 4.5 Localization details
+
 - **Numerals: Western 0–9 everywhere** (safest for mixed audience + mono + public links). Plex Mono only
   ever carries Latin digits. (Arabic-Indic digits, if ever wanted in the Arabic UI, render in Plex Sans, not mono.)
 - Dates render in Asia/Damascus; the public EN view renders dates in an EN-readable form.
 
 ### 4.6 Working-surface theme — "dispatch register"
+
 The file list is styled as a **dispatch register**: monospace ledger columns for size/date/(share token),
 a **status/stamp column** (seal badge when shared), Kufic section headers. This carries the identity on the
 screen users spend ~95% of their time on — not just `/s/<token>`.
 
 ### 4.7 Icon system
+
 Restrained custom line-icons matching ink/brass stroke weight + corner treatment; brand-critical glyphs are
 subject-grounded: **folder = dispatch dossier**, **share = seal/send**, **active-share = stamp**,
 **auto-delete = hourglass**, **expiry = calendar-stamp**. Named set + these customizations (no stock Lucide look).
 
 ### 4.8 Quality floor
+
 Responsive to mobile (§ mobile rules below) · visible keyboard focus (`--focus` token) · `prefers-reduced-motion`
 respected · light + dark · contrast contract §4.1 · status never color-only.
 
@@ -195,22 +215,23 @@ sheet; storage meter → inside the nav drawer; top bar collapses search/actions
 primary; picker is the mobile upload path.
 
 ### 4.9 Copy inventory (authored, MSA voice; AR+EN on public pages)
+
 Every empty/error state has authored copy, active voice, next-step guidance (not mood). Representative set
 (full strings live in i18n during build):
 
-| State | AR (voice) | EN (public only) |
-|---|---|---|
-| Empty root | "لا ملفات بعد. ارفع أول ملف أو أنشئ مجلدًا." | — |
-| Empty Trash | "المهملات فارغة." | — |
-| Empty Shared | "لم تُشارك أي عنصر بعد." | — |
-| Upload >100MB | "الحد الأقصى ١٠٠ ميغابايت للملف. قسّم الملف أو اضغطه." | — |
-| Quota exceeded | "لا تتوفر مساحة كافية. احذف عناصر أو راجع المشرف." | — |
-| Upload failed | "تعذّر رفع الملف. تحقق من الاتصال وحاول مجددًا." | — |
-| Public 404 | "هذا الرابط غير موجود." | "This link doesn't exist." |
-| Public 410 stopped | "أوقف المُرسِل مشاركة هذا الملف." | "The sender turned this link off." |
-| Public 410 expired | "انتهت صلاحية هذا الرابط في <date>." | "This link expired on <date>." |
-| Password gate | "هذا الملف محمي بكلمة مرور." | "This file is password-protected." |
-| Wrong password | "كلمة مرور غير صحيحة. المحاولات المتبقية: <n>." | "Incorrect password. <n> attempts left." |
+| State              | AR (voice)                                             | EN (public only)                         |
+| ------------------ | ------------------------------------------------------ | ---------------------------------------- |
+| Empty root         | "لا ملفات بعد. ارفع أول ملف أو أنشئ مجلدًا."           | —                                        |
+| Empty Trash        | "المهملات فارغة."                                      | —                                        |
+| Empty Shared       | "لم تُشارك أي عنصر بعد."                               | —                                        |
+| Upload >100MB      | "الحد الأقصى ١٠٠ ميغابايت للملف. قسّم الملف أو اضغطه." | —                                        |
+| Quota exceeded     | "لا تتوفر مساحة كافية. احذف عناصر أو راجع المشرف."     | —                                        |
+| Upload failed      | "تعذّر رفع الملف. تحقق من الاتصال وحاول مجددًا."       | —                                        |
+| Public 404         | "هذا الرابط غير موجود."                                | "This link doesn't exist."               |
+| Public 410 stopped | "أوقف المُرسِل مشاركة هذا الملف."                      | "The sender turned this link off."       |
+| Public 410 expired | "انتهت صلاحية هذا الرابط في <date>."                   | "This link expired on <date>."           |
+| Password gate      | "هذا الملف محمي بكلمة مرور."                           | "This file is password-protected."       |
+| Wrong password     | "كلمة مرور غير صحيحة. المحاولات المتبقية: <n>."        | "Incorrect password. <n> attempts left." |
 
 ---
 
@@ -230,6 +251,7 @@ Internet ─HTTPS→ IT gateway (terminates TLS) ─HTTP→ host nginx :80/:443
                         ├── better-sqlite3 (WAL, busy_timeout, foreign_keys=ON) → /data/db/app.db
                         └── blobs → /data/storage/<owner_id>/<node_id>   (bind-mounted)
 ```
+
 - **One** Docker service; data bind-mounted to `/var/www/projects/mirsal/data/` (survives rebuilds).
 - **Sessions over JWT:** an opaque 32-byte session token in an `httpOnly; Secure; SameSite=Lax` cookie,
   hashed in a `sessions` table, **validated on every request** (cheap SQLite lookup joining `users`,
@@ -237,6 +259,7 @@ Internet ─HTTPS→ IT gateway (terminates TLS) ─HTTP→ host nginx :80/:443
   user's sessions. (No stateless-JWT revocation gap — resolves must-fix M1 simply.)
 
 ### Module boundaries (each independently testable)
+
 `db/` (schema, migrations, PRAGMAs, typed queries) · `auth/` (argon2, sessions, CSRF, guards) ·
 `storage/` (streamed blob write/read/delete by id; temp-file + rename; quota reserve/commit) ·
 `nodes/` (tree CRUD, move w/ cycle guard, trash subtree, recursive delete, roll-ups) ·
@@ -308,6 +331,7 @@ shares(
 audit_log(id INTEGER PK, actor_id INTEGER, action TEXT NOT NULL, target TEXT, detail TEXT, created_at INTEGER NOT NULL)
 share_access_log(id INTEGER PK, share_id INTEGER NOT NULL, ip TEXT, ua TEXT, accessed_at INTEGER NOT NULL)
 ```
+
 Delete order (documented, top of every cascade): shares → child nodes depth-first → parent node → blobs
 (after commit) → empty storage dirs. FKs `ON DELETE CASCADE` back this up; app performs it explicitly and
 in order so blob unlink happens post-commit. `audit_log.actor_id` intentionally unconstrained (survives user delete).
@@ -379,7 +403,7 @@ reject trashed nodes and anything not a descendant → 403. No path strings from
   local-chain curl check.
 - **Isolation:** every node/share query scoped by `owner_id`. Admin has **no** content path; admin
   cross-user metadata access is audited.
-- **Public folder shares:** canonical subtree resolver (§7) is the *only* addressing; blocks the
+- **Public folder shares:** canonical subtree resolver (§7) is the _only_ addressing; blocks the
   cross-subtree IDOR. Pre-unlock response leaks nothing identifying.
 - **Share tokens:** 32-byte CSPRNG, constant-time compare; per-IP **and** per-token global attempt caps.
 - **Downloads:** always `Content-Disposition: attachment` encoded per **RFC 6266**
@@ -404,6 +428,7 @@ reject trashed nodes and anything not a descendant → 403. No path strings from
 immediately even before the next tick; re-toggling `is_active` with a past `expires_at` still 410s.
 
 **Scheduler (node-cron, 60s) — cleanup/UX only:**
+
 - **Reentrancy lock:** a module-level run-lock skips a tick if the prior run is still in flight.
 - `dueTrash(now)`: nodes with `auto_delete_at≤now` and not yet trashed → stamp subtree trashed, 410 their
   shares, set `purge_after = now + 7d`. Bounded batch per tick (`LIMIT`).
@@ -472,7 +497,7 @@ immediately even before the next tick; re-toggling `is_active` with a past `expi
 - **E2E smoke (curl vs running container):** login → change password → create folder → upload → share →
   `/s/<token>` meta → public download → ZIP → stop sharing → 410 → set past expiry variant.
 - **Local chain check:** `curl --resolve project4.system.mow.gov.sy:443:127.0.0.1
-  https://project4.system.mow.gov.sy/` returns the app AND share links come back `https://` (proxy-proto).
+https://project4.system.mow.gov.sy/` returns the app AND share links come back `https://` (proxy-proto).
 - **Manual UI pass:** admin creates a user; that user uploads/organizes/shares; recipient (AR + EN toggle)
   downloads; RTL + dark + mobile + reduced-motion + focus-visible + Arabic-filename download spot-checks.
 
@@ -481,6 +506,7 @@ immediately even before the next tick; re-toggling `is_active` with a past `expi
 ---
 
 ## 12. Risks & mitigations
+
 - **Memory pressure (box already swapping):** single lean container; SQLite not Postgres; **build off the
   runtime path** (host/off-box, capped); streamed uploads/downloads; argon2 concurrency semaphore. Monitor RSS.
 - **No at-rest encryption v1:** acceptable for stated use; documented v2 option. Share passwords + HTTPS
@@ -492,6 +518,7 @@ immediately even before the next tick; re-toggling `is_active` with a past `expi
 ---
 
 ## 13. What the user provides / decisions
+
 1. ~~Review this spec~~ — **approved 2026-07-25**.
 2. ~~Brand name~~ — **Mirsal / مِرسال** (confirmed).
 3. ~~Three defaults~~ — **all confirmed** (§1): admin metadata-only; auto-delete → Trash + 7-day grace;
@@ -501,4 +528,7 @@ immediately even before the next tick; re-toggling `is_active` with a past `expi
 
 At launch the agent hands over: admin URL + generated admin credential (from the root-only file), a short
 runbook, and the backup/restore recipe.
+
+```
+
 ```

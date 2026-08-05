@@ -36,11 +36,7 @@ export default function DashboardShell({ children }: { children: ReactNode }) {
       <header className="flex flex-wrap items-center justify-between gap-4 border-b border-line bg-surface ps-4 pe-4 py-3">
         <span className="font-display text-lg text-ink">{t('brand.name')}</span>
         <div className="flex items-center gap-3">
-          {user && (
-            <span className="min-w-0 max-w-[45vw] truncate font-body text-sm text-ink-2">
-              {user.username}
-            </span>
-          )}
+          {user && <span className="min-w-0 max-w-[45vw] truncate font-body text-sm text-ink-2">{user.username}</span>}
           <Button variant="ghost" onClick={onLogout}>
             {t('account.logout')}
           </Button>

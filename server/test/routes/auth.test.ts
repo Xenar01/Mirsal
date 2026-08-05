@@ -68,14 +68,14 @@ async function makeApp(): Promise<FastifyInstance> {
 async function seedUser(
   username: string,
   password: string,
-  overrides: Partial<{ role: string; isActive: number }> = {}
+  overrides: Partial<{ role: string; isActive: number }> = {},
 ): Promise<number> {
   const passwordService = createPasswordService(TEST_ARGON);
   const hash = await passwordService.hashPassword(password);
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 0, ?, ?)`
+       VALUES (?, ?, ?, ?, 0, ?, ?)`,
     )
     .run(username, hash, overrides.role ?? 'admin', overrides.isActive ?? 1, NOW, NOW);
   return Number(info.lastInsertRowid);
@@ -88,7 +88,7 @@ function findCookie(cookies: InjectedCookie[], name: string): InjectedCookie | u
 async function login(
   built: FastifyInstance,
   username: string,
-  password: string
+  password: string,
 ): Promise<{
   statusCode: number;
   body: unknown;
@@ -417,12 +417,12 @@ test('password change: the update+revoke+recreate+audit sequence is atomic — a
   // aren't in the same db.transaction() as this INSERT, they'd survive the
   // failure; wrapped correctly, they must be rolled back too.
   const originalPrepare = db!.prepare.bind(db!);
-   
+
   (db as any).prepare = (sql: string, ...rest: unknown[]) => {
     if (sql.includes('INSERT INTO sessions')) {
       throw new Error('simulated failure mid password-change transaction');
     }
-     
+
     return (originalPrepare as any)(sql, ...rest);
   };
 
@@ -434,7 +434,6 @@ test('password change: the update+revoke+recreate+audit sequence is atomic — a
     payload: { current: 'pw', new: 'a-new-password-123' },
   });
 
-   
   (db as any).prepare = originalPrepare;
 
   expect(res.statusCode).toBe(500); // unhandled throw -> Fastify's default error handler
@@ -487,9 +486,10 @@ test('login: rootNodeId is a positive id backed by a real kind=root node owned b
   const userId = await seedUser('freshuser', 'pw', { role: 'user' });
 
   // Precondition: this user's roots were never materialized.
-  const before = db!
-    .prepare('SELECT root_node_id, trash_node_id FROM users WHERE id = ?')
-    .get(userId) as { root_node_id: number | null; trash_node_id: number | null };
+  const before = db!.prepare('SELECT root_node_id, trash_node_id FROM users WHERE id = ?').get(userId) as {
+    root_node_id: number | null;
+    trash_node_id: number | null;
+  };
   expect(before.root_node_id).toBeNull();
 
   const res = await built.inject({
@@ -504,17 +504,16 @@ test('login: rootNodeId is a positive id backed by a real kind=root node owned b
   expect(body.user.rootNodeId).toBeGreaterThan(0);
 
   // It corresponds to a real synthetic root node owned by that user.
-  const rootRow = db!
-    .prepare('SELECT owner_id, kind FROM nodes WHERE id = ?')
-    .get(body.user.rootNodeId) as { owner_id: number; kind: string } | undefined;
+  const rootRow = db!.prepare('SELECT owner_id, kind FROM nodes WHERE id = ?').get(body.user.rootNodeId) as
+    { owner_id: number; kind: string } | undefined;
   expect(rootRow).toBeDefined();
   expect(rootRow!.kind).toBe('root');
   expect(rootRow!.owner_id).toBe(userId);
 
   // And it was persisted onto the user row (ensureUserRoots materialized it).
-  const after = db!
-    .prepare('SELECT root_node_id FROM users WHERE id = ?')
-    .get(userId) as { root_node_id: number | null };
+  const after = db!.prepare('SELECT root_node_id FROM users WHERE id = ?').get(userId) as {
+    root_node_id: number | null;
+  };
   expect(after.root_node_id).toBe(body.user.rootNodeId);
 });
 

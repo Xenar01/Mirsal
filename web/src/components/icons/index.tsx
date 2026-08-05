@@ -24,12 +24,7 @@ export interface IconProps {
   title?: string;
 }
 
-function IconBase({
-  size = 24,
-  className,
-  title,
-  children,
-}: IconProps & { children: ReactNode }) {
+function IconBase({ size = 24, className, title, children }: IconProps & { children: ReactNode }) {
   const labelled = title !== undefined;
   return (
     <svg

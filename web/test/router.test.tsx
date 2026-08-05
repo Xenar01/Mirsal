@@ -30,7 +30,7 @@ function renderApp(initialEntries: string[]) {
           </ToastProvider>
         </AuthProvider>
       </I18nextProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -43,7 +43,7 @@ describe('RequireAuth route guard', () => {
     // /api/auth/me → 401 (no session)
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(401))
+      vi.fn(async () => jsonResponse(401)),
     );
 
     renderApp(['/']);
@@ -54,30 +54,22 @@ describe('RequireAuth route guard', () => {
   test('a user with mustChangePassword is redirected from / to /change-password', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        jsonResponse(200, { id: 1, username: 'admin', role: 'admin', mustChangePassword: true })
-      )
+      vi.fn(async () => jsonResponse(200, { id: 1, username: 'admin', role: 'admin', mustChangePassword: true })),
     );
 
     renderApp(['/']);
 
-    expect(
-      await screen.findByRole('heading', { name: i18n.t('changePassword.title') })
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: i18n.t('changePassword.title') })).toBeInTheDocument();
   });
 
   test('an authenticated user without mustChangePassword sees the dashboard at /', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        jsonResponse(200, { id: 1, username: 'admin', role: 'admin', mustChangePassword: false })
-      )
+      vi.fn(async () => jsonResponse(200, { id: 1, username: 'admin', role: 'admin', mustChangePassword: false })),
     );
 
     renderApp(['/']);
 
-    expect(
-      await screen.findByRole('heading', { name: i18n.t('dashboard.title') })
-    ).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: i18n.t('dashboard.title') })).toBeInTheDocument();
   });
 });

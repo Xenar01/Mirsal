@@ -54,9 +54,7 @@ export function findServerRoot(startDir: string): string {
     }
     const parent = path.dirname(dir);
     if (parent === dir) {
-      throw new Error(
-        `Could not locate server package root (no package.json found above ${startDir})`
-      );
+      throw new Error(`Could not locate server package root (no package.json found above ${startDir})`);
     }
     dir = parent;
   }
@@ -70,12 +68,7 @@ export function findServerRoot(startDir: string): string {
  * not exist yet in this phase — `buildApp` guards on it below so the API
  * boots and its tests pass without a frontend build.
  */
-const WEB_DIST = path.resolve(
-  findServerRoot(path.dirname(fileURLToPath(import.meta.url))),
-  '..',
-  'web',
-  'dist'
-);
+const WEB_DIST = path.resolve(findServerRoot(path.dirname(fileURLToPath(import.meta.url))), '..', 'web', 'dist');
 
 /**
  * Registers every route plugin onto `app`. `health` was H1's only route;

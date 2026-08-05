@@ -34,12 +34,7 @@ export default function Modal({ open, onClose, title, children, footer }: ModalP
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
-        data-testid="modal-scrim"
-        aria-hidden="true"
-        onClick={onClose}
-        className="fixed inset-0 bg-ink/50"
-      />
+      <div data-testid="modal-scrim" aria-hidden="true" onClick={onClose} className="fixed inset-0 bg-ink/50" />
       <div
         ref={panelRef}
         role="dialog"
@@ -65,9 +60,7 @@ export default function Modal({ open, onClose, title, children, footer }: ModalP
         {/* Scrollable body — the only part that overflows a tall modal. */}
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">{children}</div>
         {footer ? (
-          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-6 py-4">
-            {footer}
-          </div>
+          <div className="flex shrink-0 items-center justify-end gap-2 border-t border-line px-6 py-4">{footer}</div>
         ) : null}
       </div>
     </div>

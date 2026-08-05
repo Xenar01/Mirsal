@@ -39,20 +39,15 @@ function seedUser(
     role: string;
     isActive: number;
     mustChangePassword: number;
-  }> = {}
+  }> = {},
 ): number {
   const t = Date.now();
-  const {
-    username = 'alice',
-    role = 'user',
-    isActive = 1,
-    mustChangePassword = 0,
-  } = overrides;
+  const { username = 'alice', role = 'user', isActive = 1, mustChangePassword = 0 } = overrides;
 
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, created_at, updated_at)
-       VALUES (?, 'x', ?, ?, ?, ?, ?)`
+       VALUES (?, 'x', ?, ?, ?, ?, ?)`,
     )
     .run(username, role, isActive, mustChangePassword, t, t);
 
@@ -91,7 +86,7 @@ test('revokeSession deletes the row so validateSession returns null next', () =>
   expect(row).toBeUndefined();
 });
 
-test('revokeAllForUser deletes all of that user\'s sessions', () => {
+test("revokeAllForUser deletes all of that user's sessions", () => {
   const uid = seedUser();
   const now = Date.now();
   const { token: t1 } = createSession(db!, uid, now);

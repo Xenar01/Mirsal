@@ -63,7 +63,7 @@ function seedUser(): number {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, created_at, updated_at)
-       VALUES (?, 'x', 'user', 1, 0, ?, ?)`
+       VALUES (?, 'x', 'user', 1, 0, ?, ?)`,
     )
     .run(`user-${Math.random()}`, t, t);
   return Number(info.lastInsertRowid);
@@ -75,7 +75,7 @@ function seedFileNode(uid: number, now: number, overrides: { trashedAt?: number 
   const info = db!
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, trashed_at, created_at, updated_at)
-       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @trashedAt, @now, @now)`
+       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @trashedAt, @now, @now)`,
     )
     .run({
       ownerId: uid,
@@ -245,35 +245,35 @@ test('setShareState does not modify a share owned by a different user (IDOR guar
 // --- ownerStatus (pure) ---------------------------------------------------------------
 
 test('ownerStatus: is_active=0 -> stopped', () => {
-  expect(
-    ownerStatus({ is_active: 0, expires_at: null, download_limit: null, download_count: 0 }, Date.now())
-  ).toBe('stopped');
+  expect(ownerStatus({ is_active: 0, expires_at: null, download_limit: null, download_count: 0 }, Date.now())).toBe(
+    'stopped',
+  );
 });
 
 test('ownerStatus: is_active=1 and expires_at in the past -> expired', () => {
   const now = Date.now();
-  expect(
-    ownerStatus({ is_active: 1, expires_at: now - 1, download_limit: null, download_count: 0 }, now)
-  ).toBe('expired');
+  expect(ownerStatus({ is_active: 1, expires_at: now - 1, download_limit: null, download_count: 0 }, now)).toBe(
+    'expired',
+  );
 });
 
 test('ownerStatus: is_active=1 and expires_at=null -> active', () => {
-  expect(
-    ownerStatus({ is_active: 1, expires_at: null, download_limit: null, download_count: 0 }, Date.now())
-  ).toBe('active');
+  expect(ownerStatus({ is_active: 1, expires_at: null, download_limit: null, download_count: 0 }, Date.now())).toBe(
+    'active',
+  );
 });
 
 test('ownerStatus: download_limit reached -> exhausted (checked before expired)', () => {
   const now = Date.now();
-  expect(
-    ownerStatus({ is_active: 1, expires_at: now - 1, download_limit: 1, download_count: 1 }, now)
-  ).toBe('exhausted');
+  expect(ownerStatus({ is_active: 1, expires_at: now - 1, download_limit: 1, download_count: 1 }, now)).toBe(
+    'exhausted',
+  );
 });
 
 test('ownerStatus: download_count below download_limit -> active', () => {
-  expect(
-    ownerStatus({ is_active: 1, expires_at: null, download_limit: 3, download_count: 2 }, Date.now())
-  ).toBe('active');
+  expect(ownerStatus({ is_active: 1, expires_at: null, download_limit: 3, download_count: 2 }, Date.now())).toBe(
+    'active',
+  );
 });
 
 // --- revokeShare ---------------------------------------------------------------

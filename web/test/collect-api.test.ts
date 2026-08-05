@@ -23,13 +23,22 @@ afterEach(() => {
 
 describe('collect api — fetchCollectMeta', () => {
   test('404 → notFound; isOpen:false → closed; needsPassword&&!departments → password; departments → open', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(404, { error: 'not_found' })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(404, { error: 'not_found' })),
+    );
     expect(await fetchCollectMeta(TOKEN)).toEqual({ state: 'notFound' });
 
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, { isOpen: false })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { isOpen: false })),
+    );
     expect(await fetchCollectMeta(TOKEN)).toEqual({ state: 'closed' });
 
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, { isOpen: true, needsPassword: true })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { isOpen: true, needsPassword: true })),
+    );
     expect(await fetchCollectMeta(TOKEN)).toEqual({ state: 'password' });
 
     const openBody = {
@@ -38,23 +47,35 @@ describe('collect api — fetchCollectMeta', () => {
       title: 'مسح الاحتياجات',
       hasTemplate: true,
       templateName: 'template.xlsx',
-      departments: [{ id: 1, name: 'المالية' }, { id: 2, name: 'الموارد' }],
+      departments: [
+        { id: 1, name: 'المالية' },
+        { id: 2, name: 'الموارد' },
+      ],
     };
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, openBody)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, openBody)),
+    );
     expect(await fetchCollectMeta(TOKEN)).toEqual({
       state: 'open',
       meta: {
         title: 'مسح الاحتياجات',
         hasTemplate: true,
         templateName: 'template.xlsx',
-        departments: [{ id: 1, name: 'المالية' }, { id: 2, name: 'الموارد' }],
+        departments: [
+          { id: 1, name: 'المالية' },
+          { id: 2, name: 'الموارد' },
+        ],
         needsPassword: false,
       },
     });
   });
 
   test('an unexpected status maps to error', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(500, {})));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(500, {})),
+    );
     expect(await fetchCollectMeta(TOKEN)).toEqual({ state: 'error' });
   });
 
@@ -79,30 +100,42 @@ describe('collect api — fetchCollectMeta', () => {
 
 describe('collect api — unlockCollection', () => {
   test('200 → ok', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, { ok: true })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { ok: true })),
+    );
     expect(await unlockCollection(TOKEN, 'pw')).toEqual({ kind: 'ok' });
   });
 
   test('401 reads x-ratelimit-remaining → wrong{remaining}', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(401, { error: 'invalid_password' }, { 'x-ratelimit-remaining': '3' }))
+      vi.fn(async () => jsonResponse(401, { error: 'invalid_password' }, { 'x-ratelimit-remaining': '3' })),
     );
     expect(await unlockCollection(TOKEN, 'pw')).toEqual({ kind: 'wrong', remaining: 3 });
   });
 
   test('401 without a readable header degrades to remaining:null', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(401, { error: 'invalid_password' })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(401, { error: 'invalid_password' })),
+    );
     expect(await unlockCollection(TOKEN, 'pw')).toEqual({ kind: 'wrong', remaining: null });
   });
 
   test('429 → rateLimited', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(429, {})));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(429, {})),
+    );
     expect(await unlockCollection(TOKEN, 'pw')).toEqual({ kind: 'rateLimited' });
   });
 
   test('anything else → error', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(500, {})));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(500, {})),
+    );
     expect(await unlockCollection(TOKEN, 'pw')).toEqual({ kind: 'error' });
   });
 
@@ -134,15 +167,10 @@ class FakeXHR {
   status = 0;
   responseText = '';
   listeners: Record<string, Array<() => void>> = {};
-  uploadListeners: Record<
-    string,
-    Array<(e: { lengthComputable: boolean; loaded: number; total: number }) => void>
-  > = {};
+  uploadListeners: Record<string, Array<(e: { lengthComputable: boolean; loaded: number; total: number }) => void>> =
+    {};
   upload = {
-    addEventListener: (
-      type: string,
-      cb: (e: { lengthComputable: boolean; loaded: number; total: number }) => void
-    ) => {
+    addEventListener: (type: string, cb: (e: { lengthComputable: boolean; loaded: number; total: number }) => void) => {
       (this.uploadListeners[type] ??= []).push(cb);
     },
   };
@@ -229,7 +257,7 @@ describe('collect api — submitResponse (XHR, with upload progress)', () => {
     const p = submitResponse(
       TOKEN,
       { departmentId: 1, files: [new File(['x'], 'a.txt')] },
-      { onProgress: (f) => seen.push(f) }
+      { onProgress: (f) => seen.push(f) },
     );
     const xhr = lastXhr();
     xhr.emitProgress(50, 100);

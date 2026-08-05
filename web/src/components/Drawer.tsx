@@ -35,12 +35,7 @@ export default function Drawer({ open, onClose, title, children }: DrawerProps) 
 
   return (
     <div className="fixed inset-0 z-40">
-      <div
-        data-testid="drawer-scrim"
-        aria-hidden="true"
-        onClick={onClose}
-        className="fixed inset-0 bg-ink/40"
-      />
+      <div data-testid="drawer-scrim" aria-hidden="true" onClick={onClose} className="fixed inset-0 bg-ink/40" />
       <div
         ref={panelRef}
         role="dialog"
@@ -53,12 +48,7 @@ export default function Drawer({ open, onClose, title, children }: DrawerProps) 
           <h2 id={titleId} className="font-display text-lg">
             {title}
           </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label={t('common.close')}
-            className="inline-flex text-ink-2"
-          >
+          <button type="button" onClick={onClose} aria-label={t('common.close')} className="inline-flex text-ink-2">
             <Close size={20} />
           </button>
         </div>

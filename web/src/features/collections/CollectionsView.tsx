@@ -63,9 +63,7 @@ export default function CollectionsView() {
           <p className="font-body text-sm text-ink-2">{t('collections.empty')}</p>
         )}
 
-        {!isPending && !isError && collections.length > 0 && (
-          <CollectionList collections={collections} />
-        )}
+        {!isPending && !isError && collections.length > 0 && <CollectionList collections={collections} />}
       </div>
 
       {createOpen && <CreateCollectionModal onClose={() => setCreateOpen(false)} />}
@@ -84,12 +82,8 @@ function CollectionList({ collections }: { collections: CollectionSummaryDto[] }
           <thead>
             <tr className="border-b border-line text-ink-2">
               <th className="ps-3 pe-3 py-2 text-start font-medium">{t('collections.col.title')}</th>
-              <th className="ps-3 pe-3 py-2 text-start font-medium">
-                {t('collections.col.responses')}
-              </th>
-              <th className="ps-3 pe-3 py-2 text-start font-medium">
-                {t('collections.col.status')}
-              </th>
+              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('collections.col.responses')}</th>
+              <th className="ps-3 pe-3 py-2 text-start font-medium">{t('collections.col.status')}</th>
               <th className="ps-3 pe-3 py-2 text-start font-medium">
                 <span className="sr-only">{t('collections.col.actions')}</span>
               </th>

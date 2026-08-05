@@ -4,7 +4,7 @@
 
 **Goal:** Add a per-file download cap (default 1) to shares; when exhausted, run the creator's chosen terminal action — `stop` the link or `delete` the file (default → Trash, purged after 24h).
 
-**Architecture:** Additive `shares` columns + an incremental DB migration (v1→v2). The counted download is a **POST** (passive GETs can't burn/bypass); enforcement counts only *completed* deliveries in the DB and bounds concurrency with an in-memory reservation map; a completed download that reaches the limit runs an idempotent terminal helper in one transaction. UI: a new share-console section (creator) and a static label + POST download (recipient).
+**Architecture:** Additive `shares` columns + an incremental DB migration (v1→v2). The counted download is a **POST** (passive GETs can't burn/bypass); enforcement counts only _completed_ deliveries in the DB and bounds concurrency with an in-memory reservation map; a completed download that reaches the limit runs an idempotent terminal helper in one transaction. UI: a new share-console section (creator) and a static label + POST download (recipient).
 
 **Tech Stack:** Fastify 5 + better-sqlite3 (server, ESM, `.js` import specifiers), React 19 + Vite + react-i18next + Tailwind (web), Vitest both sides, Zod validation.
 
@@ -21,6 +21,7 @@
 ## File Structure
 
 **Server**
+
 - `server/src/db/schema.sql` — MODIFY: append 3 `shares` columns (after `revoked_at`).
 - `server/src/db/migrate.ts` — MODIFY: incremental versioned runner (v2 ALTERs, `sqlite_master` fresh-detection).
 - `server/src/shares/shares.ts` — MODIFY: `Share` interface (+3 cols), `ownerStatus` (+`exhausted`), `SetShareStatePatch` + `setShareState` (+`downloadLimit`/`onExhaust`, count reset).
@@ -30,6 +31,7 @@
 - `server/src/routes/public.ts` — MODIFY: `POST /download` counted path; `GET /download` → 405 for limited; meta + `download_limit`.
 
 **Web**
+
 - `web/src/features/dashboard/share/types.ts` — MODIFY: `ShareDto` (+3 fields, +`exhausted` status).
 - `web/src/features/dashboard/share/api.ts` — MODIFY: `PatchShareVars` + `patchShare` mapping (camel→snake).
 - `web/src/features/dashboard/share/ShareModal.tsx` — MODIFY: add `DownloadLimitSection`.
@@ -47,11 +49,13 @@
 ## Task 1: Schema + incremental migration (v1 → v2)
 
 **Files:**
+
 - Modify: `server/src/db/schema.sql`
 - Modify: `server/src/db/migrate.ts`
 - Test: `server/test/db/migrate.test.ts`
 
 **Interfaces:**
+
 - Produces: `LATEST_VERSION = 2`, and `shares` rows now carry `download_limit INTEGER|null`, `download_count INTEGER`, `on_exhaust 'stop'|'delete'`.
 
 - [ ] **Step 1: Write the failing migration tests** — append to `server/test/db/migrate.test.ts`:
@@ -91,20 +95,25 @@ describe('migrate v2 download-limit columns', () => {
   });
 
   it('fresh and upgraded shares schemas converge (identical table_info)', () => {
-    const fresh = new Database(':memory:'); migrate(fresh);
+    const fresh = new Database(':memory:');
+    migrate(fresh);
     const upgraded = new Database(':memory:');
     upgraded.exec(V1_SHARES);
     upgraded.exec('CREATE TABLE schema_version(version INTEGER NOT NULL, applied_at INTEGER NOT NULL)');
     upgraded.prepare('INSERT INTO schema_version(version, applied_at) VALUES (1, 0)').run();
     migrate(upgraded);
     expect(fresh.prepare('PRAGMA table_info(shares)').all()).toEqual(
-      upgraded.prepare('PRAGMA table_info(shares)').all()
+      upgraded.prepare('PRAGMA table_info(shares)').all(),
     );
   });
 
   it('is idempotent on repeated boots', () => {
-    const db = new Database(':memory:'); migrate(db);
-    expect(() => { migrate(db); migrate(db); }).not.toThrow();
+    const db = new Database(':memory:');
+    migrate(db);
+    expect(() => {
+      migrate(db);
+      migrate(db);
+    }).not.toThrow();
     expect((db.prepare('SELECT COUNT(*) c FROM schema_version').get() as { c: number }).c).toBe(1);
   });
 
@@ -130,6 +139,7 @@ describe('migrate v2 download-limit columns', () => {
   on_exhaust TEXT NOT NULL DEFAULT 'delete' CHECK(on_exhaust IN ('stop','delete'))
 );
 ```
+
 (Columns MUST be last — ALTER appends at the end, so this keeps fresh and upgraded column order identical.)
 
 - [ ] **Step 4: Rewrite `migrate.ts` as an incremental runner:**
@@ -142,7 +152,10 @@ export const LATEST_VERSION = 2;
 /** Back-compat alias for any importer of the old single-shot constant. */
 export const SCHEMA_VERSION = LATEST_VERSION;
 
-interface MigrationStep { version: number; up(db: Database.Database): void; }
+interface MigrationStep {
+  version: number;
+  up(db: Database.Database): void;
+}
 
 const STEPS: MigrationStep[] = [
   {
@@ -166,12 +179,14 @@ const STEPS: MigrationStep[] = [
  */
 export function migrate(db: Database.Database): void {
   db.exec('CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL, applied_at INTEGER NOT NULL)');
-  let current = (db.prepare('SELECT MAX(version) AS version FROM schema_version').get() as {
-    version: number | null;
-  }).version ?? 0;
+  let current =
+    (
+      db.prepare('SELECT MAX(version) AS version FROM schema_version').get() as {
+        version: number | null;
+      }
+    ).version ?? 0;
 
-  const hasCore =
-    db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='shares'").get() !== undefined;
+  const hasCore = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='shares'").get() !== undefined;
 
   if (current === 0 && !hasCore) {
     const schemaSql = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');
@@ -210,11 +225,13 @@ git commit -m "feat(db): incremental migration + download-limit columns (v2)"
 ## Task 2: Share model — interface, DTO, exhausted status
 
 **Files:**
+
 - Modify: `server/src/shares/shares.ts` (`Share`, `ownerStatus`)
 - Modify: `server/src/routes/shares.ts` (`ShareDto`, `toShareDto`)
 - Test: `server/test/routes/shares.test.ts`
 
 **Interfaces:**
+
 - Produces: `Share` gains `download_limit: number|null`, `download_count: number`, `on_exhaust: 'stop'|'delete'`. `ownerStatus(share, now)` return union gains `'exhausted'`. `ShareDto` gains `download_limit`, `download_count`, `on_exhaust`, and `status` union gains `'exhausted'`.
 
 - [ ] **Step 1: Write the failing test** — add to `server/test/routes/shares.test.ts` (adapt the file's existing setup/login helpers):
@@ -242,7 +259,7 @@ export interface Share {
 
 export function ownerStatus(
   share: Pick<Share, 'is_active' | 'expires_at' | 'download_limit' | 'download_count'>,
-  now: number
+  now: number,
 ): 'active' | 'stopped' | 'expired' | 'exhausted' {
   if (!share.is_active) return 'stopped';
   if (share.download_limit != null && share.download_count >= share.download_limit) return 'exhausted';
@@ -285,11 +302,13 @@ function toShareDto(share: Share, publicBaseUrl: string, nowMs: number): ShareDt
 ## Task 3: PATCH validation + folder-kind guard + count reset
 
 **Files:**
+
 - Modify: `server/src/shares/shares.ts` (`SetShareStatePatch`, `setShareState`)
 - Modify: `server/src/routes/shares.ts` (`patchShareSchema`, handler)
 - Test: `server/test/routes/shares.test.ts`
 
 **Interfaces:**
+
 - Consumes: `Share`, `setShareState` (Task 2).
 - Produces: PATCH `/api/shares/:id` accepts `download_limit` (int≥1|null) and `on_exhaust` ('stop'|'delete'); rejects `download_limit` on a folder share (400) / missing-foreign (404); setting a limit resets `download_count` to 0.
 
@@ -306,7 +325,9 @@ it('PATCH accepts on_exhaust', async () => {
 it('PATCH download_limit on a FOLDER share → 400', async () => {
   // create folder share; PATCH { download_limit: 1 } → 400.
 });
-it('PATCH download_limit=0 → 400 (invalid_body)', async () => { /* Zod rejects */ });
+it('PATCH download_limit=0 → 400 (invalid_body)', async () => {
+  /* Zod rejects */
+});
 it('PATCH clearing download_limit → null', async () => {
   // PATCH { download_limit: null } → dto.download_limit===null, download_count===0.
 });
@@ -325,19 +346,21 @@ export interface SetShareStatePatch {
   onExhaust?: 'stop' | 'delete';
 }
 ```
+
 Inside `setShareState`, after the existing `expiresAt` block:
 
 ```ts
-  if (patch.downloadLimit !== undefined) {
-    // Setting (or clearing) the limit starts a fresh budget — one atomic UPDATE.
-    sets.push('download_limit = @downloadLimit', 'download_count = 0');
-    params.downloadLimit = patch.downloadLimit;
-  }
-  if (patch.onExhaust !== undefined) {
-    sets.push('on_exhaust = @onExhaust');
-    params.onExhaust = patch.onExhaust;
-  }
+if (patch.downloadLimit !== undefined) {
+  // Setting (or clearing) the limit starts a fresh budget — one atomic UPDATE.
+  sets.push('download_limit = @downloadLimit', 'download_count = 0');
+  params.downloadLimit = patch.downloadLimit;
+}
+if (patch.onExhaust !== undefined) {
+  sets.push('on_exhaust = @onExhaust');
+  params.onExhaust = patch.onExhaust;
+}
 ```
+
 (The existing single `UPDATE shares SET ${sets.join(', ')} …` already applies limit + count reset together atomically.)
 
 - [ ] **Step 4: Extend `patchShareSchema` + handler (`routes/shares.ts`):**
@@ -353,31 +376,43 @@ const patchShareSchema = z
   })
   .refine(
     (v) =>
-      v.is_active !== undefined || v.password !== undefined || v.expires_at !== undefined ||
-      v.download_limit !== undefined || v.on_exhaust !== undefined,
-    { message: 'at least one field is required' }
+      v.is_active !== undefined ||
+      v.password !== undefined ||
+      v.expires_at !== undefined ||
+      v.download_limit !== undefined ||
+      v.on_exhaust !== undefined,
+    { message: 'at least one field is required' },
   );
 ```
+
 In the PATCH handler, after `parsed` succeeds and before building `patch`, add the folder-kind guard (only when a limit is being set):
 
 ```ts
-    const uid = req.user!.id;
-    if (parsed.data.download_limit !== undefined) {
-      const row = db
-        .prepare(
-          'SELECT n.kind AS kind FROM shares s JOIN nodes n ON n.id = s.node_id WHERE s.id = @id AND s.owner_id = @uid'
-        )
-        .get({ id, uid }) as { kind: string } | undefined;
-      if (!row) { reply.code(404).send({ error: 'not_found' }); return; }        // missing/foreign — no oracle
-      if (row.kind !== 'file') { reply.code(400).send({ code: 'not_a_file' }); return; }
-    }
+const uid = req.user!.id;
+if (parsed.data.download_limit !== undefined) {
+  const row = db
+    .prepare(
+      'SELECT n.kind AS kind FROM shares s JOIN nodes n ON n.id = s.node_id WHERE s.id = @id AND s.owner_id = @uid',
+    )
+    .get({ id, uid }) as { kind: string } | undefined;
+  if (!row) {
+    reply.code(404).send({ error: 'not_found' });
+    return;
+  } // missing/foreign — no oracle
+  if (row.kind !== 'file') {
+    reply.code(400).send({ code: 'not_a_file' });
+    return;
+  }
+}
 ```
+
 Then extend the forwarding block:
 
 ```ts
-    if (parsed.data.download_limit !== undefined) patch.downloadLimit = parsed.data.download_limit;
-    if (parsed.data.on_exhaust !== undefined) patch.onExhaust = parsed.data.on_exhaust;
+if (parsed.data.download_limit !== undefined) patch.downloadLimit = parsed.data.download_limit;
+if (parsed.data.on_exhaust !== undefined) patch.onExhaust = parsed.data.on_exhaust;
 ```
+
 (Keep the existing `const updated = await setShareState(db, uid, id, patch);` — note `uid` is now declared earlier; remove the later duplicate `const uid`.)
 
 - [ ] **Step 5: Run tests** — `npx vitest run test/routes/shares.test.ts` → PASS.
@@ -389,10 +424,12 @@ Then extend the forwarding block:
 ## Task 4: Exhaustion terminal helper
 
 **Files:**
+
 - Create: `server/src/shares/exhaustion.ts`
 - Test: `server/test/shares/exhaustion.test.ts`
 
 **Interfaces:**
+
 - Consumes: `trashNode` (`nodes/trash.js`), `writeAudit` (`audit.js`), `Clock` (`clock.js`).
 - Produces: `applyExhaustion(db, share, now)` where `share: { id; owner_id; node_id; on_exhaust; download_limit }`. `EXHAUST_PURGE_GRACE_MS`.
 
@@ -408,13 +445,20 @@ import { applyExhaustion, EXHAUST_PURGE_GRACE_MS } from '../../src/shares/exhaus
 // use the same fixtures the other shares tests use (seed a user, a file node).
 
 describe('applyExhaustion', () => {
-  it('stop: sets is_active=0 and writes an audit row', () => { /* … */ });
-  it('delete: trashes the node, stamps purge_after ≈ now+24h, audits, in one txn', () => { /* … */
+  it('stop: sets is_active=0 and writes an audit row', () => {
+    /* … */
+  });
+  it('delete: trashes the node, stamps purge_after ≈ now+24h, audits, in one txn', () => {
+    /* … */
     // assert nodes.trashed_at set, purge_after === now + EXHAUST_PURGE_GRACE_MS,
     // audit_log has action 'share_download_limit_deleted' with actor_id NULL.
   });
-  it('delete: already-trashed node → no-op, does not throw', () => { /* … */ });
-  it('delete: foreign/missing node → no-op, does not throw', () => { /* … */ });
+  it('delete: already-trashed node → no-op, does not throw', () => {
+    /* … */
+  });
+  it('delete: foreign/missing node → no-op, does not throw', () => {
+    /* … */
+  });
 });
 ```
 
@@ -449,19 +493,22 @@ export function applyExhaustion(db: Database.Database, share: ExhaustibleShare, 
   if (share.on_exhaust === 'stop') {
     db.transaction(() => {
       db.prepare('UPDATE shares SET is_active = 0 WHERE id = @id').run({ id: share.id });
-      writeAudit(db, {
-        actorId: null,
-        action: 'share_download_limit_stopped',
-        target: String(share.id),
-        detail: JSON.stringify({ owner_id: share.owner_id, limit: share.download_limit }),
-      }, now);
+      writeAudit(
+        db,
+        {
+          actorId: null,
+          action: 'share_download_limit_stopped',
+          target: String(share.id),
+          detail: JSON.stringify({ owner_id: share.owner_id, limit: share.download_limit }),
+        },
+        now,
+      );
     })();
     return;
   }
 
   const node = db.prepare('SELECT owner_id, trashed_at FROM nodes WHERE id = @id').get({ id: share.node_id }) as
-    | { owner_id: number; trashed_at: number | null }
-    | undefined;
+    { owner_id: number; trashed_at: number | null } | undefined;
   if (!node || node.owner_id !== share.owner_id || node.trashed_at !== null) {
     return; // already trashed / foreign / gone — nothing to do
   }
@@ -476,12 +523,16 @@ export function applyExhaustion(db: Database.Database, share: ExhaustibleShare, 
       deadline: nowMs + EXHAUST_PURGE_GRACE_MS,
       id: share.node_id,
     });
-    writeAudit(db, {
-      actorId: null,
-      action: 'share_download_limit_deleted',
-      target: String(share.id),
-      detail: JSON.stringify({ owner_id: share.owner_id, node_id: share.node_id, limit: share.download_limit }),
-    }, now);
+    writeAudit(
+      db,
+      {
+        actorId: null,
+        action: 'share_download_limit_deleted',
+        target: String(share.id),
+        detail: JSON.stringify({ owner_id: share.owner_id, node_id: share.node_id, limit: share.download_limit }),
+      },
+      now,
+    );
   })();
 }
 ```
@@ -495,10 +546,12 @@ export function applyExhaustion(db: Database.Database, share: ExhaustibleShare, 
 ## Task 5: In-memory download reservation registry
 
 **Files:**
+
 - Create: `server/src/shares/download-reservations.ts`
 - Test: `server/test/shares/download-reservations.test.ts`
 
 **Interfaces:**
+
 - Produces: `createReservations()` → `{ tryReserve(shareId, completed, limit): boolean; release(shareId): void; inFlight(shareId): number }`.
 
 - [ ] **Step 1: Write failing tests:**
@@ -510,19 +563,23 @@ import { createReservations } from '../../src/shares/download-reservations.js';
 describe('download reservations', () => {
   it('reserves up to (limit - completed) then rejects', () => {
     const r = createReservations();
-    expect(r.tryReserve(1, 0, 1)).toBe(true);   // completed 0, limit 1 → ok, inflight 1
-    expect(r.tryReserve(1, 0, 1)).toBe(false);  // 0 + inflight 1 >= 1 → reject
+    expect(r.tryReserve(1, 0, 1)).toBe(true); // completed 0, limit 1 → ok, inflight 1
+    expect(r.tryReserve(1, 0, 1)).toBe(false); // 0 + inflight 1 >= 1 → reject
     expect(r.inFlight(1)).toBe(1);
   });
   it('release frees a slot and deletes the key at zero', () => {
     const r = createReservations();
-    r.tryReserve(2, 0, 2); r.tryReserve(2, 0, 2);
-    r.release(2); expect(r.inFlight(2)).toBe(1);
-    r.release(2); expect(r.inFlight(2)).toBe(0);
+    r.tryReserve(2, 0, 2);
+    r.tryReserve(2, 0, 2);
+    r.release(2);
+    expect(r.inFlight(2)).toBe(1);
+    r.release(2);
+    expect(r.inFlight(2)).toBe(0);
   });
   it('release never goes negative', () => {
     const r = createReservations();
-    r.release(9); expect(r.inFlight(9)).toBe(0);
+    r.release(9);
+    expect(r.inFlight(9)).toBe(0);
   });
 });
 ```
@@ -576,18 +633,24 @@ export function createReservations(): Reservations {
 ## Task 6: Counted POST download + GET-405 + meta
 
 **Files:**
+
 - Modify: `server/src/routes/public.ts`
 - Test: `server/test/routes/public.test.ts`
 
 **Interfaces:**
+
 - Consumes: `createReservations` (Task 5), `applyExhaustion` (Task 4), `Share` w/ new cols (Task 2).
 - Produces: `POST /api/public/:token/download` (counted); `GET …/download` → 405 for limited shares; meta `GET /api/public/:token` includes `download_limit`.
 
 - [ ] **Step 1: Write failing tests** — add to `server/test/routes/public.test.ts`. The concurrency/abort/crash tests MUST use a **real listening server + socket**, mirroring the existing `/zip` mid-stream-abort test in this file (search it for `listen(` / `.destroy()` and reuse that harness). Concrete cases:
 
 ```ts
-it('meta includes download_limit for a limited file share', async () => { /* set limit=1; GET meta → body.download_limit===1 */ });
-it('GET /download on a limited share → 405', async () => { /* limit=1; GET → 405 */ });
+it('meta includes download_limit for a limited file share', async () => {
+  /* set limit=1; GET meta → body.download_limit===1 */
+});
+it('GET /download on a limited share → 405', async () => {
+  /* limit=1; GET → 405 */
+});
 it('POST /download on a limited share streams the file and counts it', async () => {
   // limit=2; POST → 200 + body bytes; download_count becomes 1.
 });
@@ -612,117 +675,145 @@ it('unlimited file share: GET /download still streams (unchanged)', async () => 
 - [ ] **Step 3: Add reservation state at the top of `publicRoutes`** (next to `activeZipCount`):
 
 ```ts
-  const reservations = createReservations();
-  // Idempotent per-request release (mirrors the /zip WeakSet slot pattern).
-  const reservationHolders = new WeakSet<FastifyRequest>();
-  const reservedShareId = new WeakMap<FastifyRequest, number>();
-  function releaseReservation(req: FastifyRequest): void {
-    if (reservationHolders.delete(req)) {
-      const sid = reservedShareId.get(req);
-      if (sid !== undefined) reservations.release(sid);
-    }
+const reservations = createReservations();
+// Idempotent per-request release (mirrors the /zip WeakSet slot pattern).
+const reservationHolders = new WeakSet<FastifyRequest>();
+const reservedShareId = new WeakMap<FastifyRequest, number>();
+function releaseReservation(req: FastifyRequest): void {
+  if (reservationHolders.delete(req)) {
+    const sid = reservedShareId.get(req);
+    if (sid !== undefined) reservations.release(sid);
   }
+}
 ```
+
 Add the import at the top: `import { createReservations } from '../shares/download-reservations.js';` and `import { applyExhaustion } from '../shares/exhaustion.js';`
 
 - [ ] **Step 4: Extend the meta response** — in `GET /api/public/:token`, widen the node SELECT and body:
 
 ```ts
-    const node = db
-      .prepare('SELECT kind, name, size_bytes FROM nodes WHERE id = @nodeId')
-      .get({ nodeId: share.node_id }) as { kind: Node['kind']; name: string; size_bytes: number };
+const node = db
+  .prepare('SELECT kind, name, size_bytes FROM nodes WHERE id = @nodeId')
+  .get({ nodeId: share.node_id }) as { kind: Node['kind']; name: string; size_bytes: number };
 
-    reply.code(200).send({
-      token: share.token,
-      kind: node.kind,
-      name: node.name,
-      size_bytes: node.size_bytes,
-      isFolder: node.kind === 'folder',
-      allow_download: !!share.allow_download,
-      // Static config (not a live count) — drives the recipient's "one-time / up to N" label.
-      download_limit: share.download_limit,
-    });
+reply.code(200).send({
+  token: share.token,
+  kind: node.kind,
+  name: node.name,
+  size_bytes: node.size_bytes,
+  isFolder: node.kind === 'folder',
+  allow_download: !!share.allow_download,
+  // Static config (not a live count) — drives the recipient's "one-time / up to N" label.
+  download_limit: share.download_limit,
+});
 ```
 
 - [ ] **Step 5: Gate the existing GET /download** — at the top of the `scope.get('/api/public/:token/download', …)` handler, right after `if (!requireUnlocked(...)) return;`:
 
 ```ts
-      // A limited share must be downloaded via POST (an explicit human action);
-      // a passive GET can neither burn nor bypass the cap.
-      if (share.download_limit !== null) {
-        reply.code(405).send({ error: 'method_not_allowed' });
-        return;
-      }
+// A limited share must be downloaded via POST (an explicit human action);
+// a passive GET can neither burn nor bypass the cap.
+if (share.download_limit !== null) {
+  reply.code(405).send({ error: 'method_not_allowed' });
+  return;
+}
 ```
 
 - [ ] **Step 6: Add the counted POST /download** — inside the same `downloadScope` register block, add an `onResponse` release backstop and the POST route. The body reuses the GET handler's gate/resolve/open logic; the new parts are the reserve (before anything fallible) and the completion in the raw `'close'` handler:
 
 ```ts
-    scope.addHook('onResponse', async (req) => releaseReservation(req)); // release-only backstop
+scope.addHook('onResponse', async (req) => releaseReservation(req)); // release-only backstop
 
-    scope.post('/api/public/:token/download', async (req, reply) => {
-      const { token } = req.params as { token: string };
-      const share = loadLiveShare(reply, token);
-      if (!share) return;
-      if (!requireUnlocked(req, reply, share)) return;
-      if (!share.allow_download) { reply.code(403).send({ error: 'forbidden' }); return; }
+scope.post('/api/public/:token/download', async (req, reply) => {
+  const { token } = req.params as { token: string };
+  const share = loadLiveShare(reply, token);
+  if (!share) return;
+  if (!requireUnlocked(req, reply, share)) return;
+  if (!share.allow_download) {
+    reply.code(403).send({ error: 'forbidden' });
+    return;
+  }
 
-      const nodeParam = (req.query as { node?: string }).node ?? share.node_id;
-      let node: Node;
-      try { node = resolveInSubtree(db, share, nodeParam); }
-      catch (e) { if (e instanceof ForbiddenError) { reply.code(403).send({ error: 'forbidden' }); return; } throw e; }
-      if (node.kind !== 'file' || !node.storage_path) { reply.code(403).send({ error: 'forbidden' }); return; }
+  const nodeParam = (req.query as { node?: string }).node ?? share.node_id;
+  let node: Node;
+  try {
+    node = resolveInSubtree(db, share, nodeParam);
+  } catch (e) {
+    if (e instanceof ForbiddenError) {
+      reply.code(403).send({ error: 'forbidden' });
+      return;
+    }
+    throw e;
+  }
+  if (node.kind !== 'file' || !node.storage_path) {
+    reply.code(403).send({ error: 'forbidden' });
+    return;
+  }
 
-      const stream = blobStore.readBlob(node.storage_path);
-      try { await waitForOpen(stream); }
-      catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'ENOENT') { reply.code(404).send({ error: 'not_found' }); return; }
-        throw e;
+  const stream = blobStore.readBlob(node.storage_path);
+  try {
+    await waitForOpen(stream);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
+    throw e;
+  }
+
+  // --- Reserve (only for limited shares). Synchronous read-then-reserve, no
+  //     await between, so it is atomic under Node's single thread. ---
+  if (share.download_limit !== null) {
+    const completed = (
+      db.prepare('SELECT download_count FROM shares WHERE id = @id').get({ id: share.id }) as {
+        download_count: number;
       }
-
-      // --- Reserve (only for limited shares). Synchronous read-then-reserve, no
-      //     await between, so it is atomic under Node's single thread. ---
-      if (share.download_limit !== null) {
-        const completed = (db.prepare('SELECT download_count FROM shares WHERE id = @id').get({ id: share.id }) as {
-          download_count: number;
-        }).download_count;
-        if (!reservations.tryReserve(share.id, completed, share.download_limit)) {
-          stream.destroy();
-          // Same shape as a stopped share — no "live-but-reserved" oracle.
-          reply.code(410).send({ error: 'gone', reason: 'stopped', expires_at: share.expires_at });
-          return;
-        }
-        reservationHolders.add(req);
-        reservedShareId.set(req, share.id);
-        // Wire the release+completion BEFORE anything fallible (logShareAccess).
-        reply.raw.once('close', () => {
-          try {
-            releaseReservation(req);
-            if (reply.raw.writableFinished) {
-              const upd = db
-                .prepare(
-                  `UPDATE shares SET download_count = download_count + 1
+    ).download_count;
+    if (!reservations.tryReserve(share.id, completed, share.download_limit)) {
+      stream.destroy();
+      // Same shape as a stopped share — no "live-but-reserved" oracle.
+      reply.code(410).send({ error: 'gone', reason: 'stopped', expires_at: share.expires_at });
+      return;
+    }
+    reservationHolders.add(req);
+    reservedShareId.set(req, share.id);
+    // Wire the release+completion BEFORE anything fallible (logShareAccess).
+    reply.raw.once('close', () => {
+      try {
+        releaseReservation(req);
+        if (reply.raw.writableFinished) {
+          const upd = db
+            .prepare(
+              `UPDATE shares SET download_count = download_count + 1
                    WHERE id = @id AND download_limit IS NOT NULL AND download_count < download_limit
-                   RETURNING id, owner_id, node_id, on_exhaust, download_limit, download_count`
-                )
-                .get({ id: share.id }) as
-                | { id: number; owner_id: number; node_id: number; on_exhaust: 'stop' | 'delete'; download_limit: number; download_count: number }
-                | undefined;
-              if (upd && upd.download_count === upd.download_limit) applyExhaustion(db, upd, now);
-            }
-          } catch (err) {
-            req.log.error({ err }, 'download completion handler failed');
-          }
-        });
+                   RETURNING id, owner_id, node_id, on_exhaust, download_limit, download_count`,
+            )
+            .get({ id: share.id }) as
+            | {
+                id: number;
+                owner_id: number;
+                node_id: number;
+                on_exhaust: 'stop' | 'delete';
+                download_limit: number;
+                download_count: number;
+              }
+            | undefined;
+          if (upd && upd.download_count === upd.download_limit) applyExhaustion(db, upd, now);
+        }
+      } catch (err) {
+        req.log.error({ err }, 'download completion handler failed');
       }
-
-      reply.header('Content-Disposition', buildContentDisposition(node.name));
-      reply.header('X-Content-Type-Options', 'nosniff');
-      reply.header('Content-Type', node.mime_type ?? 'application/octet-stream');
-      logShareAccess(share.id, req);
-      return reply.send(stream);
     });
+  }
+
+  reply.header('Content-Disposition', buildContentDisposition(node.name));
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('Content-Type', node.mime_type ?? 'application/octet-stream');
+  logShareAccess(share.id, req);
+  return reply.send(stream);
+});
 ```
+
 (If TypeScript flags `RETURNING`'s row type, cast as shown. `now` is the plugin's `Clock`.)
 
 - [ ] **Step 7: Run tests** — `npx vitest run test/routes/public.test.ts` → PASS. If the abort/crash tests are flaky under fake timers, keep them on the real-listen harness (they must use actual sockets).
@@ -734,12 +825,14 @@ Add the import at the top: `import { createReservations } from '../shares/downlo
 ## Task 7: Web boundary — types + api mappings
 
 **Files:**
+
 - Modify: `web/src/features/dashboard/share/types.ts`
 - Modify: `web/src/features/dashboard/share/api.ts`
 - Modify: `web/src/features/public/api.ts`
 - Test: `web/test/api.test.ts`
 
 **Interfaces:**
+
 - Produces: `ShareDto` (+3 fields, +`exhausted`), `PatchShareVars` (+`downloadLimit`/`onExhaust`), `patchShare` snake_case mapping, `PublicMeta` (+`download_limit`).
 
 - [ ] **Step 1: Write failing test** — add to `web/test/api.test.ts`:
@@ -815,12 +908,14 @@ export interface PublicMeta {
 ## Task 8: Creator UI — DownloadLimitSection + StatusChip + i18n(ar)
 
 **Files:**
+
 - Modify: `web/src/features/dashboard/share/ShareModal.tsx`
 - Modify: `web/src/components/StatusChip.tsx`
 - Modify: `web/src/i18n/ar.json`
 - Test: `web/test/share.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `usePatchShare` (existing; passes `PatchShareVars` through), `ShareDto` (Task 7).
 
 - [ ] **Step 1: Write failing tests** — in `web/test/share.test.tsx`: (a) update the `mkShare` fixture to include `download_limit: null, download_count: 0, on_exhaust: 'delete'`; (b) `DownloadLimitSection` renders for a file node, shows "Unlimited", lets you Apply a limit (asserts `patchShare` called with `{ downloadLimit, onExhaust }`), shows the Delete warning when `delete` is selected, and is absent for a folder node; (c) `StatusChip` renders an "exhausted" label.
@@ -845,20 +940,30 @@ function DownloadLimitSection({ share, nodeKind }: { share: ShareDto; nodeKind: 
   function apply(e?: FormEvent) {
     e?.preventDefault();
     const n = Number(value);
-    if (!Number.isInteger(n) || n < 1) { setError(t('share.downloadLimit.invalid')); return; }
+    if (!Number.isInteger(n) || n < 1) {
+      setError(t('share.downloadLimit.invalid'));
+      return;
+    }
     setError(null);
     patch.mutate(
       { id: share.id, downloadLimit: n, onExhaust: mode },
-      { onSuccess: () => toast({ kind: 'success', message: t('share.downloadLimit.toast.set') }),
-        onError: () => toast({ kind: 'error', message: t('share.toast.error') }) }
+      {
+        onSuccess: () => toast({ kind: 'success', message: t('share.downloadLimit.toast.set') }),
+        onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
+      },
     );
   }
   function clear() {
     setError(null);
     patch.mutate(
       { id: share.id, downloadLimit: null },
-      { onSuccess: () => { toast({ kind: 'success', message: t('share.downloadLimit.toast.cleared') }); setValue(''); },
-        onError: () => toast({ kind: 'error', message: t('share.toast.error') }) }
+      {
+        onSuccess: () => {
+          toast({ kind: 'success', message: t('share.downloadLimit.toast.cleared') });
+          setValue('');
+        },
+        onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
+      },
     );
   }
 
@@ -872,10 +977,18 @@ function DownloadLimitSection({ share, nodeKind }: { share: ShareDto; nodeKind: 
           : t('share.downloadLimit.unlimited')}
       </p>
       <form onSubmit={apply} className="flex flex-col gap-2">
-        <label htmlFor={inputId} className="font-body text-sm text-ink-2">{t('share.downloadLimit.label')}</label>
-        <input id={inputId} type="number" min={1} inputMode="numeric" value={value}
+        <label htmlFor={inputId} className="font-body text-sm text-ink-2">
+          {t('share.downloadLimit.label')}
+        </label>
+        <input
+          id={inputId}
+          type="number"
+          min={1}
+          inputMode="numeric"
+          value={value}
           onChange={(e) => setValue(e.target.value)}
-          className="w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-mono text-sm text-ink" />
+          className="w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-mono text-sm text-ink"
+        />
         {/* Terminal action — shown only when a limit is being/So set */}
         <fieldset className="flex flex-col gap-1">
           <legend className="font-body text-sm text-ink-2">{t('share.downloadLimit.onExhaust')}</legend>
@@ -888,14 +1001,24 @@ function DownloadLimitSection({ share, nodeKind }: { share: ShareDto; nodeKind: 
             {t('share.downloadLimit.modeStop')}
           </label>
           {mode === 'delete' && (
-            <p role="note" className="font-body text-xs text-clay">{t('share.downloadLimit.deleteWarning')}</p>
+            <p role="note" className="font-body text-xs text-clay">
+              {t('share.downloadLimit.deleteWarning')}
+            </p>
           )}
         </fieldset>
-        {error !== null && <p role="alert" className="font-body text-sm text-clay">{error}</p>}
+        {error !== null && (
+          <p role="alert" className="font-body text-sm text-clay">
+            {error}
+          </p>
+        )}
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" type="submit" disabled={patch.isPending}>{t('share.downloadLimit.apply')}</Button>
+          <Button variant="secondary" type="submit" disabled={patch.isPending}>
+            {t('share.downloadLimit.apply')}
+          </Button>
           {isLimited && (
-            <Button variant="ghost" onClick={clear} disabled={patch.isPending}>{t('share.downloadLimit.clear')}</Button>
+            <Button variant="ghost" onClick={clear} disabled={patch.isPending}>
+              {t('share.downloadLimit.clear')}
+            </Button>
           )}
         </div>
       </form>
@@ -915,12 +1038,14 @@ function DownloadLimitSection({ share, nodeKind }: { share: ShareDto; nodeKind: 
 ## Task 9: Recipient UI — POST download + static label + i18n(ar/en)
 
 **Files:**
+
 - Modify: `web/src/features/public/PublicFile.tsx`
 - Modify: `web/src/features/public/controls.tsx`
 - Modify: `web/src/i18n/ar.json` and `web/src/i18n/en.json`
 - Test: `web/test/public.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `PublicMeta.download_limit` (Task 7).
 
 - [ ] **Step 1: Write failing tests** — in `web/test/public.test.tsx`: (a) with `download_limit: 1`, the page shows the "one-time download" label; with `download_limit: 3`, shows "up to 3 downloads"; with `null`, no label; (b) the download control is a `<form method="post">` whose action is the `/api/public/:token/download` URL (not a bare GET anchor).
@@ -935,25 +1060,28 @@ function DownloadLimitSection({ share, nodeKind }: { share: ShareDto; nodeKind: 
 import { downloadUrl, type PublicMeta } from './api';
 import { PrimaryButton, DownloadGlyph } from './controls';
 // ...
-      {meta.download_limit != null && (
-        <p className="font-body text-sm text-brass-ring">
-          {meta.download_limit === 1
-            ? t('public.limitOnce')
-            : t('public.limitN', { count: meta.download_limit })}
-        </p>
-      )}
+{
+  meta.download_limit != null && (
+    <p className="font-body text-sm text-brass-ring">
+      {meta.download_limit === 1 ? t('public.limitOnce') : t('public.limitN', { count: meta.download_limit })}
+    </p>
+  );
+}
 
-      {meta.allow_download && (
-        // POST so passive GETs (unfurlers/scanners/prefetch) can't trigger a burn;
-        // the browser still downloads natively from the streamed attachment response.
-        <form method="post" action={downloadUrl(token)}>
-          <PrimaryButton type="submit">
-            <DownloadGlyph />
-            {t('public.download')}
-          </PrimaryButton>
-        </form>
-      )}
+{
+  meta.allow_download && (
+    // POST so passive GETs (unfurlers/scanners/prefetch) can't trigger a burn;
+    // the browser still downloads natively from the streamed attachment response.
+    <form method="post" action={downloadUrl(token)}>
+      <PrimaryButton type="submit">
+        <DownloadGlyph />
+        {t('public.download')}
+      </PrimaryButton>
+    </form>
+  );
+}
 ```
+
 (`downloadUrl(token)` already returns `/api/public/<token>/download`; the POST form posts to it. The `mirsal_unlock` cookie is `SameSite=Lax` and same-origin, so it rides along on this same-site form POST.)
 
 - [ ] **Step 5: Add `public.*` keys to BOTH `ar.json` and `en.json`** — `public.limitOnce` ("تنزيل لمرة واحدة" / "One-time download") and `public.limitN` ("حتى {{count}} عمليات تنزيل" / "Up to {{count}} downloads"). Missing `en` keys would fall back to Arabic on the bilingual page — a visible bug, so both files are required.
@@ -980,5 +1108,5 @@ import { PrimaryButton, DownloadGlyph } from './controls';
 ## Self-Review (checklist run against the spec)
 
 - **Coverage:** §4 data model → T1; §5 migration → T1; §6 enforcement (POST/GET-405/reserve/complete/terminal) → T6 (+T4/T5); §7 terminal → T4; §8 API (PATCH/DTO/meta) → T2/T3/T6; §9 creator UI → T8; §10 recipient UI → T9; §11 audit → T4; §12 validation → T3/T6; §13 edge cases → covered by T4/T6 tests; §15 tests → distributed; §16 rollout → T10. No spec section without a task.
-- **Placeholders:** UI tasks (T8/T9) reference real component patterns with concrete code; test bodies for a few UI/route cases are described precisely (fixtures + assertions) rather than fully transcribed where they must adapt to each file's existing harness — the *implementation* code blocks are complete. The concurrency/abort/crash tests explicitly require the existing real-listen harness.
+- **Placeholders:** UI tasks (T8/T9) reference real component patterns with concrete code; test bodies for a few UI/route cases are described precisely (fixtures + assertions) rather than fully transcribed where they must adapt to each file's existing harness — the _implementation_ code blocks are complete. The concurrency/abort/crash tests explicitly require the existing real-listen harness.
 - **Type consistency:** `download_limit: number|null`, `download_count: number`, `on_exhaust: 'stop'|'delete'` identical across `Share` (T2), `ShareDto` server+web (T2/T7), meta (T6/T7). `ownerStatus`/`status` union `'active'|'stopped'|'expired'|'exhausted'` consistent (T2/T7/T8). `applyExhaustion`'s param matches the `RETURNING` row shape in T6. `PatchShareVars` camelCase ↔ body snake_case mapping consistent (T3/T7).

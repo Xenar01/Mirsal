@@ -5,10 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import App from '../src/App';
 
-const TOKENS_PATH = path.resolve(
-  path.dirname(fileURLToPath(import.meta.url)),
-  '../src/styles/tokens.css'
-);
+const TOKENS_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../src/styles/tokens.css');
 
 describe('RTL shell (App)', () => {
   test('sets dir="rtl" and lang="ar" on the document root and renders the brand mark', () => {
@@ -79,49 +76,31 @@ describe('design tokens (tokens.css, §4.1)', () => {
 
   // Dark (OS preference): the `:root { ... }` nested inside the
   // prefers-color-scheme media query.
-  const mediaDarkOuter = blockAfter(
-    css,
-    /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{/
-  );
+  const mediaDarkOuter = blockAfter(css, /@media\s*\(prefers-color-scheme:\s*dark\)\s*\{/);
   const mediaDarkBlock = blockAfter(mediaDarkOuter, /:root\s*\{/);
 
   // Dark (explicit theme-toggle override).
-  const dataThemeDarkBlock = blockAfter(
-    css,
-    /:root\[data-theme=["']dark["']\]\s*\{/
-  );
+  const dataThemeDarkBlock = blockAfter(css, /:root\[data-theme=["']dark["']\]\s*\{/);
 
   // Light (explicit theme-toggle override — must win over a dark OS
   // preference).
-  const dataThemeLightBlock = blockAfter(
-    css,
-    /:root\[data-theme=["']light["']\]\s*\{/
-  );
+  const dataThemeLightBlock = blockAfter(css, /:root\[data-theme=["']light["']\]\s*\{/);
 
   test.each(REQUIRED_TOKENS)('%s is defined for light (:root)', (token) => {
     expect(lightBlock).toMatch(new RegExp(`${token}\\s*:\\s*#`));
   });
 
-  test.each(REQUIRED_TOKENS)(
-    '%s is defined for dark (@media prefers-color-scheme: dark)',
-    (token) => {
-      expect(mediaDarkBlock).toMatch(new RegExp(`${token}\\s*:\\s*#`));
-    }
-  );
+  test.each(REQUIRED_TOKENS)('%s is defined for dark (@media prefers-color-scheme: dark)', (token) => {
+    expect(mediaDarkBlock).toMatch(new RegExp(`${token}\\s*:\\s*#`));
+  });
 
-  test.each(REQUIRED_TOKENS)(
-    '%s is defined for dark (:root[data-theme="dark"])',
-    (token) => {
-      expect(dataThemeDarkBlock).toMatch(new RegExp(`${token}\\s*:\\s*#`));
-    }
-  );
+  test.each(REQUIRED_TOKENS)('%s is defined for dark (:root[data-theme="dark"])', (token) => {
+    expect(dataThemeDarkBlock).toMatch(new RegExp(`${token}\\s*:\\s*#`));
+  });
 
-  test.each(REQUIRED_TOKENS)(
-    '%s is restated for light (:root[data-theme="light"])',
-    (token) => {
-      expect(dataThemeLightBlock).toMatch(new RegExp(`${token}\\s*:\\s*#`));
-    }
-  );
+  test.each(REQUIRED_TOKENS)('%s is restated for light (:root[data-theme="light"])', (token) => {
+    expect(dataThemeLightBlock).toMatch(new RegExp(`${token}\\s*:\\s*#`));
+  });
 
   /**
    * Regression test for a review finding: Tailwind v4 reserves the
@@ -146,12 +125,12 @@ describe('design tokens (tokens.css, §4.1)', () => {
   };
 
   test.each(Object.entries(UNLAYERED_BLOCKS))(
-    '%s does not shadow Tailwind\'s reserved --text-* theme namespace',
+    "%s does not shadow Tailwind's reserved --text-* theme namespace",
     (_label, block) => {
       // Matches an actual `--text-<name>:` declaration, not prose mentioning
       // `--text-*` names inside a comment.
       expect(block).not.toMatch(/--text-[a-z0-9-]+\s*:/);
-    }
+    },
   );
 });
 

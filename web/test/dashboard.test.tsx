@@ -60,7 +60,7 @@ function renderDrive(initialEntries: string[]) {
           </ToastProvider>
         </AuthProvider>
       </I18nextProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -77,7 +77,7 @@ function renderTrash(initialEntries: string[]) {
           </ToastProvider>
         </AuthProvider>
       </I18nextProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -125,9 +125,7 @@ describe('UploadDrop — client-side size guard (§3.2 / §4.9)', () => {
     });
 
     // Authored §4.9 copy, verbatim.
-    expect(
-      screen.getByText('الحد الأقصى ١٠٠ ميغابايت للملف. قسّم الملف أو اضغطه.')
-    ).toBeInTheDocument();
+    expect(screen.getByText('الحد الأقصى ١٠٠ ميغابايت للملف. قسّم الملف أو اضغطه.')).toBeInTheDocument();
     // The over-limit file was rejected client-side — nothing hit the network.
     expect(xhrOpen).not.toHaveBeenCalled();
     expect(xhrSend).not.toHaveBeenCalled();
@@ -229,9 +227,7 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     // the modal — not the generic "shared" seal.
     expect(within(register).getByText(i18n.t('status.active'))).toBeInTheDocument();
     expect(within(register).queryByText(i18n.t('status.shared'))).toBeNull();
-    expect(
-      within(register).getByRole('button', { name: i18n.t('share.copy') })
-    ).toBeInTheDocument();
+    expect(within(register).getByRole('button', { name: i18n.t('share.copy') })).toBeInTheDocument();
   });
 
   test('the mobile card list renders the same node alongside the desktop table (§M2a two-layout pattern)', async () => {
@@ -264,9 +260,7 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
 
     renderDrive(['/']);
 
-    expect(
-      await screen.findByText('لا ملفات بعد. ارفع أول ملف أو أنشئ مجلدًا.')
-    ).toBeInTheDocument();
+    expect(await screen.findByText('لا ملفات بعد. ارفع أول ملف أو أنشئ مجلدًا.')).toBeInTheDocument();
   });
 
   test('New Folder is usable on a brand-new empty root — POSTs with a null parent, no generic-failure short-circuit (§4.9)', async () => {
@@ -317,7 +311,7 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
     const call = fetchMock.mock.calls.find(
       ([u, init]) =>
         String(u).split('?')[0] === '/api/nodes/folder' &&
-        ((init as RequestInit | undefined)?.method ?? 'GET') === 'POST'
+        ((init as RequestInit | undefined)?.method ?? 'GET') === 'POST',
     );
     expect(call).toBeDefined();
     expect(folderBody).toMatchObject({ parent_id: null, name: 'مجلد جديد' });
@@ -424,9 +418,39 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
 
   test('clicking the Size column header reorders the rows (folders stay first) (#7)', async () => {
     const listing: NodeDto[] = [
-      { id: 1, parent_id: 9, kind: 'file', name: 'big.bin', size_bytes: 900, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 100 },
-      { id: 2, parent_id: 9, kind: 'file', name: 'small.txt', size_bytes: 10, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 200 },
-      { id: 3, parent_id: 9, kind: 'folder', name: 'Docs', size_bytes: 0, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 300 },
+      {
+        id: 1,
+        parent_id: 9,
+        kind: 'file',
+        name: 'big.bin',
+        size_bytes: 900,
+        mime_type: null,
+        auto_delete_at: null,
+        created_at: 0,
+        updated_at: 100,
+      },
+      {
+        id: 2,
+        parent_id: 9,
+        kind: 'file',
+        name: 'small.txt',
+        size_bytes: 10,
+        mime_type: null,
+        auto_delete_at: null,
+        created_at: 0,
+        updated_at: 200,
+      },
+      {
+        id: 3,
+        parent_id: 9,
+        kind: 'folder',
+        name: 'Docs',
+        size_bytes: 0,
+        mime_type: null,
+        auto_delete_at: null,
+        created_at: 0,
+        updated_at: 300,
+      },
     ];
     stubFetch({ '/api/nodes': listing, '/api/shares': [] });
     renderDrive(['/']);
@@ -441,15 +465,37 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
       fireEvent.click(sizeHeaderBtn); // size asc
     });
 
-    const nameCells = within(table).getAllByText(/big\.bin|small\.txt|Docs/).map((el) => el.textContent);
+    const nameCells = within(table)
+      .getAllByText(/big\.bin|small\.txt|Docs/)
+      .map((el) => el.textContent);
     // Folder first, then files ascending by size: Docs, small.txt, big.bin
     expect(nameCells).toEqual(['Docs', 'small.txt', 'big.bin']);
   });
 
   test('selecting rows shows a bulk bar; confirming bulk-trashes each selected id (#8)', async () => {
     const listing: NodeDto[] = [
-      { id: 1, parent_id: 9, kind: 'file', name: 'a.txt', size_bytes: 5, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 100 },
-      { id: 2, parent_id: 9, kind: 'file', name: 'b.txt', size_bytes: 6, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 200 },
+      {
+        id: 1,
+        parent_id: 9,
+        kind: 'file',
+        name: 'a.txt',
+        size_bytes: 5,
+        mime_type: null,
+        auto_delete_at: null,
+        created_at: 0,
+        updated_at: 100,
+      },
+      {
+        id: 2,
+        parent_id: 9,
+        kind: 'file',
+        name: 'b.txt',
+        size_bytes: 6,
+        mime_type: null,
+        auto_delete_at: null,
+        created_at: 0,
+        updated_at: 200,
+      },
     ];
     const trashed: number[] = [];
     const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -458,7 +504,10 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
       if (path === '/api/nodes' && method === 'GET') return jsonResponse(200, listing);
       if (path === '/api/shares') return jsonResponse(200, []);
       const m = path.match(/^\/api\/nodes\/(\d+)\/trash$/);
-      if (m && method === 'POST') { trashed.push(Number(m[1])); return jsonResponse(200, {}); }
+      if (m && method === 'POST') {
+        trashed.push(Number(m[1]));
+        return jsonResponse(200, {});
+      }
       return jsonResponse(200, {});
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -495,8 +544,28 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
 
   test('the select-all checkbox toggles every row in the current folder (#8)', async () => {
     const listing: NodeDto[] = [
-      { id: 1, parent_id: 9, kind: 'file', name: 'a.txt', size_bytes: 5, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 100 },
-      { id: 2, parent_id: 9, kind: 'folder', name: 'Docs', size_bytes: 0, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: 200 },
+      {
+        id: 1,
+        parent_id: 9,
+        kind: 'file',
+        name: 'a.txt',
+        size_bytes: 5,
+        mime_type: null,
+        auto_delete_at: null,
+        created_at: 0,
+        updated_at: 100,
+      },
+      {
+        id: 2,
+        parent_id: 9,
+        kind: 'folder',
+        name: 'Docs',
+        size_bytes: 0,
+        mime_type: null,
+        auto_delete_at: null,
+        created_at: 0,
+        updated_at: 200,
+      },
     ];
     stubFetch({ '/api/nodes': listing, '/api/shares': [] });
     renderDrive(['/']);
@@ -513,7 +582,15 @@ describe('DriveView — dispatch register (§4.6 / §4.3)', () => {
 
 describe('sortNodes — folders first, then by key/direction (#7)', () => {
   const mk = (id: number, kind: 'folder' | 'file', name: string, size: number, updated: number): NodeDto => ({
-    id, parent_id: 1, kind, name, size_bytes: size, mime_type: null, auto_delete_at: null, created_at: 0, updated_at: updated,
+    id,
+    parent_id: 1,
+    kind,
+    name,
+    size_bytes: size,
+    mime_type: null,
+    auto_delete_at: null,
+    created_at: 0,
+    updated_at: updated,
   });
   const nodes: NodeDto[] = [
     mk(1, 'file', 'banana', 30, 100),
@@ -573,7 +650,17 @@ describe('TrashView — mobile card list (§M2b two-layout pattern)', () => {
 describe('TrashView — empty whole trash (#6)', () => {
   test('shows an empty-trash button only when the trash is non-empty, and calls the endpoint on confirm', async () => {
     const trashed: NodeDto[] = [
-      { id: 10, parent_id: 2, kind: 'file', name: 'old.txt', size_bytes: 5, mime_type: 'text/plain', auto_delete_at: null, created_at: NOW, updated_at: NOW },
+      {
+        id: 10,
+        parent_id: 2,
+        kind: 'file',
+        name: 'old.txt',
+        size_bytes: 5,
+        mime_type: 'text/plain',
+        auto_delete_at: null,
+        created_at: NOW,
+        updated_at: NOW,
+      },
     ];
     const calls: string[] = [];
     const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {

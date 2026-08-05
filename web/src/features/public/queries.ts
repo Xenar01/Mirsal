@@ -11,8 +11,7 @@ import { fetchPublicList, fetchPublicMeta } from './api';
 
 export const publicMetaKey = (token: string, reveal: boolean) =>
   ['public', token, 'meta', reveal ? 'reveal' : 'gate'] as const;
-export const publicListKey = (token: string, path: number | null) =>
-  ['public', token, 'list', path ?? 'root'] as const;
+export const publicListKey = (token: string, path: number | null) => ['public', token, 'list', path ?? 'root'] as const;
 
 export function usePublicMeta(token: string, reveal: boolean) {
   return useQuery({

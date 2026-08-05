@@ -109,7 +109,7 @@ const displayNameSchema = z
         const n = c.charCodeAt(0);
         return n < 0x20 || n === 0x7f;
       }),
-    { message: 'display_name has control chars' }
+    { message: 'display_name has control chars' },
   )
   .transform((s) => (s.length === 0 ? null : s))
   .nullable()
@@ -133,11 +133,8 @@ const patchUserSchema = z
   })
   .refine(
     (v) =>
-      v.is_active !== undefined ||
-      v.role !== undefined ||
-      v.quota_bytes !== undefined ||
-      v.display_name !== undefined,
-    { message: 'at least one field is required' }
+      v.is_active !== undefined || v.role !== undefined || v.quota_bytes !== undefined || v.display_name !== undefined,
+    { message: 'at least one field is required' },
   );
 
 const passwordResetSchema = z.object({
@@ -255,7 +252,7 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
       const info = db
         .prepare(
           `INSERT INTO users(username, password_hash, role, quota_bytes, used_bytes, is_active, must_change_password, display_name, created_by, created_at, updated_at)
-           VALUES (@username, @hash, @role, @quotaBytes, 0, 1, 1, @displayName, @actor, @now, @now)`
+           VALUES (@username, @hash, @role, @quotaBytes, 0, 1, 1, @displayName, @actor, @now, @now)`,
         )
         .run({ username, hash, role, quotaBytes, displayName, actor: req.user!.id, now: nowMs });
       userId = Number(info.lastInsertRowid);
@@ -286,9 +283,7 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
       return;
     }
 
-    const target = db.prepare('SELECT id, role, is_active FROM users WHERE id = ?').get(id) as
-      | GuardUserRow
-      | undefined;
+    const target = db.prepare('SELECT id, role, is_active FROM users WHERE id = ?').get(id) as GuardUserRow | undefined;
     if (!target) {
       reply.code(404).send({ error: 'not_found' });
       return;
@@ -409,9 +404,7 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
       return;
     }
 
-    const target = db.prepare('SELECT id, role, is_active FROM users WHERE id = ?').get(id) as
-      | GuardUserRow
-      | undefined;
+    const target = db.prepare('SELECT id, role, is_active FROM users WHERE id = ?').get(id) as GuardUserRow | undefined;
     if (!target) {
       reply.code(404).send({ error: 'not_found' });
       return;
@@ -461,9 +454,7 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
     // Collect blob paths BEFORE deletion (unlink is post-commit — a rollback
     // must never orphan a still-referenced blob).
     const blobRows = db
-      .prepare(
-        `SELECT storage_path FROM nodes WHERE owner_id = ? AND kind = 'file' AND storage_path IS NOT NULL`
-      )
+      .prepare(`SELECT storage_path FROM nodes WHERE owner_id = ? AND kind = 'file' AND storage_path IS NOT NULL`)
       .all(id) as { storage_path: string }[];
     const storagePaths = blobRows.map((r) => r.storage_path);
 
@@ -473,8 +464,13 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
       db.prepare('UPDATE users SET used_bytes = 0, updated_at = @now WHERE id = @id').run({ id, now: nowMs });
       writeAudit(
         db,
-        { actorId: req.user!.id, action: 'user_clear_space', target: String(id), detail: `${storagePaths.length} files` },
-        now
+        {
+          actorId: req.user!.id,
+          action: 'user_clear_space',
+          target: String(id),
+          detail: `${storagePaths.length} files`,
+        },
+        now,
       );
     });
     run();
@@ -516,7 +512,7 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
       .prepare(
         `SELECT ${NODE_METADATA_COLUMNS} FROM nodes
          WHERE owner_id = @id AND kind IN ('folder','file')
-         ORDER BY parent_id ASC, created_at ASC, id ASC`
+         ORDER BY parent_id ASC, created_at ASC, id ASC`,
       )
       .all({ id }) as AdminNodeDto[];
 
@@ -546,7 +542,7 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
          FROM shares s
          JOIN users u ON u.id = s.owner_id
          LEFT JOIN nodes n ON n.id = s.node_id
-         ORDER BY s.created_at DESC, s.id DESC`
+         ORDER BY s.created_at DESC, s.id DESC`,
       )
       .all() as AdminShareRow[];
 
@@ -605,7 +601,7 @@ export default async function adminRoutes(app: FastifyInstance, deps: AdminRoute
 
     const rows = db
       .prepare(
-        'SELECT id, actor_id, action, target, detail, created_at FROM audit_log ORDER BY id DESC LIMIT @limit OFFSET @offset'
+        'SELECT id, actor_id, action, target, detail, created_at FROM audit_log ORDER BY id DESC LIMIT @limit OFFSET @offset',
       )
       .all({ limit, offset }) as Array<{
       id: number;

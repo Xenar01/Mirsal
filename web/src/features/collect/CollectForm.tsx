@@ -86,7 +86,7 @@ export default function CollectForm({ token, meta }: { token: string; meta: Coll
         files,
         note: note.trim() || undefined,
       },
-      { onProgress: setProgress }
+      { onProgress: setProgress },
     );
     setSubmitting(false);
 

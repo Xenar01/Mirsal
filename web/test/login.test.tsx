@@ -35,7 +35,7 @@ async function renderLogin(fetchMock: ReturnType<typeof vi.fn>) {
           <LoginPage />
         </MemoryRouter>
       </AuthProvider>
-    </I18nextProvider>
+    </I18nextProvider>,
   );
   // Flush the AuthProvider's mount `/api/auth/me` probe, then forget it so the
   // assertions below only see login-triggered fetches.

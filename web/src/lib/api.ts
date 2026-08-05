@@ -59,9 +59,7 @@ export class ApiError extends Error {
  * {@link request} does.
  */
 export function readCsrfToken(): string | null {
-  const match = document.cookie.match(
-    new RegExp('(?:^|;\\s*)' + CSRF_COOKIE + '=([^;]*)')
-  );
+  const match = document.cookie.match(new RegExp('(?:^|;\\s*)' + CSRF_COOKIE + '=([^;]*)'));
   return match ? decodeURIComponent(match[1]) : null;
 }
 
@@ -128,9 +126,6 @@ async function toApiError(res: Response): Promise<ApiError> {
 }
 
 export const apiGet = <T>(path: string): Promise<T> => request<T>('GET', path);
-export const apiPost = <T>(path: string, body?: unknown): Promise<T> =>
-  request<T>('POST', path, body);
-export const apiPatch = <T>(path: string, body?: unknown): Promise<T> =>
-  request<T>('PATCH', path, body);
-export const apiDelete = <T>(path: string, body?: unknown): Promise<T> =>
-  request<T>('DELETE', path, body);
+export const apiPost = <T>(path: string, body?: unknown): Promise<T> => request<T>('POST', path, body);
+export const apiPatch = <T>(path: string, body?: unknown): Promise<T> => request<T>('PATCH', path, body);
+export const apiDelete = <T>(path: string, body?: unknown): Promise<T> => request<T>('DELETE', path, body);

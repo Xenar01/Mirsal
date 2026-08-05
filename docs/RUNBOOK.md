@@ -3,15 +3,15 @@
 Operations for the running Mirsal deployment. See `deploy/install.md` for first
 install and the go-live steps.
 
-| Property | Value |
-|----------|-------|
-| App | Mirsal (مِرسال) — Arabic/RTL secure file-sharing |
-| Domain | `project4.system.mow.gov.sy` (host nginx → `127.0.0.1:8084`) |
-| Runtime | one Docker container `mirsal` (image `mirsal:local`), `restart: unless-stopped` |
-| Compose dir | `/var/www/projects/mirsal` |
-| Data | `./data` bind mount → `/app/data` (db, storage, backups, admin credential) |
-| Runs as | uid 1000 (unprivileged) inside the container |
-| Env / secrets | `./.env` (gitignored, `0600`) |
+| Property      | Value                                                                           |
+| ------------- | ------------------------------------------------------------------------------- |
+| App           | Mirsal (مِرسال) — Arabic/RTL secure file-sharing                                |
+| Domain        | `project4.system.mow.gov.sy` (host nginx → `127.0.0.1:8084`)                    |
+| Runtime       | one Docker container `mirsal` (image `mirsal:local`), `restart: unless-stopped` |
+| Compose dir   | `/var/www/projects/mirsal`                                                      |
+| Data          | `./data` bind mount → `/app/data` (db, storage, backups, admin credential)      |
+| Runs as       | uid 1000 (unprivileged) inside the container                                    |
+| Env / secrets | `./.env` (gitignored, `0600`)                                                   |
 
 ## Everyday commands
 
@@ -108,7 +108,7 @@ Operational notes:
 - **Concurrency is per-process.** In-flight downloads are bounded by an in-memory
   reservation map — authoritative because Mirsal runs as a single container.
   It resets on restart (a crash can never strand a reservation); the durable
-  `download_count < download_limit` guard still caps *counted* completions.
+  `download_count < download_limit` guard still caps _counted_ completions.
 
 ## Collections (طلب تجميع)
 

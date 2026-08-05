@@ -25,7 +25,7 @@ export interface ShareLiveResult {
 export function isShareLive(
   db: Database.Database,
   share: Pick<Share, 'is_active' | 'expires_at' | 'node_id'>,
-  now: number
+  now: number,
 ): ShareLiveResult {
   if (!share.is_active) {
     return { live: false, reason: 'stopped' };
@@ -37,9 +37,7 @@ export function isShareLive(
 
   const node = db
     .prepare('SELECT trashed_at, auto_delete_at FROM nodes WHERE id = @nodeId')
-    .get({ nodeId: share.node_id }) as
-    | { trashed_at: number | null; auto_delete_at: number | null }
-    | undefined;
+    .get({ nodeId: share.node_id }) as { trashed_at: number | null; auto_delete_at: number | null } | undefined;
 
   if (!node || node.trashed_at !== null) {
     return { live: false, reason: 'gone' };

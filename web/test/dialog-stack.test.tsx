@@ -24,7 +24,7 @@ describe('stacked dialogs — Escape dismisses only the topmost', () => {
         <Modal open onClose={modalClose} title="مشاركة">
           <p>حوار</p>
         </Modal>
-      </I18nextProvider>
+      </I18nextProvider>,
     );
     // Both dialogs are mounted.
     expect(screen.getAllByRole('dialog')).toHaveLength(2);

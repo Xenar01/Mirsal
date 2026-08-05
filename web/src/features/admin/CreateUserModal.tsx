@@ -86,12 +86,10 @@ export default function CreateUserModal({ open, onClose }: { open: boolean; onCl
         },
         onError: (err) => {
           setError(
-            adminErrorCode(err) === 'username_taken'
-              ? t('admin.create.usernameTaken')
-              : t('admin.create.error')
+            adminErrorCode(err) === 'username_taken' ? t('admin.create.usernameTaken') : t('admin.create.error'),
           );
         },
-      }
+      },
     );
   }
 
@@ -191,11 +189,7 @@ export default function CreateUserModal({ open, onClose }: { open: boolean; onCl
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-mono text-sm text-ink"
               />
-              <Button
-                variant="secondary"
-                onClick={() => setPassword(generatePassword())}
-                className="shrink-0"
-              >
+              <Button variant="secondary" onClick={() => setPassword(generatePassword())} className="shrink-0">
                 {t('admin.create.regenerate')}
               </Button>
             </div>

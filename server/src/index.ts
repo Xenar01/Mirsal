@@ -31,7 +31,7 @@ export interface DbCloseable {
 export function createShutdown(
   app: Closeable,
   db: DbCloseable,
-  exit: (code: number) => void = (code) => process.exit(code)
+  exit: (code: number) => void = (code) => process.exit(code),
 ): () => Promise<void> {
   let shuttingDown = false;
 
@@ -92,8 +92,7 @@ async function main(): Promise<void> {
 // Guard: only run (and bind a real port) when this module is the actual
 // process entrypoint, never as a side effect of another module (or a test)
 // importing it.
-const isEntrypoint =
-  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isEntrypoint = process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 
 if (isEntrypoint) {
   main().catch((err) => {

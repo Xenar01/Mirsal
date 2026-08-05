@@ -34,7 +34,7 @@ export function createSession(
   db: Database.Database,
   userId: number,
   now: number,
-  ttlMs: number = SESSION_TTL_MS
+  ttlMs: number = SESSION_TTL_MS,
 ): CreatedSession {
   const token = randomToken(32);
   const tokenHash = sha256(token);
@@ -42,7 +42,7 @@ export function createSession(
   const info = db
     .prepare(
       `INSERT INTO sessions(user_id, token_hash, created_at, last_used_at, expires_at, revoked_at)
-       VALUES (?, ?, ?, ?, ?, NULL)`
+       VALUES (?, ?, ?, ?, ?, NULL)`,
     )
     .run(userId, tokenHash, now, now, now + ttlMs);
 
@@ -55,11 +55,7 @@ export function createSession(
  * session forward (last_used_at = now, expires_at = now + SESSION_TTL_MS)
  * and returns the resolved user identity.
  */
-export function validateSession(
-  db: Database.Database,
-  token: string,
-  now: number
-): ValidatedSession | null {
+export function validateSession(db: Database.Database, token: string, now: number): ValidatedSession | null {
   const tokenHash = sha256(token);
 
   const row = db
@@ -69,7 +65,7 @@ export function validateSession(
               u.must_change_password AS must_change_password
        FROM sessions s
        JOIN users u ON u.id = s.user_id
-       WHERE s.token_hash = ?`
+       WHERE s.token_hash = ?`,
     )
     .get(tokenHash) as SessionUserRow | undefined;
 
@@ -81,7 +77,7 @@ export function validateSession(
   db.prepare('UPDATE sessions SET last_used_at = ?, expires_at = ? WHERE token_hash = ?').run(
     now,
     now + SESSION_TTL_MS,
-    tokenHash
+    tokenHash,
   );
 
   return {

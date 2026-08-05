@@ -7,10 +7,7 @@ import type { ReactNode } from 'react';
 import i18n from '../src/i18n';
 import { AuthProvider } from '../src/features/auth/auth-context';
 import { ToastProvider } from '../src/components/Toast';
-import {
-  damascusInputToUtcMs,
-  utcMsToDamascusInput,
-} from '../src/features/dashboard/share/datetime';
+import { damascusInputToUtcMs, utcMsToDamascusInput } from '../src/features/dashboard/share/datetime';
 import ShareModal from '../src/features/dashboard/share/ShareModal';
 import SharedView from '../src/features/dashboard/share/SharedView';
 import AutoDeleteMenu from '../src/features/dashboard/share/AutoDeleteMenu';
@@ -94,7 +91,7 @@ function renderModal(node: NodeDto) {
           <ShareModal node={node} onClose={() => {}} />
         </ToastProvider>
       </I18nextProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -103,9 +100,7 @@ function renderModal(node: NodeDto) {
  * / download-limit) behind an explicit "Edit settings" toggle. Reveal them.
  */
 async function openEditSettings() {
-  fireEvent.click(
-    await screen.findByRole('button', { name: i18n.t('share.wizard.editSettings') })
-  );
+  fireEvent.click(await screen.findByRole('button', { name: i18n.t('share.wizard.editSettings') }));
 }
 
 function renderAutoDelete(node: NodeDto) {
@@ -117,7 +112,7 @@ function renderAutoDelete(node: NodeDto) {
           <AutoDeleteMenu node={node} onClose={() => {}} />
         </ToastProvider>
       </I18nextProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -132,7 +127,7 @@ function renderShared(node: ReactNode = <SharedView />) {
           </ToastProvider>
         </AuthProvider>
       </I18nextProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -178,9 +173,7 @@ describe('ShareModal — expiry picker (§3.3 / §4.5)', () => {
     renderModal(mkNode());
     await openEditSettings();
 
-    const input = (await screen.findByLabelText(
-      i18n.t('share.expiry.label')
-    )) as HTMLInputElement;
+    const input = (await screen.findByLabelText(i18n.t('share.expiry.label'))) as HTMLInputElement;
     fireEvent.change(input, { target: { value: '2020-01-01T00:00' } });
 
     await act(async () => {
@@ -201,9 +194,7 @@ describe('ShareModal — expiry picker (§3.3 / §4.5)', () => {
     renderModal(mkNode());
     await openEditSettings();
 
-    const input = (await screen.findByLabelText(
-      i18n.t('share.expiry.label')
-    )) as HTMLInputElement;
+    const input = (await screen.findByLabelText(i18n.t('share.expiry.label'))) as HTMLInputElement;
     // 2099-06-01 12:00 Damascus (+3) => 09:00 UTC.
     fireEvent.change(input, { target: { value: '2099-06-01T12:00' } });
 
@@ -452,9 +443,7 @@ describe('ShareModal — download limit (creator console, §4 / §9)', () => {
     await openEditSettings();
 
     // on_exhaust defaults to 'delete' ⇒ the trash-after-last-download warning is visible up front.
-    expect(
-      await screen.findByText(i18n.t('share.downloadLimit.deleteWarning'))
-    ).toBeInTheDocument();
+    expect(await screen.findByText(i18n.t('share.downloadLimit.deleteWarning'))).toBeInTheDocument();
 
     // Choosing "stop the link" instead removes the destructive consequence.
     fireEvent.click(screen.getByLabelText(i18n.t('share.downloadLimit.modeStop')));

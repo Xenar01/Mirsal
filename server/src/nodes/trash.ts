@@ -14,8 +14,7 @@ export interface PermanentDeleteResult {
 function isUniqueConstraintError(e: unknown): boolean {
   return (
     e instanceof Error &&
-    ((e as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT_UNIQUE' ||
-      /UNIQUE constraint failed/i.test(e.message))
+    ((e as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint failed/i.test(e.message))
   );
 }
 
@@ -37,9 +36,8 @@ function isUniqueConstraintError(e: unknown): boolean {
  *    trashed nodes, so an existing share simply reads as gone while trashed.
  */
 export function trashNode(db: Database.Database, ownerId: number, nodeId: number, now: number): Node {
-  const node = db
-    .prepare('SELECT owner_id, kind, trashed_at FROM nodes WHERE id = @nodeId')
-    .get({ nodeId }) as { owner_id: number; kind: Node['kind']; trashed_at: number | null } | undefined;
+  const node = db.prepare('SELECT owner_id, kind, trashed_at FROM nodes WHERE id = @nodeId').get({ nodeId }) as
+    { owner_id: number; kind: Node['kind']; trashed_at: number | null } | undefined;
 
   if (
     !node ||
@@ -56,12 +54,12 @@ export function trashNode(db: Database.Database, ownerId: number, nodeId: number
          SELECT id FROM nodes WHERE id = @nodeId
          UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.trashed_at IS NULL
        )
-       UPDATE nodes SET trashed_at = @now WHERE id IN (SELECT id FROM sub)`
+       UPDATE nodes SET trashed_at = @now WHERE id IN (SELECT id FROM sub)`,
     ).run({ nodeId, now });
 
-    db.prepare(
-      'UPDATE nodes SET original_parent_id = parent_id, purge_after = NULL WHERE id = @nodeId'
-    ).run({ nodeId });
+    db.prepare('UPDATE nodes SET original_parent_id = parent_id, purge_after = NULL WHERE id = @nodeId').run({
+      nodeId,
+    });
 
     return db.prepare('SELECT * FROM nodes WHERE id = @nodeId').get({ nodeId }) as Node;
   });
@@ -98,8 +96,7 @@ export function restoreNode(db: Database.Database, ownerId: number, nodeId: numb
   const node = db
     .prepare('SELECT owner_id, trashed_at, name, original_parent_id FROM nodes WHERE id = @nodeId')
     .get({ nodeId }) as
-    | { owner_id: number; trashed_at: number | null; name: string; original_parent_id: number | null }
-    | undefined;
+    { owner_id: number; trashed_at: number | null; name: string; original_parent_id: number | null } | undefined;
 
   if (!node || node.owner_id !== ownerId || node.trashed_at === null) {
     throw new Error(`Invalid node for restoreNode: ${nodeId}`);
@@ -143,19 +140,19 @@ export function restoreNode(db: Database.Database, ownerId: number, nodeId: numb
            UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id
            WHERE n.trashed_at = @topTrashedAt
          )
-         UPDATE nodes SET trashed_at = NULL WHERE id IN (SELECT id FROM sub) AND id != @nodeId`
+         UPDATE nodes SET trashed_at = NULL WHERE id IN (SELECT id FROM sub) AND id != @nodeId`,
       ).run({ nodeId, topTrashedAt });
 
       db.prepare(
         `UPDATE nodes
          SET trashed_at = NULL, parent_id = @destParent, original_parent_id = NULL,
              purge_after = NULL, name = @finalName, updated_at = @now
-         WHERE id = @nodeId`
+         WHERE id = @nodeId`,
       ).run({ nodeId, destParent, finalName, now });
     } catch (e) {
       if (isUniqueConstraintError(e)) {
         throw new CollisionError(
-          `Cannot restore node ${nodeId}: a live-name collision occurred while resurrecting its subtree`
+          `Cannot restore node ${nodeId}: a live-name collision occurred while resurrecting its subtree`,
         );
       }
       throw e;
@@ -188,20 +185,11 @@ export function restoreNode(db: Database.Database, ownerId: number, nodeId: numb
  * *after* this commits; this function never touches the filesystem, so a
  * rollback can never orphan a still-referenced blob.
  */
-export function permanentDelete(
-  db: Database.Database,
-  ownerId: number,
-  nodeId: number
-): PermanentDeleteResult {
+export function permanentDelete(db: Database.Database, ownerId: number, nodeId: number): PermanentDeleteResult {
   const node = db.prepare('SELECT owner_id, kind FROM nodes WHERE id = @nodeId').get({ nodeId }) as
-    | { owner_id: number; kind: Node['kind'] }
-    | undefined;
+    { owner_id: number; kind: Node['kind'] } | undefined;
 
-  if (
-    !node ||
-    node.owner_id !== ownerId ||
-    (node.kind !== 'folder' && node.kind !== 'file')
-  ) {
+  if (!node || node.owner_id !== ownerId || (node.kind !== 'folder' && node.kind !== 'file')) {
     throw new Error(`Invalid node for permanentDelete: ${nodeId}`);
   }
 
@@ -213,7 +201,7 @@ export function permanentDelete(
            UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id
          )
          SELECT storage_path, size_bytes FROM nodes
-         WHERE id IN (SELECT id FROM sub) AND kind = 'file' AND storage_path IS NOT NULL`
+         WHERE id IN (SELECT id FROM sub) AND kind = 'file' AND storage_path IS NOT NULL`,
       )
       .all({ nodeId }) as { storage_path: string; size_bytes: number }[];
 

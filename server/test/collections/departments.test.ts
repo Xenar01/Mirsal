@@ -7,7 +7,11 @@ import { openDb } from '../../src/db/connection.js';
 import { migrate } from '../../src/db/migrate.js';
 import { createCollection } from '../../src/collections/collections.js';
 import {
-  addDepartment, removeDepartment, listDepartments, getRoster, DuplicateDepartmentError,
+  addDepartment,
+  removeDepartment,
+  listDepartments,
+  getRoster,
+  DuplicateDepartmentError,
 } from '../../src/collections/departments.js';
 
 let db: Database.Database | undefined;
@@ -19,8 +23,12 @@ beforeEach(() => {
   migrate(db);
 });
 afterEach(() => {
-  db?.close(); db = undefined;
-  if (dir) { fs.rmSync(dir, { recursive: true, force: true }); dir = undefined; }
+  db?.close();
+  db = undefined;
+  if (dir) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  }
 });
 
 const keys = ['DB_PATH', 'STORAGE_DIR', 'SESSION_SECRET', 'CSRF_SECRET', 'PUBLIC_BASE_URL'] as const;
@@ -45,7 +53,7 @@ function seedUser(): number {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, created_at, updated_at)
-       VALUES (?, 'x', 'user', 1, 0, ?, ?)`
+       VALUES (?, 'x', 'user', 1, 0, ?, ?)`,
     )
     .run(`user-${Math.random()}`, t, t);
   return Number(info.lastInsertRowid);
@@ -87,10 +95,20 @@ test('removeDepartment refuses a department that already has a response', async 
   const c = await mkCollection(uid, ['A']);
   const a = listDepartments(db!, c.id)[0];
   // seed a response subfolder + row for dept A
-  const sub = Number(db!.prepare(`INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
-    VALUES (?,?,'folder','A',0,?,?)`).run(uid, c.folder_node_id, now, now).lastInsertRowid);
-  db!.prepare(`INSERT INTO collection_responses(collection_id,department_id,folder_node_id,note,submitted_at)
-    VALUES (?,?,?,NULL,?)`).run(c.id, a.id, sub, now);
+  const sub = Number(
+    db!
+      .prepare(
+        `INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
+    VALUES (?,?,'folder','A',0,?,?)`,
+      )
+      .run(uid, c.folder_node_id, now, now).lastInsertRowid,
+  );
+  db!
+    .prepare(
+      `INSERT INTO collection_responses(collection_id,department_id,folder_node_id,note,submitted_at)
+    VALUES (?,?,?,NULL,?)`,
+    )
+    .run(c.id, a.id, sub, now);
   expect(removeDepartment(db!, uid, c.id, a.id)).toBe('has_response');
 });
 
@@ -100,13 +118,27 @@ test('getRoster lists every department, marks responded + file_count, ordered by
   const c = await mkCollection(uid, ['A', 'B']);
   const [a] = listDepartments(db!, c.id);
   // dept A responds with 2 files under its subfolder; B stays missing.
-  const sub = Number(db!.prepare(`INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
-    VALUES (?,?,'folder','A',0,?,?)`).run(uid, c.folder_node_id, now, now).lastInsertRowid);
+  const sub = Number(
+    db!
+      .prepare(
+        `INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
+    VALUES (?,?,'folder','A',0,?,?)`,
+      )
+      .run(uid, c.folder_node_id, now, now).lastInsertRowid,
+  );
   for (let i = 0; i < 2; i++)
-    db!.prepare(`INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,storage_path,created_at,updated_at)
-      VALUES (?,?,'file',?,3,?,?,?)`).run(uid, sub, `f${i}`, `${uid}/${i}`, now, now);
-  db!.prepare(`INSERT INTO collection_responses(collection_id,department_id,folder_node_id,note,submitted_at)
-    VALUES (?,?,?,'hi',?)`).run(c.id, a.id, sub, now);
+    db!
+      .prepare(
+        `INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,storage_path,created_at,updated_at)
+      VALUES (?,?,'file',?,3,?,?,?)`,
+      )
+      .run(uid, sub, `f${i}`, `${uid}/${i}`, now, now);
+  db!
+    .prepare(
+      `INSERT INTO collection_responses(collection_id,department_id,folder_node_id,note,submitted_at)
+    VALUES (?,?,?,'hi',?)`,
+    )
+    .run(c.id, a.id, sub, now);
 
   const roster = getRoster(db!, c.id);
   expect(roster.map((r) => r.name)).toEqual(['A', 'B']);

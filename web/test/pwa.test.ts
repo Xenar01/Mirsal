@@ -23,15 +23,11 @@ describe('PWA — index.html head (§P1)', () => {
   });
 
   test('declares a light + dark theme-color pair', () => {
-    expect(indexHtml).toMatch(
-      /name="theme-color"\s+content="#F4F5F3"\s+media="\(prefers-color-scheme:\s*light\)"/
-    );
-    expect(indexHtml).toMatch(
-      /name="theme-color"\s+content="#12212F"\s+media="\(prefers-color-scheme:\s*dark\)"/
-    );
+    expect(indexHtml).toMatch(/name="theme-color"\s+content="#F4F5F3"\s+media="\(prefers-color-scheme:\s*light\)"/);
+    expect(indexHtml).toMatch(/name="theme-color"\s+content="#12212F"\s+media="\(prefers-color-scheme:\s*dark\)"/);
   });
 
-  test('carries no inline service-worker registration (would violate script-src \'self\')', () => {
+  test("carries no inline service-worker registration (would violate script-src 'self')", () => {
     // Registration is a bundled import in main.tsx (injectRegister:null), so the
     // HTML must never contain an inline `navigator.serviceWorker.register(...)`.
     expect(indexHtml).not.toMatch(/navigator\.serviceWorker/);

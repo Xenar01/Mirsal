@@ -1,0 +1,6 @@
+**/dist
+**/node_modules
+**/coverage
+web/dev-dist
+package-lock.json
+*.min.*

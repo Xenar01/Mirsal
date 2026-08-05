@@ -7,21 +7,21 @@
 
 ## 1. Goal
 
-Today Mirsal is **one-way**: a share-link recipient can only *download*. A user asked for the reverse — **send one file out to a known set of people and collect a filled-in response back from each of them**. The concrete case: an owner runs data collection across **~30 departments**; every department receives the **same template file**, fills it, and uploads its response; the owner watches all responses arrive in one place, attributed by department, and can see who has **not** responded yet.
+Today Mirsal is **one-way**: a share-link recipient can only _download_. A user asked for the reverse — **send one file out to a known set of people and collect a filled-in response back from each of them**. The concrete case: an owner runs data collection across **~30 departments**; every department receives the **same template file**, fills it, and uploads its response; the owner watches all responses arrive in one place, attributed by department, and can see who has **not** responded yet.
 
 This introduces a new first-class feature, **Collections (طلب تجميع)** — a "file request / intake" flow that is the inbound mirror of the existing outbound Share. It is Mirsal's **first inbound-write capability** (§9 covers the security consequences).
 
 ## 2. Locked decisions (from brainstorming with the user)
 
-1. **One shared link**, not per-recipient links. The owner distributes a single `/c/<token>` URL to all departments. *(Rationale: per-department links mean sending 30 links and risking sending the wrong one to the wrong person.)*
-2. **Uploader self-identifies from a predefined list.** The owner enters the department names once at creation; each uploader **picks their department from a dropdown**. This yields clean attribution (no typos/dupes) and enables the **responded / still-missing roster** — the payoff of collecting from a *known* set.
+1. **One shared link**, not per-recipient links. The owner distributes a single `/c/<token>` URL to all departments. _(Rationale: per-department links mean sending 30 links and risking sending the wrong one to the wrong person.)_
+2. **Uploader self-identifies from a predefined list.** The owner enters the department names once at creation; each uploader **picks their department from a dropdown**. This yields clean attribution (no typos/dupes) and enables the **responded / still-missing roster** — the payoff of collecting from a _known_ set.
 3. **A response is a set of 1..N files** (not a single file). Departments sometimes send 2–3 documents together; the uploader can select up to a capped number (`COLLECTION_MAX_FILES_PER_RESPONSE`, default **10**) and upload them in one submission, plus an optional note.
 4. **Latest replaces.** If a department submits again, the **new set of files replaces its previous set entirely** (previous files removed, quota reclaimed). Each department has exactly one current response slot; corrections are a re-submit.
 5. **Template attached, freely re-downloadable.** The collection carries an optional template file; recipients can download it any number of times (not burn-after-download).
 6. **Optional short note** per response.
 7. **Lifecycle:** owner can **open/close** the collection at will, and optionally set a **deadline** after which the link auto-closes. Liveness is computed at request time (like share `expires_at`), so **no scheduler change is needed**.
 8. **Optional password** on the collection link (same mechanism as shares).
-9. **Privacy (non-negotiable):** an uploader only ever sees the title, the template to download, the department picker, and *their own* upload form + confirmation. They can **never** see other departments' responses or who has/hasn't responded.
+9. **Privacy (non-negotiable):** an uploader only ever sees the title, the template to download, the department picker, and _their own_ upload form + confirmation. They can **never** see other departments' responses or who has/hasn't responded.
 10. **No email/SMS notifications in v1** (Mirsal has no mail infrastructure). The owner sees the live "X / N" count on the dashboard.
 11. **Responses live in the owner's Drive and count against the owner's quota.** A large collection needs sufficient quota assigned to the owner.
 
@@ -40,19 +40,24 @@ This introduces a new first-class feature, **Collections (طلب تجميع)** �
 ## 4. User-facing behavior
 
 ### 4.1 Owner — create a collection
+
 Fields: **title**, optional **template file** (pick an existing file from the owner's Drive, or upload one), the **department list** (paste/enter names; deduped; order preserved), optional **password**, optional **deadline**. On save, Mirsal:
+
 - creates a folder `طلب تجميع: <title>` in the owner's Drive (`collections.folder_node_id`),
 - generates a 32-byte URL-safe **token**, and
 - returns the shareable link `PUBLIC_BASE_URL + /c/<token>`.
 
 ### 4.2 Owner — collection dashboard (the roster)
+
 A collection detail view shows:
+
 - **X / N responded** headline.
 - **Responded** list: each department with its **file count**, submitted time, and note; actions = download a single file, **download that department's set as a ZIP** (reuses folder `/zip`), or **download the whole collection as one ZIP**.
 - **Missing** list: departments with no response yet — the chase list.
 - Controls: **edit the department list** (add always; **remove only a department with no response yet** — never orphan stored files), **close / reopen**, edit deadline/password, **delete the collection** (removes the collection, its departments, response rows, and the Drive folder + blobs).
 
 ### 4.3 Uploader — public page `/c/<token>`
+
 Neutral, bilingual page: collection **title**, a **Download template** button (if a template is attached), a **department dropdown** (required), a **file picker accepting 1..N files** (client hint: up to the cap; each ≤ 100 MB), an **optional note**, and **Upload response**. On success → a simple "received, thank you" confirmation; re-visiting and re-uploading replaces the department's set (decision 4). If the collection is password-protected, a password gate precedes the form (mirrors the share unlock). A **closed/expired** link shows a neutral "this collection is closed" page. The uploader **never** sees other responses or the roster.
 
 ## 5. Data model
@@ -60,45 +65,49 @@ Neutral, bilingual page: collection **title**, a **Download template** button (i
 Three new tables (all `CREATE TABLE IF NOT EXISTS`, added to `schema.sql` for fresh DBs **and** created by the v4 migration step for existing DBs). No changes to existing tables.
 
 **`collections`**
-| Column | Type | Meaning |
-|---|---|---|
-| `id` | `INTEGER PRIMARY KEY` | |
-| `owner_id` | `INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE` | creator/owner (quota + audit subject) |
-| `token` | `TEXT UNIQUE NOT NULL` | 32-byte CSPRNG, URL-safe (same generator as `shares.token`) |
-| `title` | `TEXT NOT NULL` | shown to owner + uploaders |
-| `template_node_id` | `INTEGER REFERENCES nodes(id) ON DELETE SET NULL` | NULL = no template |
-| `folder_node_id` | `INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE` | the collection's response folder in the owner's tree |
-| `password_hash` | `TEXT` | NULL = no password (argon2id, same service as shares) |
-| `is_active` | `INTEGER NOT NULL DEFAULT 1` | owner open/close toggle |
-| `deadline_at` | `INTEGER` | NULL = no deadline; `deadline_at <= now` ⇒ closed (request-time) |
-| `created_at` | `INTEGER NOT NULL` | epoch-ms |
-| `updated_at` | `INTEGER NOT NULL` | epoch-ms |
+
+| Column             | Type                                                      | Meaning                                                          |
+| ------------------ | --------------------------------------------------------- | ---------------------------------------------------------------- |
+| `id`               | `INTEGER PRIMARY KEY`                                     |                                                                  |
+| `owner_id`         | `INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE` | creator/owner (quota + audit subject)                            |
+| `token`            | `TEXT UNIQUE NOT NULL`                                    | 32-byte CSPRNG, URL-safe (same generator as `shares.token`)      |
+| `title`            | `TEXT NOT NULL`                                           | shown to owner + uploaders                                       |
+| `template_node_id` | `INTEGER REFERENCES nodes(id) ON DELETE SET NULL`         | NULL = no template                                               |
+| `folder_node_id`   | `INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE` | the collection's response folder in the owner's tree             |
+| `password_hash`    | `TEXT`                                                    | NULL = no password (argon2id, same service as shares)            |
+| `is_active`        | `INTEGER NOT NULL DEFAULT 1`                              | owner open/close toggle                                          |
+| `deadline_at`      | `INTEGER`                                                 | NULL = no deadline; `deadline_at <= now` ⇒ closed (request-time) |
+| `created_at`       | `INTEGER NOT NULL`                                        | epoch-ms                                                         |
+| `updated_at`       | `INTEGER NOT NULL`                                        | epoch-ms                                                         |
 
 **`collection_departments`**
-| Column | Type | Meaning |
-|---|---|---|
-| `id` | `INTEGER PRIMARY KEY` | |
-| `collection_id` | `INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE` | |
-| `name` | `TEXT NOT NULL` | department label (Arabic or English) |
-| `position` | `INTEGER NOT NULL DEFAULT 0` | display order |
-| `created_at` | `INTEGER NOT NULL` | |
+
+| Column          | Type                                                            | Meaning                              |
+| --------------- | --------------------------------------------------------------- | ------------------------------------ |
+| `id`            | `INTEGER PRIMARY KEY`                                           |                                      |
+| `collection_id` | `INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE` |                                      |
+| `name`          | `TEXT NOT NULL`                                                 | department label (Arabic or English) |
+| `position`      | `INTEGER NOT NULL DEFAULT 0`                                    | display order                        |
+| `created_at`    | `INTEGER NOT NULL`                                              |                                      |
 
 `UNIQUE(collection_id, name)` — the roster is a set of distinct names.
 
 **`collection_responses`**
-| Column | Type | Meaning |
-|---|---|---|
-| `id` | `INTEGER PRIMARY KEY` | |
-| `collection_id` | `INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE` | |
-| `department_id` | `INTEGER NOT NULL REFERENCES collection_departments(id) ON DELETE CASCADE` | which department |
-| `folder_node_id` | `INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE` | the department's response subfolder (holds its 1..N file nodes) |
-| `note` | `TEXT` | optional uploader note |
-| `submitted_at` | `INTEGER NOT NULL` | epoch-ms of the latest (current) submission |
-| `submitted_ip` | `TEXT` | best-effort client IP for audit |
+
+| Column           | Type                                                                       | Meaning                                                         |
+| ---------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------- |
+| `id`             | `INTEGER PRIMARY KEY`                                                      |                                                                 |
+| `collection_id`  | `INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE`            |                                                                 |
+| `department_id`  | `INTEGER NOT NULL REFERENCES collection_departments(id) ON DELETE CASCADE` | which department                                                |
+| `folder_node_id` | `INTEGER NOT NULL REFERENCES nodes(id) ON DELETE CASCADE`                  | the department's response subfolder (holds its 1..N file nodes) |
+| `note`           | `TEXT`                                                                     | optional uploader note                                          |
+| `submitted_at`   | `INTEGER NOT NULL`                                                         | epoch-ms of the latest (current) submission                     |
+| `submitted_ip`   | `TEXT`                                                                     | best-effort client IP for audit                                 |
 
 `UNIQUE(collection_id, department_id)` — **one current response per department** (latest-replaces updates this row and swaps its folder's contents). Indexes: `ix_collections_owner(owner_id)`, `ix_collection_responses_collection(collection_id)`.
 
 **Drive tree layout for a collection:**
+
 ```
 <owner root>
   └── طلب تجميع: <title>            (collections.folder_node_id, kind=folder)
@@ -108,6 +117,7 @@ Three new tables (all `CREATE TABLE IF NOT EXISTS`, added to `schema.sql` for fr
         └── <Department B>
               └── form.docx
 ```
+
 Per-department subfolders avoid cross-department filename collisions and make "download this department's set" a plain folder ZIP. Within one submission, duplicate filenames are de-duplicated with the existing `nodes/collisions.ts` helper.
 
 ## 6. Migration (v3 → v4)
@@ -115,13 +125,14 @@ Per-department subfolders avoid cross-department filename collisions and make "d
 - Bump `LATEST_VERSION = 4`. Add one ordered step `{ version: 4, up(db) }` that runs the three `CREATE TABLE IF NOT EXISTS` statements + indexes (one `db.exec`, inside the step's transaction).
 - Add the identical DDL to `schema.sql` so a **fresh** DB gets the tables and records `version = 4`.
 - Fresh-detection is unchanged (probe `sqlite_master` for `shares`).
-- **Zero data-loss risk:** the step only *creates new tables* — it never alters or drops anything. The live production DB is at `schema_version = 3`; on deploy it runs exactly the v4 create step.
+- **Zero data-loss risk:** the step only _creates new tables_ — it never alters or drops anything. The live production DB is at `schema_version = 3`; on deploy it runs exactly the v4 create step.
 - **Convergence test** (§11): a fresh DB and a `v3`-then-migrated DB produce identical `sqlite_master` for the three new tables; idempotent re-run; `schema_version` records 4.
 - **Pre-deploy DB snapshot required** (it is a migration) via `deploy/backup-mirsal.sh`.
 
 ## 7. API surface
 
 ### 7.1 Owner routes (authenticated: `requireAuth` + CSRF, owner-scoped)
+
 - `POST /api/collections` — create `{ title, templateNodeId?, departments: string[], password?, deadlineAt? }` → `{ id, token, url }`. Validates: title non-empty; ≥1 department; departments deduped/trimmed/length-capped; template (if given) is an owner-owned live **file** node. `deadlineAt` (if given) may be any epoch-ms value — there is no future-only validation; a deadline at or earlier than "now" simply makes the collection read as `expired` at request time (see `collectionStatus`).
 - `GET /api/collections` — list the owner's collections with summary counts (`departmentCount`, `respondedCount`, `is_active`, `deadline_at`).
 - `GET /api/collections/:id` — detail: collection fields + department roster, each annotated with `responded` (bool), file count, `submitted_at`, `note`, and the `folder_node_id` (so the UI can wire downloads via the existing node routes).
@@ -132,6 +143,7 @@ Per-department subfolders avoid cross-department filename collisions and make "d
 - **Downloads reuse existing node routes** (`/api/nodes/:id/download`, `/api/nodes/:id/zip`) against the response folder ids — no new download code.
 
 ### 7.2 Public routes (unauthenticated, token-addressed, rate-limited, `Cache-Control: no-store`)
+
 - `GET /api/collect/:token` — **meta**: `{ title, hasTemplate, templateName?, departments: [{id, name}], needsPassword, isOpen }`. **Reveals department names** (needed for the dropdown) but **never** which have responded, nor owner identity/quota. A closed/expired/unknown collection returns a neutral closed/`404` shape.
 - `POST /api/collect/:token/unlock` — password unlock (only when `needsPassword`); mirrors share `/unlock` (per-IP + per-token limit, HMAC `SameSite=Lax` cookie).
 - `GET /api/collect/:token/template` — stream the template file (uncounted, unlimited); `404` if none/closed.
@@ -146,17 +158,17 @@ Per-department subfolders avoid cross-department filename collisions and make "d
    - `writeStreamToTemp(ownerId, part, MAX_FILE_BYTES)` (aborts past 100 MB → reject + cleanup).
    - `reserve(db, ownerId, bytes, now)` — **quota exceeded ⇒ reject the whole submission**, release everything already reserved, unlink temps (no partial response stored).
    - create the file node (row-first) under the department's response subfolder, `commitTemp`, `commitActual`.
-5. **Latest-replaces swap (transactional):** ensure the department's response subfolder exists (create under `collections.folder_node_id` on first submission). If a prior response exists, **permanently delete its previous file set** (blob unlink + `subtract` quota) as part of committing the new set, then `INSERT OR REPLACE` the `collection_responses` row (`folder_node_id`, `note`, `submitted_at`, `submitted_ip`). *(Immediate hard-delete of the superseded set — not Trash — keeps quota honest and matches Mirsal's transient-files ethos.)*
+5. **Latest-replaces swap (transactional):** ensure the department's response subfolder exists (create under `collections.folder_node_id` on first submission). If a prior response exists, **permanently delete its previous file set** (blob unlink + `subtract` quota) as part of committing the new set, then `INSERT OR REPLACE` the `collection_responses` row (`folder_node_id`, `note`, `submitted_at`, `submitted_ip`). _(Immediate hard-delete of the superseded set — not Trash — keeps quota honest and matches Mirsal's transient-files ethos.)_
 6. **Audit:** `collection_response_submitted`, `actor_id = NULL`, detail `{ collection_id, department_id, department_name, file_count }`, plus the IP.
 7. **Response:** neutral success. Concurrency on the same department is serialized by SQLite's writer lock + the `UNIQUE(collection_id, department_id)` constraint; a rare loser retries.
 
 ## 9. Security — the new inbound-write surface (stated plainly)
 
-This is the **first time Mirsal lets an outsider *write***; every existing public route is read-only. Consequences and mitigations (all reuse existing tools):
+This is the **first time Mirsal lets an outsider _write_**; every existing public route is read-only. Consequences and mitigations (all reuse existing tools):
 
 - **Storage/DoS ceiling:** an attacker holding the link could fill the owner's quota. Bounds: each file ≤ **100 MB** (`MAX_FILE_BYTES`, streamed-abort), ≤ **10 files/response** (`COLLECTION_MAX_FILES_PER_RESPONSE`), one slot per department with **latest-replaces**, and hard-stopped by the **owner's quota** (`reserve` rejects). So the maximum resident bytes for a collection is bounded by `departments × 10 × 100 MB` **and** by the owner's quota — whichever is smaller. Recommend owners set a realistic quota.
 - **Per-IP rate-limiting** on `/collect/:token/*` (reuse `@fastify/rate-limit`), tighter on `submit` than on reads, keyed on the real client IP (nginx `real_ip` is already enabled on the project4 vhost → `req.ip` is the true client, not the gateway).
-- **Impersonation — the accepted trade-off (decision 1/2):** with one shared link + self-identification, anyone with the link can pick *any* department (or submit garbage as "Finance"). Per-department links would prevent this but were rejected (link-management burden). The **optional password** is the primary lever to limit who can reach the form; the roster shows exactly what was submitted, and the owner controls link distribution.
+- **Impersonation — the accepted trade-off (decision 1/2):** with one shared link + self-identification, anyone with the link can pick _any_ department (or submit garbage as "Finance"). Per-department links would prevent this but were rejected (link-management burden). The **optional password** is the primary lever to limit who can reach the form; the roster shows exactly what was submitted, and the owner controls link distribution.
 - **No CSRF token on the public submit** (the uploader has no account/session) — same stance as public download: protection is the unguessable token + rate-limit + optional password. The unlock cookie is `SameSite=Lax`, so a cross-site auto-POST can't carry it for password-protected collections.
 - **Content-type:** submit requires `multipart/form-data` (via `@fastify/multipart`); other media types are rejected before the handler (the 415-lesson analog).
 - **Anti-oracle:** unknown/closed/foreign token, wrong department, and rejections are **constant-shape**; meta never leaks response status or owner identity; all public responses carry `Cache-Control: no-store`.
@@ -174,6 +186,7 @@ This is the **first time Mirsal lets an outsider *write***; every existing publi
 ## 11. Testing strategy
 
 **Server (`server/test`):**
+
 - Migration: v3 DB gains the three tables; fresh DB has them; convergence (fresh vs upgraded `sqlite_master` identical); idempotent re-run; `schema_version` records 4.
 - Collections model: create (dedup/trim/validate departments; template must be an owner file); list/detail counts; PATCH owner-scoped (`404` foreign, no oracle); department add (409 dup) / remove (409 if responded); delete cascades rows + folder + blobs + quota.
 - Public meta: reveals department names + `needsPassword`/`isOpen`, **never** response status or owner; closed/expired/unknown → neutral.
@@ -181,6 +194,7 @@ This is the **first time Mirsal lets an outsider *write***; every existing publi
 - Rate-limit: submit is per-IP limited.
 
 **Web (`web/test`):**
+
 - Create modal (title/departments/template/password/deadline; validation). Roster (X/N, responded vs missing, file counts, download wiring). Public page (department dropdown from meta, template download, multi-file input, submit issues a multipart POST, confirmation, closed + password states, **both** ar/en labels present).
 
 ## 12. Rollout

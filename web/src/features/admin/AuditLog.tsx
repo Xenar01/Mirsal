@@ -83,14 +83,8 @@ export default function AuditLog() {
           >
             {t('admin.audit.prev')}
           </Button>
-          <span className="font-body text-sm text-ink-2">
-            {t('admin.audit.page', { page: page + 1 })}
-          </span>
-          <Button
-            variant="secondary"
-            onClick={() => setPage((p) => p + 1)}
-            disabled={!hasNext || isPlaceholderData}
-          >
+          <span className="font-body text-sm text-ink-2">{t('admin.audit.page', { page: page + 1 })}</span>
+          <Button variant="secondary" onClick={() => setPage((p) => p + 1)} disabled={!hasNext || isPlaceholderData}>
             {t('admin.audit.next')}
           </Button>
         </div>
@@ -124,9 +118,7 @@ function AuditActor({ entry }: { entry: AuditRowDto }) {
     return <span className="text-ink-2">{t('admin.audit.system')}</span>;
   }
   if (entry.actor_display_name || entry.actor_username) {
-    return (
-      <span className="font-body text-ink">{entry.actor_display_name || entry.actor_username}</span>
-    );
+    return <span className="font-body text-ink">{entry.actor_display_name || entry.actor_username}</span>;
   }
   return (
     <bdi dir="ltr" className="font-mono text-ink">
@@ -148,11 +140,7 @@ function AuditTarget({ entry }: { entry: AuditRowDto }) {
     return <span className="text-ink-2">—</span>;
   }
   if (entry.target_display_name || entry.target_username) {
-    return (
-      <span className="font-body text-ink-2">
-        {entry.target_display_name || entry.target_username}
-      </span>
-    );
+    return <span className="font-body text-ink-2">{entry.target_display_name || entry.target_username}</span>;
   }
   if (USER_TARGET_ACTIONS.has(entry.action)) {
     return (
@@ -180,10 +168,7 @@ function AuditRow({ entry, variant = 'row' }: { entry: AuditRowDto; variant?: 'r
 
   if (variant === 'card') {
     return (
-      <div
-        data-testid={`audit-card-${entry.id}`}
-        className="rounded-[10px] border border-line bg-surface p-3"
-      >
+      <div data-testid={`audit-card-${entry.id}`} className="rounded-[10px] border border-line bg-surface p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <bdi dir="ltr" className="font-mono text-xs text-ink-2">
             {formatDate(entry.created_at)}

@@ -27,8 +27,9 @@ Every task's requirements implicitly include this section. Values copied verbati
 ## File Structure
 
 **New files:**
+
 - `server/src/collections/unlock.ts` — HMAC unlock-cookie gate factory (Task 1). One responsibility: sign/verify the per-collection unlock cookie.
-- `server/src/util/names.ts` — exported `sanitizeNodeName` used by the new code (Task 5). *(Deliberate: `routes/nodes.ts` keeps its own private copy so the deployed upload path is untouched; a future cleanup can DRY it onto this module — noted as a CARRY.)*
+- `server/src/util/names.ts` — exported `sanitizeNodeName` used by the new code (Task 5). _(Deliberate: `routes/nodes.ts` keeps its own private copy so the deployed upload path is untouched; a future cleanup can DRY it onto this module — noted as a CARRY.)_
 - `server/src/collections/responses.ts` — the response write model: `commitResponse` (transactional first-submit + latest-replaces + atomic quota reserve), `responseHeadroom`, `QuotaExceededError` (Task 5).
 - `server/src/routes/collect.ts` — the public collect plugin: meta (Task 2), unlock (Task 3), template (Task 4), submit (Task 6).
 - `server/test/collections/unlock.test.ts` (Task 1)
@@ -36,6 +37,7 @@ Every task's requirements implicitly include this section. Values copied verbati
 - `server/test/routes/collect.test.ts` (Tasks 2/3/4/6 all add to this one integration file)
 
 **Modified files:**
+
 - `server/src/app.ts` — register `collectRoutes` after `publicRoutes` (Task 2); add `/c/` to the not-found handler's `Referrer-Policy` branch (Task 7).
 - `server/src/config.ts` — add `COLLECTION_MAX_FILES_PER_RESPONSE` and `MAX_NOTE_LENGTH` consts (Task 5).
 - `server/test/app.test.ts` — add the `/c/<token>` SPA-shell test (Task 7).
@@ -47,10 +49,12 @@ Every task's requirements implicitly include this section. Values copied verbati
 A pure crypto module mirroring the share unlock logic in `routes/public.ts` (`signUnlock`/`unlockCookieValue`/`isUnlocked`), extracted into a reusable factory so the collect plugin gets identical, independently-tested behavior **without touching the deployed `public.ts`**.
 
 **Files:**
+
 - Create: `server/src/collections/unlock.ts`
 - Test: `server/test/collections/unlock.test.ts`
 
 **Interfaces:**
+
 - Consumes: `node:crypto` (`createHmac`, `timingSafeEqual`).
 - Produces:
   - `COLLECT_UNLOCK_COOKIE: string` (= `'mirsal_collect_unlock'`).
@@ -104,9 +108,9 @@ describe('createUnlockGate', () => {
     const gate = createUnlockGate(SECRET);
     const cookie = gate.cookieValue(TOKEN, HASH, NOW);
     expect(gate.isUnlocked(cookie, TOKEN, HASH, NOW + 601_000)).toBe(false); // aged out
-    expect(gate.isUnlocked(cookie, TOKEN, HASH, NOW + 599_000)).toBe(true);  // still fresh
+    expect(gate.isUnlocked(cookie, TOKEN, HASH, NOW + 599_000)).toBe(true); // still fresh
     const future = gate.cookieValue(TOKEN, HASH, NOW + 10_000);
-    expect(gate.isUnlocked(future, TOKEN, HASH, NOW)).toBe(false);           // issued in the future
+    expect(gate.isUnlocked(future, TOKEN, HASH, NOW)).toBe(false); // issued in the future
   });
 
   test('a tampered signature -> false', () => {
@@ -154,7 +158,9 @@ export interface UnlockGate {
  */
 export function createUnlockGate(secret: string): UnlockGate {
   function sign(token: string, passwordHash: string | null, issuedAtStr: string): string {
-    return createHmac('sha256', secret).update(`${token}.${passwordHash ?? ''}.${issuedAtStr}`).digest('base64url');
+    return createHmac('sha256', secret)
+      .update(`${token}.${passwordHash ?? ''}.${issuedAtStr}`)
+      .digest('base64url');
   }
 
   function cookieValue(token: string, passwordHash: string | null, issuedAtMs: number): string {
@@ -199,11 +205,13 @@ git commit -m "feat(collections): unlock-cookie gate module (public collect)"
 The public plugin, its response hooks, a token loader, the `GET /api/collect/:token` meta endpoint, and registration in `app.ts`.
 
 **Files:**
+
 - Create: `server/src/routes/collect.ts`
 - Modify: `server/src/app.ts` (import + register `collectRoutes`)
 - Test: `server/test/routes/collect.test.ts`
 
 **Interfaces:**
+
 - Consumes: `createUnlockGate` (Task 1); Phase-1 `collectionStatus`, `type Collection` (`collections/collections.js`), `listDepartments` (`collections/departments.js`); `writeAudit`; `type Clock`, `PasswordService`, `BlobStore`, `Config`.
 - Produces:
   - `export interface CollectRouteDeps { db: Database.Database; now: Clock; passwordService: PasswordService; blobStore: BlobStore; config: Config }`.
@@ -236,7 +244,10 @@ const clock = () => NOW;
 const TEST_ARGON = { ARGON_MEMORY_KIB: 19456, ARGON_TIME: 2, ARGON_PARALLELISM: 1, ARGON_MAX_CONCURRENCY: 2 };
 const PUBLIC_BASE_URL = 'https://mirsal.example.test';
 
-interface InjectedCookie { name: string; value: string }
+interface InjectedCookie {
+  name: string;
+  value: string;
+}
 
 let db: Database.Database | undefined;
 let dir: string | undefined;
@@ -253,21 +264,34 @@ beforeAll(() => {
   process.env.CSRF_SECRET = 'b'.repeat(32);
   process.env.PUBLIC_BASE_URL = PUBLIC_BASE_URL;
 });
-afterAll(() => { for (const k of keys) { if (originals[k] === undefined) delete process.env[k]; else process.env[k] = originals[k]; } });
+afterAll(() => {
+  for (const k of keys) {
+    if (originals[k] === undefined) delete process.env[k];
+    else process.env[k] = originals[k];
+  }
+});
 afterEach(async () => {
-  await app?.close(); app = undefined;
-  db?.close(); db = undefined;
-  if (dir) { fs.rmSync(dir, { recursive: true, force: true }); dir = undefined; }
+  await app?.close();
+  app = undefined;
+  db?.close();
+  db = undefined;
+  if (dir) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  }
 });
 
 async function makeApp(): Promise<FastifyInstance> {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mirsal-collect-'));
   const dbPath = path.join(dir, 't.db');
   const storageDir = path.join(dir, 'storage');
-  db = openDb(dbPath); migrate(db);
+  db = openDb(dbPath);
+  migrate(db);
   const config = loadConfig({
-    DB_PATH: dbPath, STORAGE_DIR: storageDir,
-    SESSION_SECRET: 'a-test-session-secret-16+', CSRF_SECRET: 'a-test-csrf-secret-16chars+',
+    DB_PATH: dbPath,
+    STORAGE_DIR: storageDir,
+    SESSION_SECRET: 'a-test-session-secret-16+',
+    CSRF_SECRET: 'a-test-csrf-secret-16chars+',
     PUBLIC_BASE_URL,
   });
   app = await buildApp({ db, config, now: clock });
@@ -277,12 +301,16 @@ async function makeApp(): Promise<FastifyInstance> {
 async function seedUser(username: string, quotaBytes: number | null = null): Promise<number> {
   const hash = await createPasswordService(TEST_ARGON).hashPassword('pw');
   const info = db!
-    .prepare(`INSERT INTO users(username,password_hash,role,is_active,must_change_password,quota_bytes,created_at,updated_at)
-              VALUES (?, ?, 'user', 1, 0, ?, ?, ?)`)
+    .prepare(
+      `INSERT INTO users(username,password_hash,role,is_active,must_change_password,quota_bytes,created_at,updated_at)
+              VALUES (?, ?, 'user', 1, 0, ?, ?, ?)`,
+    )
     .run(username, hash, quotaBytes, NOW, NOW);
   return Number(info.lastInsertRowid);
 }
-function findCookie(cookies: InjectedCookie[], name: string) { return cookies.find((c) => c.name === name); }
+function findCookie(cookies: InjectedCookie[], name: string) {
+  return cookies.find((c) => c.name === name);
+}
 async function login(built: FastifyInstance, username: string): Promise<{ session: string; csrf: string }> {
   const res = await built.inject({ method: 'POST', url: '/api/auth/login', payload: { username, password: 'pw' } });
   return {
@@ -293,8 +321,11 @@ async function login(built: FastifyInstance, username: string): Promise<{ sessio
 /** Owner-creates a collection via the Phase-1 owner API; returns its detail DTO. */
 async function makeCollection(built: FastifyInstance, session: string, csrf: string, payload: Record<string, unknown>) {
   const res = await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf }, payload,
+    method: 'POST',
+    url: '/api/collections',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload,
   });
   expect(res.statusCode).toBe(201);
   return res.json();
@@ -332,8 +363,11 @@ test('GET meta closed -> {isOpen:false}, nothing else', async () => {
   const { session, csrf } = await login(built, 'alice');
   const c = await makeCollection(built, session, csrf, { title: 'T', departments: ['A'] });
   await built.inject({
-    method: 'PATCH', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf }, payload: { is_active: false },
+    method: 'PATCH',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { is_active: false },
   });
   const res = await built.inject({ method: 'GET', url: `/api/collect/${c.token}` });
   expect(res.statusCode).toBe(200);
@@ -426,7 +460,9 @@ export default async function collectRoutes(app: FastifyInstance, deps: CollectR
     let templateName: string | null = null;
     if (c.template_node_id !== null) {
       const t = db
-        .prepare("SELECT name FROM nodes WHERE id = @id AND owner_id = @ownerId AND kind = 'file' AND trashed_at IS NULL")
+        .prepare(
+          "SELECT name FROM nodes WHERE id = @id AND owner_id = @ownerId AND kind = 'file' AND trashed_at IS NULL",
+        )
         .get({ id: c.template_node_id, ownerId: c.owner_id }) as { name: string } | undefined;
       if (t) templateName = t.name;
     }
@@ -453,17 +489,17 @@ import collectRoutes from './routes/collect.js';
 In `registerRoutes`, register it immediately after the `publicRoutes` registration (it needs the same `passwordService` + shared `blobStore`):
 
 ```ts
-  // Collections Phase 2: the public intake gate — NO auth, NO CSRF; token-in-URL.
-  // Same shared passwordService + blobStore as the routes above. Its own
-  // encapsulated onSend hook stamps no-referrer + no-store (never leaks onto
-  // the authenticated routes).
-  await app.register(collectRoutes, {
-    db: deps.db,
-    now: deps.now,
-    passwordService,
-    blobStore,
-    config: deps.config,
-  });
+// Collections Phase 2: the public intake gate — NO auth, NO CSRF; token-in-URL.
+// Same shared passwordService + blobStore as the routes above. Its own
+// encapsulated onSend hook stamps no-referrer + no-store (never leaks onto
+// the authenticated routes).
+await app.register(collectRoutes, {
+  db: deps.db,
+  now: deps.now,
+  passwordService,
+  blobStore,
+  config: deps.config,
+});
 ```
 
 - [ ] **Step 5: Run tests to verify they pass**
@@ -485,10 +521,12 @@ git commit -m "feat(collections): public collect plugin + GET meta + app wiring"
 Password unlock for a protected collection, in a dedicated rate-limited child scope (per-IP + per-token, two `@fastify/rate-limit` registrations), mirroring `routes/public.ts`'s `/unlock`.
 
 **Files:**
+
 - Modify: `server/src/routes/collect.ts` (add the unlock scope inside `collectRoutes`)
 - Test: `server/test/routes/collect.test.ts` (append)
 
 **Interfaces:**
+
 - Consumes: `deps.passwordService.verifyPassword`, `writeAudit`, `gate.cookieValue`/`cookiePath`/`cookieName`, `fastifyRateLimit`, `z`.
 - Produces route `POST /api/collect/:token/unlock`:
   - bad body → `400 {error:'invalid_body'}`; non-open/unknown → `404 {error:'not_found'}`; no-password collection → `400 {code:'no_password'}`; wrong password → `401 {error:'invalid_password'}` + audit `collection_unlock_failure` (actor = owner); correct → `200 {ok:true}` + sets the path-scoped unlock cookie.
@@ -500,21 +538,36 @@ test('POST unlock: wrong pw -> 401 + audit; correct pw -> 200 + cookie; meta the
   const built = await makeApp();
   await seedUser('alice');
   const { session, csrf } = await login(built, 'alice');
-  const c = await makeCollection(built, session, csrf, { title: 'Secret', departments: ['A', 'B'], password: 'hunter2' });
+  const c = await makeCollection(built, session, csrf, {
+    title: 'Secret',
+    departments: ['A', 'B'],
+    password: 'hunter2',
+  });
 
-  const wrong = await built.inject({ method: 'POST', url: `/api/collect/${c.token}/unlock`, payload: { password: 'nope' } });
+  const wrong = await built.inject({
+    method: 'POST',
+    url: `/api/collect/${c.token}/unlock`,
+    payload: { password: 'nope' },
+  });
   expect(wrong.statusCode).toBe(401);
   expect(wrong.json()).toMatchObject({ error: 'invalid_password' });
-  const audit = db!.prepare("SELECT COUNT(*) n FROM audit_log WHERE action='collection_unlock_failure'").get() as { n: number };
+  const audit = db!.prepare("SELECT COUNT(*) n FROM audit_log WHERE action='collection_unlock_failure'").get() as {
+    n: number;
+  };
   expect(audit.n).toBe(1);
 
-  const ok = await built.inject({ method: 'POST', url: `/api/collect/${c.token}/unlock`, payload: { password: 'hunter2' } });
+  const ok = await built.inject({
+    method: 'POST',
+    url: `/api/collect/${c.token}/unlock`,
+    payload: { password: 'hunter2' },
+  });
   expect(ok.statusCode).toBe(200);
   const setCookie = (ok.cookies as InjectedCookie[]).find((k) => k.name === 'mirsal_collect_unlock');
   expect(setCookie).toBeDefined();
 
   const meta = await built.inject({
-    method: 'GET', url: `/api/collect/${c.token}`,
+    method: 'GET',
+    url: `/api/collect/${c.token}`,
     cookies: { mirsal_collect_unlock: setCookie!.value },
   });
   expect(meta.json()).toMatchObject({ isOpen: true, needsPassword: true, title: 'Secret' });
@@ -526,12 +579,26 @@ test('POST unlock: no-password collection -> 400 no_password; closed -> 404; bad
   await seedUser('alice');
   const { session, csrf } = await login(built, 'alice');
   const open = await makeCollection(built, session, csrf, { title: 'T', departments: ['A'] });
-  expect((await built.inject({ method: 'POST', url: `/api/collect/${open.token}/unlock`, payload: { password: 'x' } })).statusCode).toBe(400);
-  expect((await built.inject({ method: 'POST', url: `/api/collect/${open.token}/unlock`, payload: {} })).statusCode).toBe(400);
+  expect(
+    (await built.inject({ method: 'POST', url: `/api/collect/${open.token}/unlock`, payload: { password: 'x' } }))
+      .statusCode,
+  ).toBe(400);
+  expect(
+    (await built.inject({ method: 'POST', url: `/api/collect/${open.token}/unlock`, payload: {} })).statusCode,
+  ).toBe(400);
 
   const withPw = await makeCollection(built, session, csrf, { title: 'P', departments: ['A'], password: 'pw2' });
-  await built.inject({ method: 'PATCH', url: `/api/collections/${withPw.id}`, cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf }, payload: { is_active: false } });
-  expect((await built.inject({ method: 'POST', url: `/api/collect/${withPw.token}/unlock`, payload: { password: 'pw2' } })).statusCode).toBe(404);
+  await built.inject({
+    method: 'PATCH',
+    url: `/api/collections/${withPw.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { is_active: false },
+  });
+  expect(
+    (await built.inject({ method: 'POST', url: `/api/collect/${withPw.token}/unlock`, payload: { password: 'pw2' } }))
+      .statusCode,
+  ).toBe(404);
 });
 ```
 
@@ -562,50 +629,57 @@ const unlockSchema = z.object({ password: z.string().min(1) });
 Inside `collectRoutes`, after the meta route, add the destructure of `passwordService` (extend the existing `const { db, now, config } = deps;` to `const { db, now, config, passwordService } = deps;`) and register the scope:
 
 ```ts
-  // --- POST unlock (rate-limited per-IP AND per-token) --------------------
-  // Two independent @fastify/rate-limit instances (per-IP + per-token) in a
-  // dedicated child scope — same two-registration pattern as routes/public.ts.
-  await app.register(async function collectUnlockScope(scope) {
-    await scope.register(fastifyRateLimit, {
-      max: UNLOCK_IP_RATE_LIMIT_MAX, timeWindow: UNLOCK_RATE_LIMIT_WINDOW_MS,
-      hook: 'preHandler', keyGenerator: (req) => req.ip,
-    });
-    await scope.register(fastifyRateLimit, {
-      max: UNLOCK_TOKEN_RATE_LIMIT_MAX, timeWindow: UNLOCK_RATE_LIMIT_WINDOW_MS,
-      hook: 'preHandler', keyGenerator: (req) => (req.params as { token?: string }).token ?? '',
-    });
-
-    scope.post('/api/collect/:token/unlock', async (req, reply) => {
-      const { token } = req.params as { token: string };
-      const parsed = unlockSchema.safeParse(req.body);
-      if (!parsed.success) {
-        reply.code(400).send({ error: 'invalid_body' });
-        return;
-      }
-      const c = loadByToken(token);
-      if (!c || collectionStatus(c, now()) !== 'open') {
-        reply.code(404).send({ error: 'not_found' });
-        return;
-      }
-      if (c.password_hash === null) {
-        reply.code(400).send({ code: 'no_password' });
-        return;
-      }
-      const ok = await passwordService.verifyPassword(c.password_hash, parsed.data.password);
-      if (!ok) {
-        writeAudit(db, { actorId: c.owner_id, action: 'collection_unlock_failure', target: token }, now);
-        reply.code(401).send({ error: 'invalid_password' });
-        return;
-      }
-      // Path-scoped to THIS token so the cookie is only presented to this
-      // collection's own endpoints. Session cookie (no Max-Age); its 600s
-      // lifetime is enforced server-side in gate.isUnlocked.
-      reply.setCookie(gate.cookieName, gate.cookieValue(token, c.password_hash, now()), {
-        httpOnly: true, secure: true, sameSite: 'lax', path: gate.cookiePath(token),
-      });
-      reply.code(200).send({ ok: true });
-    });
+// --- POST unlock (rate-limited per-IP AND per-token) --------------------
+// Two independent @fastify/rate-limit instances (per-IP + per-token) in a
+// dedicated child scope — same two-registration pattern as routes/public.ts.
+await app.register(async function collectUnlockScope(scope) {
+  await scope.register(fastifyRateLimit, {
+    max: UNLOCK_IP_RATE_LIMIT_MAX,
+    timeWindow: UNLOCK_RATE_LIMIT_WINDOW_MS,
+    hook: 'preHandler',
+    keyGenerator: (req) => req.ip,
   });
+  await scope.register(fastifyRateLimit, {
+    max: UNLOCK_TOKEN_RATE_LIMIT_MAX,
+    timeWindow: UNLOCK_RATE_LIMIT_WINDOW_MS,
+    hook: 'preHandler',
+    keyGenerator: (req) => (req.params as { token?: string }).token ?? '',
+  });
+
+  scope.post('/api/collect/:token/unlock', async (req, reply) => {
+    const { token } = req.params as { token: string };
+    const parsed = unlockSchema.safeParse(req.body);
+    if (!parsed.success) {
+      reply.code(400).send({ error: 'invalid_body' });
+      return;
+    }
+    const c = loadByToken(token);
+    if (!c || collectionStatus(c, now()) !== 'open') {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
+    if (c.password_hash === null) {
+      reply.code(400).send({ code: 'no_password' });
+      return;
+    }
+    const ok = await passwordService.verifyPassword(c.password_hash, parsed.data.password);
+    if (!ok) {
+      writeAudit(db, { actorId: c.owner_id, action: 'collection_unlock_failure', target: token }, now);
+      reply.code(401).send({ error: 'invalid_password' });
+      return;
+    }
+    // Path-scoped to THIS token so the cookie is only presented to this
+    // collection's own endpoints. Session cookie (no Max-Age); its 600s
+    // lifetime is enforced server-side in gate.isUnlocked.
+    reply.setCookie(gate.cookieName, gate.cookieValue(token, c.password_hash, now()), {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      path: gate.cookiePath(token),
+    });
+    reply.code(200).send({ ok: true });
+  });
+});
 ```
 
 - [ ] **Step 4: Run to verify pass**
@@ -627,10 +701,12 @@ git commit -m "feat(collections): public unlock route (per-IP+per-token limited)
 Streams the collection's template file to the recipient (uncounted, unlimited), gated by open-status and unlock, in a rate-limited scope.
 
 **Files:**
+
 - Modify: `server/src/routes/collect.ts`
 - Test: `server/test/routes/collect.test.ts` (append)
 
 **Interfaces:**
+
 - Consumes: `deps.blobStore.readBlob`, `buildContentDisposition` (`util/content-disposition.js`), `type ReadStream`, `gate.isUnlocked`.
 - Produces `GET /api/collect/:token/template`: no template / non-open / trashed-template / missing-blob → `404 {error:'not_found'}`; password + not-unlocked → `401 {needsPassword:true}`; success → streamed bytes + `Content-Disposition` (attachment, sanitized name) + `X-Content-Type-Options: nosniff`.
 
@@ -647,18 +723,26 @@ test('GET template: streams the attached file; missing template -> 404', async (
   const boundary = '----b';
   const body = Buffer.concat([
     Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="parent_id"\r\n\r\n${rootId}\r\n`),
-    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="template.txt"\r\nContent-Type: text/plain\r\n\r\n`),
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="template.txt"\r\nContent-Type: text/plain\r\n\r\n`,
+    ),
     Buffer.from('HELLO-TEMPLATE'),
     Buffer.from(`\r\n--${boundary}--\r\n`),
   ]);
   const up = await built.inject({
-    method: 'POST', url: '/api/nodes/upload',
-    cookies: { mirsal_session: session }, headers: { 'content-type': `multipart/form-data; boundary=${boundary}`, 'x-csrf-token': csrf },
+    method: 'POST',
+    url: '/api/nodes/upload',
+    cookies: { mirsal_session: session },
+    headers: { 'content-type': `multipart/form-data; boundary=${boundary}`, 'x-csrf-token': csrf },
     payload: body,
   });
   const templateNodeId = up.json().id;
 
-  const c = await makeCollection(built, session, csrf, { title: 'T', departments: ['A'], template_node_id: templateNodeId });
+  const c = await makeCollection(built, session, csrf, {
+    title: 'T',
+    departments: ['A'],
+    template_node_id: templateNodeId,
+  });
   const res = await built.inject({ method: 'GET', url: `/api/collect/${c.token}/template` });
   expect(res.statusCode).toBe(200);
   expect(res.body).toBe('HELLO-TEMPLATE');
@@ -716,67 +800,84 @@ function waitForOpen(stream: ReadStream): Promise<void> {
 Extend the destructure to include `blobStore`: `const { db, now, config, passwordService, blobStore } = deps;`. Inside `collectRoutes`, after the unlock scope, add:
 
 ```ts
-  /** For a password collection, requires a valid unlock cookie. Sends 401 and
-   *  returns false when locked; true otherwise. */
-  function requireUnlocked(req: Parameters<Parameters<typeof app.get>[1]>[0], reply: any, c: Collection): boolean {
-    if (c.password_hash !== null && !gate.isUnlocked(req.cookies[gate.cookieName], c.token, c.password_hash, now())) {
-      reply.code(401).send({ needsPassword: true });
-      return false;
-    }
-    return true;
+/** For a password collection, requires a valid unlock cookie. Sends 401 and
+ *  returns false when locked; true otherwise. */
+function requireUnlocked(req: Parameters<Parameters<typeof app.get>[1]>[0], reply: any, c: Collection): boolean {
+  if (c.password_hash !== null && !gate.isUnlocked(req.cookies[gate.cookieName], c.token, c.password_hash, now())) {
+    reply.code(401).send({ needsPassword: true });
+    return false;
   }
+  return true;
+}
 
-  // --- GET template (rate-limited per-IP AND per-token) -------------------
-  await app.register(async function collectTemplateScope(scope) {
-    await scope.register(fastifyRateLimit, {
-      max: READ_IP_RATE_LIMIT_MAX, timeWindow: READ_RATE_LIMIT_WINDOW_MS,
-      hook: 'preHandler', keyGenerator: (req) => req.ip,
-    });
-    await scope.register(fastifyRateLimit, {
-      max: READ_TOKEN_RATE_LIMIT_MAX, timeWindow: READ_RATE_LIMIT_WINDOW_MS,
-      hook: 'preHandler', keyGenerator: (req) => (req.params as { token?: string }).token ?? '',
-    });
-
-    scope.get('/api/collect/:token/template', async (req, reply) => {
-      const { token } = req.params as { token: string };
-      const c = loadByToken(token);
-      if (!c || collectionStatus(c, now()) !== 'open') {
-        reply.code(404).send({ error: 'not_found' });
-        return;
-      }
-      if (!requireUnlocked(req, reply, c)) return;
-      if (c.template_node_id === null) {
-        reply.code(404).send({ error: 'not_found' });
-        return;
-      }
-      const node = db
-        .prepare('SELECT owner_id, kind, name, mime_type, storage_path, trashed_at FROM nodes WHERE id = @id')
-        .get({ id: c.template_node_id }) as
-        | { owner_id: number; kind: string; name: string; mime_type: string | null; storage_path: string | null; trashed_at: number | null }
-        | undefined;
-      if (!node || node.owner_id !== c.owner_id || node.kind !== 'file' || node.trashed_at !== null || !node.storage_path) {
-        reply.code(404).send({ error: 'not_found' });
-        return;
-      }
-      const stream = blobStore.readBlob(node.storage_path);
-      try {
-        await waitForOpen(stream);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
-          reply.code(404).send({ error: 'not_found' }); // reverse-orphan, never 500
-          return;
-        }
-        throw e;
-      }
-      reply.header('Content-Disposition', buildContentDisposition(node.name));
-      reply.header('X-Content-Type-Options', 'nosniff');
-      reply.header('Content-Type', node.mime_type ?? 'application/octet-stream');
-      return reply.send(stream);
-    });
+// --- GET template (rate-limited per-IP AND per-token) -------------------
+await app.register(async function collectTemplateScope(scope) {
+  await scope.register(fastifyRateLimit, {
+    max: READ_IP_RATE_LIMIT_MAX,
+    timeWindow: READ_RATE_LIMIT_WINDOW_MS,
+    hook: 'preHandler',
+    keyGenerator: (req) => req.ip,
   });
+  await scope.register(fastifyRateLimit, {
+    max: READ_TOKEN_RATE_LIMIT_MAX,
+    timeWindow: READ_RATE_LIMIT_WINDOW_MS,
+    hook: 'preHandler',
+    keyGenerator: (req) => (req.params as { token?: string }).token ?? '',
+  });
+
+  scope.get('/api/collect/:token/template', async (req, reply) => {
+    const { token } = req.params as { token: string };
+    const c = loadByToken(token);
+    if (!c || collectionStatus(c, now()) !== 'open') {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
+    if (!requireUnlocked(req, reply, c)) return;
+    if (c.template_node_id === null) {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
+    const node = db
+      .prepare('SELECT owner_id, kind, name, mime_type, storage_path, trashed_at FROM nodes WHERE id = @id')
+      .get({ id: c.template_node_id }) as
+      | {
+          owner_id: number;
+          kind: string;
+          name: string;
+          mime_type: string | null;
+          storage_path: string | null;
+          trashed_at: number | null;
+        }
+      | undefined;
+    if (
+      !node ||
+      node.owner_id !== c.owner_id ||
+      node.kind !== 'file' ||
+      node.trashed_at !== null ||
+      !node.storage_path
+    ) {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
+    const stream = blobStore.readBlob(node.storage_path);
+    try {
+      await waitForOpen(stream);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === 'ENOENT') {
+        reply.code(404).send({ error: 'not_found' }); // reverse-orphan, never 500
+        return;
+      }
+      throw e;
+    }
+    reply.header('Content-Disposition', buildContentDisposition(node.name));
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('Content-Type', node.mime_type ?? 'application/octet-stream');
+    return reply.send(stream);
+  });
+});
 ```
 
-*(Note: `requireUnlocked`'s `req`/`reply` typing above is deliberately loose to avoid over-parameterizing; if `tsc` objects, type `req: FastifyRequest`/`reply: FastifyReply` by importing those types.)*
+_(Note: `requireUnlocked`'s `req`/`reply` typing above is deliberately loose to avoid over-parameterizing; if `tsc` objects, type `req: FastifyRequest`/`reply: FastifyReply` by importing those types.)_
 
 - [ ] **Step 4: Run to verify pass**
 
@@ -797,12 +898,14 @@ git commit -m "feat(collections): public template download route"
 The transactional core of the inbound write: first-submission and latest-replaces, with an atomic post-free quota reserve. Pure DB + quota (no filesystem, no HTTP) — the route (Task 6) streams to temp before, and `commitTemp`/`deleteBlob` after.
 
 **Files:**
+
 - Create: `server/src/util/names.ts`
 - Create: `server/src/collections/responses.ts`
 - Modify: `server/src/config.ts` (add two consts)
 - Test: `server/test/collections/responses.test.ts`
 
 **Interfaces:**
+
 - Consumes: `reserve`, `subtract` (`storage/quota.js`); `nextSuffixedName` (`nodes/collisions.js`); `sanitizeNodeName` (new `util/names.js`).
 - Produces:
   - `util/names.ts`: `export function sanitizeNodeName(raw: unknown): string | null` (identical behavior to the private copy in `routes/nodes.ts`).
@@ -828,13 +931,25 @@ import type Database from 'better-sqlite3';
 import { openDb } from '../../src/db/connection.js';
 import { migrate } from '../../src/db/migrate.js';
 import { ensureUserRoots } from '../../src/nodes/tree.js';
-import { commitResponse, responseHeadroom, QuotaExceededError, type StagedFile } from '../../src/collections/responses.js';
+import {
+  commitResponse,
+  responseHeadroom,
+  QuotaExceededError,
+  type StagedFile,
+} from '../../src/collections/responses.js';
 
 const NOW = 1_700_000_000_000;
 let db: Database.Database | undefined;
 let dir: string | undefined;
 
-afterEach(() => { db?.close(); db = undefined; if (dir) { fs.rmSync(dir, { recursive: true, force: true }); dir = undefined; } });
+afterEach(() => {
+  db?.close();
+  db = undefined;
+  if (dir) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  }
+});
 
 function fresh(): Database.Database {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mirsal-resp-'));
@@ -843,19 +958,38 @@ function fresh(): Database.Database {
   return db;
 }
 function seedOwner(quota: number | null): number {
-  const info = db!.prepare(`INSERT INTO users(username,password_hash,role,is_active,must_change_password,quota_bytes,used_bytes,created_at,updated_at)
-    VALUES ('o','h','user',1,0,?,0,?,?)`).run(quota, NOW, NOW);
+  const info = db!
+    .prepare(
+      `INSERT INTO users(username,password_hash,role,is_active,must_change_password,quota_bytes,used_bytes,created_at,updated_at)
+    VALUES ('o','h','user',1,0,?,0,?,?)`,
+    )
+    .run(quota, NOW, NOW);
   return Number(info.lastInsertRowid);
 }
 /** Seeds a collection folder + one department; returns ids the model needs. */
 function seedCollection(ownerId: number): { collectionId: number; folderNodeId: number; deptId: number } {
   const { rootId } = ensureUserRoots(db!, ownerId, NOW);
-  const folderNodeId = Number(db!.prepare(`INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
-    VALUES (?,?,'folder','طلب تجميع: T',0,?,?)`).run(ownerId, rootId, NOW, NOW).lastInsertRowid);
-  const collectionId = Number(db!.prepare(`INSERT INTO collections(owner_id,token,title,template_node_id,folder_node_id,password_hash,is_active,deadline_at,created_at,updated_at)
-    VALUES (?,?,?,NULL,?,NULL,1,NULL,?,?)`).run(ownerId, `tok-${Math.random()}`, 'T', folderNodeId, NOW, NOW).lastInsertRowid);
-  const deptId = Number(db!.prepare(`INSERT INTO collection_departments(collection_id,name,position,created_at) VALUES (?,?,0,?)`)
-    .run(collectionId, 'HR', NOW).lastInsertRowid);
+  const folderNodeId = Number(
+    db!
+      .prepare(
+        `INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
+    VALUES (?,?,'folder','طلب تجميع: T',0,?,?)`,
+      )
+      .run(ownerId, rootId, NOW, NOW).lastInsertRowid,
+  );
+  const collectionId = Number(
+    db!
+      .prepare(
+        `INSERT INTO collections(owner_id,token,title,template_node_id,folder_node_id,password_hash,is_active,deadline_at,created_at,updated_at)
+    VALUES (?,?,?,NULL,?,NULL,1,NULL,?,?)`,
+      )
+      .run(ownerId, `tok-${Math.random()}`, 'T', folderNodeId, NOW, NOW).lastInsertRowid,
+  );
+  const deptId = Number(
+    db!
+      .prepare(`INSERT INTO collection_departments(collection_id,name,position,created_at) VALUES (?,?,0,?)`)
+      .run(collectionId, 'HR', NOW).lastInsertRowid,
+  );
   return { collectionId, folderNodeId, deptId };
 }
 function staged(name: string, bytes: number): StagedFile {
@@ -867,16 +1001,37 @@ test('first submission: creates the dept subfolder + file nodes; response row + 
   const owner = seedOwner(null);
   const { collectionId, folderNodeId, deptId } = seedCollection(owner);
 
-  const res = commitResponse(database, owner, { id: collectionId, folder_node_id: folderNodeId },
-    { id: deptId, name: 'HR' }, [staged('a.txt', 100), staged('b.txt', 50)], 'my note', '1.2.3.4', NOW);
+  const res = commitResponse(
+    database,
+    owner,
+    { id: collectionId, folder_node_id: folderNodeId },
+    { id: deptId, name: 'HR' },
+    [staged('a.txt', 100), staged('b.txt', 50)],
+    'my note',
+    '1.2.3.4',
+    NOW,
+  );
 
   expect(res.committed).toHaveLength(2);
   expect(res.removedStoragePaths).toEqual([]);
-  const sub = database.prepare("SELECT id FROM nodes WHERE parent_id=? AND kind='folder'").get(folderNodeId) as { id: number };
-  const files = database.prepare("SELECT name, storage_path, size_bytes FROM nodes WHERE parent_id=? AND kind='file' ORDER BY name").all(sub.id) as any[];
+  const sub = database.prepare("SELECT id FROM nodes WHERE parent_id=? AND kind='folder'").get(folderNodeId) as {
+    id: number;
+  };
+  const files = database
+    .prepare("SELECT name, storage_path, size_bytes FROM nodes WHERE parent_id=? AND kind='file' ORDER BY name")
+    .all(sub.id) as any[];
   expect(files.map((f) => f.name)).toEqual(['a.txt', 'b.txt']);
-  expect(files.every((f) => f.storage_path === `${owner}/${res.committed.find((c) => true) && f.storage_path.split('/')[0] === String(owner)}` || f.storage_path.startsWith(`${owner}/`))).toBe(true);
-  const row = database.prepare('SELECT * FROM collection_responses WHERE collection_id=? AND department_id=?').get(collectionId, deptId) as any;
+  expect(
+    files.every(
+      (f) =>
+        f.storage_path ===
+          `${owner}/${res.committed.find((c) => true) && f.storage_path.split('/')[0] === String(owner)}` ||
+        f.storage_path.startsWith(`${owner}/`),
+    ),
+  ).toBe(true);
+  const row = database
+    .prepare('SELECT * FROM collection_responses WHERE collection_id=? AND department_id=?')
+    .get(collectionId, deptId) as any;
   expect(row.folder_node_id).toBe(sub.id);
   expect(row.note).toBe('my note');
   expect(row.submitted_ip).toBe('1.2.3.4');
@@ -889,19 +1044,41 @@ test('latest-replaces: second submit removes the prior set, reclaims quota, keep
   const owner = seedOwner(null);
   const { collectionId, folderNodeId, deptId } = seedCollection(owner);
 
-  const first = commitResponse(database, owner, { id: collectionId, folder_node_id: folderNodeId },
-    { id: deptId, name: 'HR' }, [staged('old.txt', 200)], null, null, NOW);
+  const first = commitResponse(
+    database,
+    owner,
+    { id: collectionId, folder_node_id: folderNodeId },
+    { id: deptId, name: 'HR' },
+    [staged('old.txt', 200)],
+    null,
+    null,
+    NOW,
+  );
   // Simulate the blobs being committed so storage_path values are real-looking (not needed for the model).
-  const second = commitResponse(database, owner, { id: collectionId, folder_node_id: folderNodeId },
-    { id: deptId, name: 'HR' }, [staged('new.txt', 30)], 'updated', null, NOW + 1);
+  const second = commitResponse(
+    database,
+    owner,
+    { id: collectionId, folder_node_id: folderNodeId },
+    { id: deptId, name: 'HR' },
+    [staged('new.txt', 30)],
+    'updated',
+    null,
+    NOW + 1,
+  );
 
   // The prior file's storage_path is reported for the caller to unlink.
   expect(second.removedStoragePaths).toHaveLength(1);
   expect(second.removedStoragePaths[0]).toBe(first.committed[0] ? `${owner}/${first.committed[0].nodeId}` : '');
   // Exactly one response row, one live file (new.txt), quota reflects only the new set.
-  const rows = database.prepare('SELECT COUNT(*) n FROM collection_responses WHERE collection_id=? AND department_id=?').get(collectionId, deptId) as { n: number };
+  const rows = database
+    .prepare('SELECT COUNT(*) n FROM collection_responses WHERE collection_id=? AND department_id=?')
+    .get(collectionId, deptId) as { n: number };
   expect(rows.n).toBe(1);
-  const sub = (database.prepare('SELECT folder_node_id f FROM collection_responses WHERE collection_id=? AND department_id=?').get(collectionId, deptId) as { f: number }).f;
+  const sub = (
+    database
+      .prepare('SELECT folder_node_id f FROM collection_responses WHERE collection_id=? AND department_id=?')
+      .get(collectionId, deptId) as { f: number }
+  ).f;
   const files = database.prepare("SELECT name FROM nodes WHERE parent_id=? AND kind='file'").all(sub) as any[];
   expect(files.map((f) => f.name)).toEqual(['new.txt']);
   const used = database.prepare('SELECT used_bytes FROM users WHERE id=?').get(owner) as { used_bytes: number };
@@ -913,11 +1090,23 @@ test('over quota: throws QuotaExceededError and rolls back (no new nodes, used_b
   const owner = seedOwner(100); // 100-byte quota
   const { collectionId, folderNodeId, deptId } = seedCollection(owner);
 
-  expect(() => commitResponse(database, owner, { id: collectionId, folder_node_id: folderNodeId },
-    { id: deptId, name: 'HR' }, [staged('big.bin', 500)], null, null, NOW)).toThrow(QuotaExceededError);
+  expect(() =>
+    commitResponse(
+      database,
+      owner,
+      { id: collectionId, folder_node_id: folderNodeId },
+      { id: deptId, name: 'HR' },
+      [staged('big.bin', 500)],
+      null,
+      null,
+      NOW,
+    ),
+  ).toThrow(QuotaExceededError);
 
   expect((database.prepare("SELECT COUNT(*) n FROM nodes WHERE kind='file'").get() as { n: number }).n).toBe(0);
-  expect((database.prepare('SELECT used_bytes FROM users WHERE id=?').get(owner) as { used_bytes: number }).used_bytes).toBe(0);
+  expect(
+    (database.prepare('SELECT used_bytes FROM users WHERE id=?').get(owner) as { used_bytes: number }).used_bytes,
+  ).toBe(0);
   expect((database.prepare('SELECT COUNT(*) n FROM collection_responses').get() as { n: number }).n).toBe(0);
 });
 
@@ -925,14 +1114,42 @@ test('over quota on REPLACE rolls back and preserves the prior response', () => 
   const database = fresh();
   const owner = seedOwner(250);
   const { collectionId, folderNodeId, deptId } = seedCollection(owner);
-  commitResponse(database, owner, { id: collectionId, folder_node_id: folderNodeId }, { id: deptId, name: 'HR' }, [staged('a', 200)], null, null, NOW);
+  commitResponse(
+    database,
+    owner,
+    { id: collectionId, folder_node_id: folderNodeId },
+    { id: deptId, name: 'HR' },
+    [staged('a', 200)],
+    null,
+    null,
+    NOW,
+  );
   // Replacing 200 with 300: post-free headroom = 250 - 200 + 200 = 250 < 300 -> reject, keep old.
-  expect(() => commitResponse(database, owner, { id: collectionId, folder_node_id: folderNodeId }, { id: deptId, name: 'HR' }, [staged('b', 300)], null, null, NOW + 1)).toThrow(QuotaExceededError);
-  const sub = (database.prepare('SELECT folder_node_id f FROM collection_responses WHERE collection_id=? AND department_id=?').get(collectionId, deptId) as { f: number }).f;
-  const files = database.prepare("SELECT name, size_bytes FROM nodes WHERE parent_id=? AND kind='file'").all(sub) as any[];
+  expect(() =>
+    commitResponse(
+      database,
+      owner,
+      { id: collectionId, folder_node_id: folderNodeId },
+      { id: deptId, name: 'HR' },
+      [staged('b', 300)],
+      null,
+      null,
+      NOW + 1,
+    ),
+  ).toThrow(QuotaExceededError);
+  const sub = (
+    database
+      .prepare('SELECT folder_node_id f FROM collection_responses WHERE collection_id=? AND department_id=?')
+      .get(collectionId, deptId) as { f: number }
+  ).f;
+  const files = database
+    .prepare("SELECT name, size_bytes FROM nodes WHERE parent_id=? AND kind='file'")
+    .all(sub) as any[];
   expect(files).toHaveLength(1);
   expect(files[0].name).toBe('a');
-  expect((database.prepare('SELECT used_bytes FROM users WHERE id=?').get(owner) as { used_bytes: number }).used_bytes).toBe(200);
+  expect(
+    (database.prepare('SELECT used_bytes FROM users WHERE id=?').get(owner) as { used_bytes: number }).used_bytes,
+  ).toBe(200);
 });
 
 test('responseHeadroom: unlimited -> null; bounded accounts for the prior set', () => {
@@ -941,23 +1158,55 @@ test('responseHeadroom: unlimited -> null; bounded accounts for the prior set', 
   const { collectionId, folderNodeId, deptId } = seedCollection(owner);
   expect(responseHeadroom(database, owner, collectionId, deptId)).toBeNull();
 
-  const owner2 = (() => { const info = database.prepare(`INSERT INTO users(username,password_hash,role,is_active,must_change_password,quota_bytes,used_bytes,created_at,updated_at) VALUES ('o2','h','user',1,0,1000,0,?,?)`).run(NOW, NOW); return Number(info.lastInsertRowid); })();
+  const owner2 = (() => {
+    const info = database
+      .prepare(
+        `INSERT INTO users(username,password_hash,role,is_active,must_change_password,quota_bytes,used_bytes,created_at,updated_at) VALUES ('o2','h','user',1,0,1000,0,?,?)`,
+      )
+      .run(NOW, NOW);
+    return Number(info.lastInsertRowid);
+  })();
   const c2 = seedCollectionFor(database, owner2);
-  commitResponse(database, owner2, { id: c2.collectionId, folder_node_id: c2.folderNodeId }, { id: c2.deptId, name: 'HR' }, [staged('x', 400)], null, null, NOW);
+  commitResponse(
+    database,
+    owner2,
+    { id: c2.collectionId, folder_node_id: c2.folderNodeId },
+    { id: c2.deptId, name: 'HR' },
+    [staged('x', 400)],
+    null,
+    null,
+    NOW,
+  );
   // used=400, quota=1000, prior set=400 -> headroom = 1000 - 400 + 400 = 1000.
   expect(responseHeadroom(database, owner2, c2.collectionId, c2.deptId)).toBe(1000);
 
   function seedCollectionFor(dbi: Database.Database, ownerId: number) {
     const { rootId } = ensureUserRoots(dbi, ownerId, NOW);
-    const folderNodeId = Number(dbi.prepare(`INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at) VALUES (?,?,'folder','f',0,?,?)`).run(ownerId, rootId, NOW, NOW).lastInsertRowid);
-    const collectionId = Number(dbi.prepare(`INSERT INTO collections(owner_id,token,title,template_node_id,folder_node_id,password_hash,is_active,deadline_at,created_at,updated_at) VALUES (?,?,?,NULL,?,NULL,1,NULL,?,?)`).run(ownerId, `t2-${Math.random()}`, 'T', folderNodeId, NOW, NOW).lastInsertRowid);
-    const dept = Number(dbi.prepare(`INSERT INTO collection_departments(collection_id,name,position,created_at) VALUES (?,?,0,?)`).run(collectionId, 'HR', NOW).lastInsertRowid);
+    const folderNodeId = Number(
+      dbi
+        .prepare(
+          `INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at) VALUES (?,?,'folder','f',0,?,?)`,
+        )
+        .run(ownerId, rootId, NOW, NOW).lastInsertRowid,
+    );
+    const collectionId = Number(
+      dbi
+        .prepare(
+          `INSERT INTO collections(owner_id,token,title,template_node_id,folder_node_id,password_hash,is_active,deadline_at,created_at,updated_at) VALUES (?,?,?,NULL,?,NULL,1,NULL,?,?)`,
+        )
+        .run(ownerId, `t2-${Math.random()}`, 'T', folderNodeId, NOW, NOW).lastInsertRowid,
+    );
+    const dept = Number(
+      dbi
+        .prepare(`INSERT INTO collection_departments(collection_id,name,position,created_at) VALUES (?,?,0,?)`)
+        .run(collectionId, 'HR', NOW).lastInsertRowid,
+    );
     return { collectionId, folderNodeId, deptId: dept };
   }
 });
 ```
 
-*(The `storage_path` assertion in the first test is intentionally loose — assert only that each is `\`${owner}/<id>\``; simplify to `files.every((f) => f.storage_path.startsWith(\`${owner}/\`))` if the inline expression reads awkwardly. Keep the behavioral checks.)*
+_(The `storage_path` assertion in the first test is intentionally loose — assert only that each is `\`${owner}/<id>\``; simplify to `files.every((f) => f.storage_path.startsWith(\`${owner}/\`))` if the inline expression reads awkwardly. Keep the behavioral checks.)_
 
 - [ ] **Step 2: Run to verify it fails**
 
@@ -1046,7 +1295,7 @@ export function responseHeadroom(
   db: Database.Database,
   ownerId: number,
   collectionId: number,
-  departmentId: number
+  departmentId: number,
 ): number | null {
   const u = db.prepare('SELECT quota_bytes, used_bytes FROM users WHERE id = @ownerId').get({ ownerId }) as {
     quota_bytes: number | null;
@@ -1058,7 +1307,7 @@ export function responseHeadroom(
       `SELECT COALESCE(SUM(n.size_bytes), 0) AS b
        FROM collection_responses r
        JOIN nodes n ON n.parent_id = r.folder_node_id AND n.kind = 'file'
-       WHERE r.collection_id = @collectionId AND r.department_id = @departmentId`
+       WHERE r.collection_id = @collectionId AND r.department_id = @departmentId`,
     )
     .get({ collectionId, departmentId }) as { b: number };
   return Math.max(0, u.quota_bytes - u.used_bytes + prior.b);
@@ -1090,7 +1339,7 @@ export function commitResponse(
   staged: StagedFile[],
   note: string | null,
   submittedIp: string | null,
-  now: number
+  now: number,
 ): CommitResponseResult {
   const totalBytes = staged.reduce((sum, f) => sum + f.bytes, 0);
 
@@ -1119,7 +1368,7 @@ export function commitResponse(
       const info = db
         .prepare(
           `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
-           VALUES (@o, @p, 'folder', @n, 0, @now, @now)`
+           VALUES (@o, @p, 'folder', @n, 0, @now, @now)`,
         )
         .run({ o: ownerId, p: collection.folder_node_id, n: folderName, now });
       subfolderId = Number(info.lastInsertRowid);
@@ -1135,7 +1384,7 @@ export function commitResponse(
       const info = db
         .prepare(
           `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, mime_type, storage_path, created_at, updated_at)
-           VALUES (@o, @p, 'file', @n, @sz, @mt, NULL, @now, @now)`
+           VALUES (@o, @p, 'file', @n, @sz, @mt, NULL, @now, @now)`,
         )
         .run({ o: ownerId, p: subfolderId, n: name, sz: f.bytes, mt: f.mimeType, now });
       const nodeId = Number(info.lastInsertRowid);
@@ -1150,7 +1399,7 @@ export function commitResponse(
          ON CONFLICT(collection_id, department_id) DO UPDATE SET
            folder_node_id = excluded.folder_node_id, note = excluded.note,
            submitted_at = excluded.submitted_at, submitted_ip = excluded.submitted_ip
-         RETURNING id`
+         RETURNING id`,
       )
       .get({ c: collection.id, d: department.id, f: subfolderId, note, now, ip: submittedIp }) as { id: number };
 
@@ -1180,10 +1429,12 @@ git commit -m "feat(collections): response write model (first-submit + latest-re
 The multipart submit endpoint: stream file parts to temp with guards, validate the department, early-abort on quota, then `commitResponse` + move blobs + audit — all in a rate-limited scope (the tightest).
 
 **Files:**
+
 - Modify: `server/src/routes/collect.ts`
 - Test: `server/test/routes/collect.test.ts` (append + add a multipart helper)
 
 **Interfaces:**
+
 - Consumes: `req.isMultipart()`, `req.parts({ limits })`, `blobStore.writeStreamToTemp`/`commitTemp`/`deleteBlob`, `commitResponse`/`responseHeadroom`/`QuotaExceededError`/`type StagedFile`, `sanitizeNodeName`, `writeAudit`, `MAX_FILE_BYTES`/`COLLECTION_MAX_FILES_PER_RESPONSE`/`MAX_NOTE_LENGTH`.
 - Produces `POST /api/collect/:token/submit`:
   - non-multipart → `415 {error:'unsupported_media_type'}`; non-open/unknown → `404`; password + not-unlocked → `401 {needsPassword:true}`; malformed multipart → `400 {error:'invalid_upload'}`; `>10` files → `400 {error:'too_many_files'}`; `>100 MB` file → `413 {error:'file_too_large'}`; `0` files → `400 {error:'no_files'}`; unknown/foreign department → `404 {error:'not_found'}`; over quota → `413 {error:'quota_exceeded'}`; success → `200 {ok:true}` + audit `collection_response_submitted` (`actor_id = NULL`).
@@ -1193,14 +1444,22 @@ The multipart submit endpoint: stream file parts to temp with guards, validate t
 First add a multipart body helper near the top of the file (mirrors `test/routes/nodes.test.ts`):
 
 ```ts
-interface MultipartPart { name: string; value?: string; filename?: string; contentType?: string; data?: Buffer }
+interface MultipartPart {
+  name: string;
+  value?: string;
+  filename?: string;
+  contentType?: string;
+  data?: Buffer;
+}
 function buildMultipart(parts: MultipartPart[]): { body: Buffer; contentType: string } {
   const boundary = `----mirsalCollect${Math.random().toString(16).slice(2)}`;
   const chunks: Buffer[] = [];
   for (const part of parts) {
     chunks.push(Buffer.from(`--${boundary}\r\n`));
     if (part.filename !== undefined) {
-      chunks.push(Buffer.from(`Content-Disposition: form-data; name="${part.name}"; filename="${part.filename}"\r\n`, 'utf8'));
+      chunks.push(
+        Buffer.from(`Content-Disposition: form-data; name="${part.name}"; filename="${part.filename}"\r\n`, 'utf8'),
+      );
       chunks.push(Buffer.from(`Content-Type: ${part.contentType ?? 'application/octet-stream'}\r\n\r\n`));
       chunks.push(part.data ?? Buffer.alloc(0));
       chunks.push(Buffer.from('\r\n'));
@@ -1212,13 +1471,26 @@ function buildMultipart(parts: MultipartPart[]): { body: Buffer; contentType: st
   chunks.push(Buffer.from(`--${boundary}--\r\n`));
   return { body: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` };
 }
-async function submit(built: FastifyInstance, token: string, parts: MultipartPart[], cookies: Record<string, string> = {}) {
+async function submit(
+  built: FastifyInstance,
+  token: string,
+  parts: MultipartPart[],
+  cookies: Record<string, string> = {},
+) {
   const { body, contentType } = buildMultipart(parts);
-  return built.inject({ method: 'POST', url: `/api/collect/${token}/submit`, headers: { 'content-type': contentType }, cookies, payload: body });
+  return built.inject({
+    method: 'POST',
+    url: `/api/collect/${token}/submit`,
+    headers: { 'content-type': contentType },
+    cookies,
+    payload: body,
+  });
 }
 /** Reads the department ids for a collection straight from the DB. */
 function deptIds(collectionId: number): { id: number; name: string }[] {
-  return db!.prepare('SELECT id, name FROM collection_departments WHERE collection_id=? ORDER BY position').all(collectionId) as any[];
+  return db!
+    .prepare('SELECT id, name FROM collection_departments WHERE collection_id=? ORDER BY position')
+    .all(collectionId) as any[];
 }
 ```
 
@@ -1243,9 +1515,14 @@ test('submit happy path: 1 file -> 200; response row + file node + used_bytes + 
   expect(res.json()).toMatchObject({ ok: true });
 
   const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
-  const sub = db!.prepare("SELECT id, name FROM nodes WHERE parent_id=? AND kind='folder'").get(folderId) as { id: number; name: string };
+  const sub = db!.prepare("SELECT id, name FROM nodes WHERE parent_id=? AND kind='folder'").get(folderId) as {
+    id: number;
+    name: string;
+  };
   expect(sub.name).toBe('HR');
-  const files = db!.prepare("SELECT name, storage_path, size_bytes FROM nodes WHERE parent_id=? AND kind='file'").all(sub.id) as any[];
+  const files = db!
+    .prepare("SELECT name, storage_path, size_bytes FROM nodes WHERE parent_id=? AND kind='file'")
+    .all(sub.id) as any[];
   expect(files).toHaveLength(1);
   expect(files[0].name).toBe('report.txt');
   expect(files[0].size_bytes).toBe(10);
@@ -1253,11 +1530,20 @@ test('submit happy path: 1 file -> 200; response row + file node + used_bytes + 
   const nodeId = files[0].storage_path.split('/')[1];
   expect(fs.existsSync(path.join(dir!, 'storage', String(owner), nodeId))).toBe(true);
   expect((db!.prepare('SELECT used_bytes u FROM users WHERE id=?').get(owner) as { u: number }).u).toBe(10);
-  const row = db!.prepare('SELECT note FROM collection_responses WHERE collection_id=? AND department_id=?').get(c.id, hr.id) as { note: string };
+  const row = db!
+    .prepare('SELECT note FROM collection_responses WHERE collection_id=? AND department_id=?')
+    .get(c.id, hr.id) as { note: string };
   expect(row.note).toBe('here is our report');
-  const audit = db!.prepare("SELECT actor_id, detail FROM audit_log WHERE action='collection_response_submitted'").get() as { actor_id: number | null; detail: string };
+  const audit = db!
+    .prepare("SELECT actor_id, detail FROM audit_log WHERE action='collection_response_submitted'")
+    .get() as { actor_id: number | null; detail: string };
   expect(audit.actor_id).toBeNull();
-  expect(JSON.parse(audit.detail)).toMatchObject({ collection_id: c.id, department_id: hr.id, department_name: 'HR', file_count: 1 });
+  expect(JSON.parse(audit.detail)).toMatchObject({
+    collection_id: c.id,
+    department_id: hr.id,
+    department_name: 'HR',
+    file_count: 1,
+  });
 });
 
 test('submit: 3 files land as 3 nodes under the department subfolder', async () => {
@@ -1274,8 +1560,11 @@ test('submit: 3 files land as 3 nodes under the department subfolder', async () 
   ]);
   expect(res.statusCode).toBe(200);
   const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
-  const sub = (db!.prepare("SELECT id FROM nodes WHERE parent_id=? AND kind='folder'").get(folderId) as { id: number }).id;
-  expect((db!.prepare("SELECT COUNT(*) n FROM nodes WHERE parent_id=? AND kind='file'").get(sub) as { n: number }).n).toBe(3);
+  const sub = (db!.prepare("SELECT id FROM nodes WHERE parent_id=? AND kind='folder'").get(folderId) as { id: number })
+    .id;
+  expect(
+    (db!.prepare("SELECT COUNT(*) n FROM nodes WHERE parent_id=? AND kind='file'").get(sub) as { n: number }).n,
+  ).toBe(3);
 });
 
 test('submit guards: 0 files -> 400 no_files; >10 files -> 400 too_many_files (nothing stored)', async () => {
@@ -1338,19 +1627,30 @@ test('submit latest-replaces: re-submit swaps the set and reclaims the old blob'
   const c = await makeCollection(built, session, csrf, { title: 'T', departments: ['HR'] });
   const hr = deptIds(c.id)[0];
 
-  await submit(built, c.token, [{ name: 'departmentId', value: String(hr.id) }, { name: 'files', filename: 'old.txt', data: Buffer.from('OLDDATA') }]);
+  await submit(built, c.token, [
+    { name: 'departmentId', value: String(hr.id) },
+    { name: 'files', filename: 'old.txt', data: Buffer.from('OLDDATA') },
+  ]);
   const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
-  const sub = (db!.prepare("SELECT id FROM nodes WHERE parent_id=? AND kind='folder'").get(folderId) as { id: number }).id;
-  const oldNode = db!.prepare("SELECT storage_path sp FROM nodes WHERE parent_id=? AND kind='file'").get(sub) as { sp: string };
+  const sub = (db!.prepare("SELECT id FROM nodes WHERE parent_id=? AND kind='folder'").get(folderId) as { id: number })
+    .id;
+  const oldNode = db!.prepare("SELECT storage_path sp FROM nodes WHERE parent_id=? AND kind='file'").get(sub) as {
+    sp: string;
+  };
   const oldBlob = path.join(dir!, 'storage', oldNode.sp);
   expect(fs.existsSync(oldBlob)).toBe(true);
 
-  await submit(built, c.token, [{ name: 'departmentId', value: String(hr.id) }, { name: 'files', filename: 'new.txt', data: Buffer.from('NEW') }]);
+  await submit(built, c.token, [
+    { name: 'departmentId', value: String(hr.id) },
+    { name: 'files', filename: 'new.txt', data: Buffer.from('NEW') },
+  ]);
   const files = db!.prepare("SELECT name FROM nodes WHERE parent_id=? AND kind='file'").all(sub) as any[];
   expect(files.map((f) => f.name)).toEqual(['new.txt']);
   expect(fs.existsSync(oldBlob)).toBe(false); // old blob unlinked
   expect((db!.prepare('SELECT used_bytes u FROM users WHERE id=?').get(owner) as { u: number }).u).toBe(3);
-  expect((db!.prepare('SELECT COUNT(*) n FROM collection_responses WHERE department_id=?').get(hr.id) as { n: number }).n).toBe(1);
+  expect(
+    (db!.prepare('SELECT COUNT(*) n FROM collection_responses WHERE department_id=?').get(hr.id) as { n: number }).n,
+  ).toBe(1);
 });
 
 test('submit rejects: wrong department -> 404; closed -> 404; non-multipart -> 415; password locked -> 401', async () => {
@@ -1360,20 +1660,58 @@ test('submit rejects: wrong department -> 404; closed -> 404; non-multipart -> 4
   const c = await makeCollection(built, session, csrf, { title: 'T', departments: ['HR'] });
   const hr = deptIds(c.id)[0];
 
-  expect((await submit(built, c.token, [{ name: 'departmentId', value: '999999' }, { name: 'files', filename: 'f.txt', data: Buffer.from('x') }])).statusCode).toBe(404);
+  expect(
+    (
+      await submit(built, c.token, [
+        { name: 'departmentId', value: '999999' },
+        { name: 'files', filename: 'f.txt', data: Buffer.from('x') },
+      ])
+    ).statusCode,
+  ).toBe(404);
 
-  const nonMultipart = await built.inject({ method: 'POST', url: `/api/collect/${c.token}/submit`, payload: { hi: 1 } });
+  const nonMultipart = await built.inject({
+    method: 'POST',
+    url: `/api/collect/${c.token}/submit`,
+    payload: { hi: 1 },
+  });
   expect(nonMultipart.statusCode).toBe(415);
 
   // Password-protected collection: submit without unlock -> 401.
   const pw = await makeCollection(built, session, csrf, { title: 'P', departments: ['HR'], password: 'pw9' });
   const pwHr = deptIds(pw.id)[0];
-  expect((await submit(built, pw.token, [{ name: 'departmentId', value: String(pwHr.id) }, { name: 'files', filename: 'f.txt', data: Buffer.from('x') }])).statusCode).toBe(401);
+  expect(
+    (
+      await submit(built, pw.token, [
+        { name: 'departmentId', value: String(pwHr.id) },
+        { name: 'files', filename: 'f.txt', data: Buffer.from('x') },
+      ])
+    ).statusCode,
+  ).toBe(401);
 
   // Closed collection -> 404 (constant shape with unknown).
-  await built.inject({ method: 'PATCH', url: `/api/collections/${c.id}`, cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf }, payload: { is_active: false } });
-  expect((await submit(built, c.token, [{ name: 'departmentId', value: String(hr.id) }, { name: 'files', filename: 'f.txt', data: Buffer.from('x') }])).statusCode).toBe(404);
-  expect((await submit(built, 'unknown-token', [{ name: 'departmentId', value: '1' }, { name: 'files', filename: 'f.txt', data: Buffer.from('x') }])).statusCode).toBe(404);
+  await built.inject({
+    method: 'PATCH',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { is_active: false },
+  });
+  expect(
+    (
+      await submit(built, c.token, [
+        { name: 'departmentId', value: String(hr.id) },
+        { name: 'files', filename: 'f.txt', data: Buffer.from('x') },
+      ])
+    ).statusCode,
+  ).toBe(404);
+  expect(
+    (
+      await submit(built, 'unknown-token', [
+        { name: 'departmentId', value: '1' },
+        { name: 'files', filename: 'f.txt', data: Buffer.from('x') },
+      ])
+    ).statusCode,
+  ).toBe(404);
 });
 ```
 
@@ -1404,173 +1742,191 @@ const SUBMIT_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
 Inside `collectRoutes`, after the template scope, add the submit scope:
 
 ```ts
-  // --- POST submit (the inbound write; rate-limited per-IP AND per-token) --
-  await app.register(async function collectSubmitScope(scope) {
-    await scope.register(fastifyRateLimit, {
-      max: SUBMIT_IP_RATE_LIMIT_MAX, timeWindow: SUBMIT_RATE_LIMIT_WINDOW_MS,
-      hook: 'preHandler', keyGenerator: (req) => req.ip,
-    });
-    await scope.register(fastifyRateLimit, {
-      max: SUBMIT_TOKEN_RATE_LIMIT_MAX, timeWindow: SUBMIT_RATE_LIMIT_WINDOW_MS,
-      hook: 'preHandler', keyGenerator: (req) => (req.params as { token?: string }).token ?? '',
-    });
+// --- POST submit (the inbound write; rate-limited per-IP AND per-token) --
+await app.register(async function collectSubmitScope(scope) {
+  await scope.register(fastifyRateLimit, {
+    max: SUBMIT_IP_RATE_LIMIT_MAX,
+    timeWindow: SUBMIT_RATE_LIMIT_WINDOW_MS,
+    hook: 'preHandler',
+    keyGenerator: (req) => req.ip,
+  });
+  await scope.register(fastifyRateLimit, {
+    max: SUBMIT_TOKEN_RATE_LIMIT_MAX,
+    timeWindow: SUBMIT_RATE_LIMIT_WINDOW_MS,
+    hook: 'preHandler',
+    keyGenerator: (req) => (req.params as { token?: string }).token ?? '',
+  });
 
-    scope.post('/api/collect/:token/submit', async (req, reply) => {
-      const { token } = req.params as { token: string };
+  scope.post('/api/collect/:token/submit', async (req, reply) => {
+    const { token } = req.params as { token: string };
 
-      // Content-type gate FIRST (before any token lookup) — a non-multipart
-      // probe gets 415 regardless of token validity (no oracle). The 415-lesson
-      // analog: the submit body is only ever multipart/form-data.
-      if (!req.isMultipart()) {
-        reply.code(415).send({ error: 'unsupported_media_type' });
-        return;
-      }
+    // Content-type gate FIRST (before any token lookup) — a non-multipart
+    // probe gets 415 regardless of token validity (no oracle). The 415-lesson
+    // analog: the submit body is only ever multipart/form-data.
+    if (!req.isMultipart()) {
+      reply.code(415).send({ error: 'unsupported_media_type' });
+      return;
+    }
 
-      const c = loadByToken(token);
-      if (!c || collectionStatus(c, now()) !== 'open') {
-        reply.code(404).send({ error: 'not_found' });
-        return;
-      }
-      if (!requireUnlocked(req, reply, c)) return;
+    const c = loadByToken(token);
+    if (!c || collectionStatus(c, now()) !== 'open') {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
+    if (!requireUnlocked(req, reply, c)) return;
 
-      const ownerId = c.owner_id;
-      const staged: StagedFile[] = [];
-      const cleanupTemps = async () => {
-        await Promise.all(staged.map((s) => unlink(s.tempPath).catch(() => {})));
-      };
+    const ownerId = c.owner_id;
+    const staged: StagedFile[] = [];
+    const cleanupTemps = async () => {
+      await Promise.all(staged.map((s) => unlink(s.tempPath).catch(() => {})));
+    };
 
-      let departmentId: number | null = null;
-      let note: string | null = null;
-      let tooManyFiles = false;
-      let tooLarge = false;
+    let departmentId: number | null = null;
+    let note: string | null = null;
+    let tooManyFiles = false;
+    let tooLarge = false;
 
-      // --- Phase A: stream every file part to temp; capture fields. No DB
-      //     writes yet. Per-request multipart limits cap the part count so a
-      //     flood can't run the loop unbounded (files cap is MAX+1 so our own
-      //     count check below produces the clean neutral rejection first). ---
-      try {
-        const parts = req.parts({
-          limits: {
-            fileSize: MAX_FILE_BYTES,
-            files: COLLECTION_MAX_FILES_PER_RESPONSE + 1,
-            fields: 10,
-            fieldSize: MAX_NOTE_LENGTH + 256,
-          },
-        });
-        for await (const part of parts) {
-          if (part.type === 'file') {
-            if (staged.length >= COLLECTION_MAX_FILES_PER_RESPONSE) {
-              tooManyFiles = true;
-              part.file.resume(); // drain the offending part
-              break;
-            }
-            const name = sanitizeNodeName(part.filename) ?? 'file';
-            const written = await blobStore.writeStreamToTemp(String(ownerId), part.file, MAX_FILE_BYTES);
-            // @fastify/multipart truncates at fileSize instead of erroring, so
-            // writeStreamToTemp resolves at exactly MAX_FILE_BYTES — `truncated`
-            // is the only over-limit signal (mirrors routes/nodes.ts finding #3).
-            if (part.file.truncated) {
-              await unlink(written.tempPath).catch(() => {});
-              tooLarge = true;
-              break;
-            }
-            staged.push({ name, tempPath: written.tempPath, bytes: written.bytes, mimeType: part.mimetype ?? null });
-          } else if (part.fieldname === 'departmentId') {
-            const n = Number(part.value);
-            if (Number.isInteger(n)) departmentId = n;
-          } else if (part.fieldname === 'note') {
-            const v = String(part.value).replace(/\0/g, '').trim();
-            note = v.length > 0 ? v.slice(0, MAX_NOTE_LENGTH) : null;
+    // --- Phase A: stream every file part to temp; capture fields. No DB
+    //     writes yet. Per-request multipart limits cap the part count so a
+    //     flood can't run the loop unbounded (files cap is MAX+1 so our own
+    //     count check below produces the clean neutral rejection first). ---
+    try {
+      const parts = req.parts({
+        limits: {
+          fileSize: MAX_FILE_BYTES,
+          files: COLLECTION_MAX_FILES_PER_RESPONSE + 1,
+          fields: 10,
+          fieldSize: MAX_NOTE_LENGTH + 256,
+        },
+      });
+      for await (const part of parts) {
+        if (part.type === 'file') {
+          if (staged.length >= COLLECTION_MAX_FILES_PER_RESPONSE) {
+            tooManyFiles = true;
+            part.file.resume(); // drain the offending part
+            break;
           }
+          const name = sanitizeNodeName(part.filename) ?? 'file';
+          const written = await blobStore.writeStreamToTemp(String(ownerId), part.file, MAX_FILE_BYTES);
+          // @fastify/multipart truncates at fileSize instead of erroring, so
+          // writeStreamToTemp resolves at exactly MAX_FILE_BYTES — `truncated`
+          // is the only over-limit signal (mirrors routes/nodes.ts finding #3).
+          if (part.file.truncated) {
+            await unlink(written.tempPath).catch(() => {});
+            tooLarge = true;
+            break;
+          }
+          staged.push({ name, tempPath: written.tempPath, bytes: written.bytes, mimeType: part.mimetype ?? null });
+        } else if (part.fieldname === 'departmentId') {
+          const n = Number(part.value);
+          if (Number.isInteger(n)) departmentId = n;
+        } else if (part.fieldname === 'note') {
+          const v = String(part.value).replace(/\0/g, '').trim();
+          note = v.length > 0 ? v.slice(0, MAX_NOTE_LENGTH) : null;
         }
-      } catch (err) {
-        await cleanupTemps();
-        req.log.warn({ err }, 'collection submit multipart parse failed');
-        reply.code(400).send({ error: 'invalid_upload' });
-        return;
       }
+    } catch (err) {
+      await cleanupTemps();
+      req.log.warn({ err }, 'collection submit multipart parse failed');
+      reply.code(400).send({ error: 'invalid_upload' });
+      return;
+    }
 
-      if (tooManyFiles) {
-        await cleanupTemps();
-        reply.code(400).send({ error: 'too_many_files' });
-        return;
-      }
-      if (tooLarge) {
-        await cleanupTemps();
-        reply.code(413).send({ error: 'file_too_large' });
-        return;
-      }
-      if (staged.length === 0) {
-        await cleanupTemps();
-        reply.code(400).send({ error: 'no_files' });
-        return;
-      }
+    if (tooManyFiles) {
+      await cleanupTemps();
+      reply.code(400).send({ error: 'too_many_files' });
+      return;
+    }
+    if (tooLarge) {
+      await cleanupTemps();
+      reply.code(413).send({ error: 'file_too_large' });
+      return;
+    }
+    if (staged.length === 0) {
+      await cleanupTemps();
+      reply.code(400).send({ error: 'no_files' });
+      return;
+    }
 
-      // --- Validate the self-identified department belongs to THIS collection.
-      const dept =
-        departmentId === null
-          ? undefined
-          : (db
-              .prepare('SELECT id, name FROM collection_departments WHERE id = @id AND collection_id = @c')
-              .get({ id: departmentId, c: c.id }) as { id: number; name: string } | undefined);
-      if (!dept) {
-        await cleanupTemps();
-        reply.code(404).send({ error: 'not_found' });
-        return;
-      }
+    // --- Validate the self-identified department belongs to THIS collection.
+    const dept =
+      departmentId === null
+        ? undefined
+        : (db
+            .prepare('SELECT id, name FROM collection_departments WHERE id = @id AND collection_id = @c')
+            .get({ id: departmentId, c: c.id }) as { id: number; name: string } | undefined);
+    if (!dept) {
+      await cleanupTemps();
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
 
-      // --- Early quota abort (advisory; the authoritative atomic reserve is in
-      //     commitResponse). Accounts for the prior set that replace will free. ---
-      const headroom = responseHeadroom(db, ownerId, c.id, dept.id);
-      const total = staged.reduce((sum, f) => sum + f.bytes, 0);
-      if (headroom !== null && total > headroom) {
-        await cleanupTemps();
+    // --- Early quota abort (advisory; the authoritative atomic reserve is in
+    //     commitResponse). Accounts for the prior set that replace will free. ---
+    const headroom = responseHeadroom(db, ownerId, c.id, dept.id);
+    const total = staged.reduce((sum, f) => sum + f.bytes, 0);
+    if (headroom !== null && total > headroom) {
+      await cleanupTemps();
+      reply.code(413).send({ error: 'quota_exceeded' });
+      return;
+    }
+
+    // --- Phase B: commit (transactional). On quota failure nothing persists. ---
+    let result;
+    try {
+      result = commitResponse(
+        db,
+        ownerId,
+        { id: c.id, folder_node_id: c.folder_node_id },
+        dept,
+        staged,
+        note,
+        req.ip,
+        now(),
+      );
+    } catch (e) {
+      await cleanupTemps();
+      if (e instanceof QuotaExceededError) {
         reply.code(413).send({ error: 'quota_exceeded' });
         return;
       }
+      throw e;
+    }
 
-      // --- Phase B: commit (transactional). On quota failure nothing persists. ---
-      let result;
+    // --- Move new blobs into place; unlink the superseded set. (Row-first:
+    //     the rows already carry their final storage_path.) A commitTemp
+    //     failure here leaves a row whose blob is still at its temp name
+    //     (a reverse-orphan → the file reads as gone), logged not fatal. ---
+    for (const cf of result.committed) {
       try {
-        result = commitResponse(db, ownerId, { id: c.id, folder_node_id: c.folder_node_id }, dept, staged, note, req.ip, now());
-      } catch (e) {
-        await cleanupTemps();
-        if (e instanceof QuotaExceededError) {
-          reply.code(413).send({ error: 'quota_exceeded' });
-          return;
-        }
-        throw e;
+        blobStore.commitTemp(cf.tempPath, String(ownerId), String(cf.nodeId));
+      } catch (err) {
+        req.log.error({ err, nodeId: cf.nodeId }, 'collection response commitTemp failed');
       }
+    }
+    for (const p of result.removedStoragePaths) {
+      blobStore.deleteBlob(p);
+    }
 
-      // --- Move new blobs into place; unlink the superseded set. (Row-first:
-      //     the rows already carry their final storage_path.) A commitTemp
-      //     failure here leaves a row whose blob is still at its temp name
-      //     (a reverse-orphan → the file reads as gone), logged not fatal. ---
-      for (const cf of result.committed) {
-        try {
-          blobStore.commitTemp(cf.tempPath, String(ownerId), String(cf.nodeId));
-        } catch (err) {
-          req.log.error({ err, nodeId: cf.nodeId }, 'collection response commitTemp failed');
-        }
-      }
-      for (const p of result.removedStoragePaths) {
-        blobStore.deleteBlob(p);
-      }
+    writeAudit(
+      db,
+      {
+        actorId: null,
+        action: 'collection_response_submitted',
+        target: token,
+        detail: JSON.stringify({
+          collection_id: c.id,
+          department_id: dept.id,
+          department_name: dept.name,
+          file_count: staged.length,
+        }),
+      },
+      now,
+    );
 
-      writeAudit(
-        db,
-        {
-          actorId: null,
-          action: 'collection_response_submitted',
-          target: token,
-          detail: JSON.stringify({ collection_id: c.id, department_id: dept.id, department_name: dept.name, file_count: staged.length }),
-        },
-        now
-      );
-
-      reply.code(200).send({ ok: true });
-    });
+    reply.code(200).send({ ok: true });
   });
+});
 ```
 
 - [ ] **Step 4: Run the full collect suite + typecheck**
@@ -1592,10 +1948,12 @@ git commit -m "feat(collections): public submit route — inbound write with all
 Serve the built SPA's `index.html` for `/c/<token>` GETs (so the Phase-3 React uploader page can client-route), with `Referrer-Policy: no-referrer` on the HTML document — parity with the existing `/s/<token>` share shell.
 
 **Files:**
+
 - Modify: `server/src/app.ts` (the `setNotFoundHandler` branch)
 - Test: `server/test/app.test.ts` (append)
 
 **Interfaces:**
+
 - Consumes: nothing new. The not-found handler already serves `index.html` for any non-`/api/` GET when `distExists`; this only adds `/c/` to the explicit `Referrer-Policy` branch (helmet already sets that header globally — this is parity/self-documentation).
 
 - [ ] **Step 1: Write the failing test (append to `app.test.ts`, in the `/s/` section)**
@@ -1610,7 +1968,7 @@ test('GET /c/<token> (dist present) -> 200 HTML shell with Referrer-Policy: no-r
 });
 ```
 
-*(`makeDistDir` and `SPA_MARKER` already exist in `app.test.ts` from the `/s/` tests.)*
+_(`makeDistDir` and `SPA_MARKER` already exist in `app.test.ts` from the `/s/` tests.)_
 
 - [ ] **Step 2: Run to verify it passes-by-accident or fails**
 
@@ -1622,13 +1980,13 @@ Expected: likely PASS already (helmet sets `Referrer-Policy` globally and the ca
 In `setNotFoundHandler`, extend the `/s/` special-case:
 
 ```ts
-    if (distExists && req.method === 'GET') {
-      if (pathname.startsWith('/s/') || pathname.startsWith('/c/')) {
-        reply.header('Referrer-Policy', 'no-referrer');
-      }
-      reply.sendFile('index.html');
-      return;
-    }
+if (distExists && req.method === 'GET') {
+  if (pathname.startsWith('/s/') || pathname.startsWith('/c/')) {
+    reply.header('Referrer-Policy', 'no-referrer');
+  }
+  reply.sendFile('index.html');
+  return;
+}
 ```
 
 Also update the block comment above `setNotFoundHandler` to mention `/c/<token>` alongside `/s/<token>` as a token-bearing shell path.

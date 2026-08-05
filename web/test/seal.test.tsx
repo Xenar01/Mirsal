@@ -23,7 +23,7 @@ function renderSeal(props: Parameters<typeof Seal>[0]) {
   return render(
     <I18nextProvider i18n={i18n}>
       <Seal {...props} />
-    </I18nextProvider>
+    </I18nextProvider>,
   );
 }
 

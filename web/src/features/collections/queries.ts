@@ -28,11 +28,17 @@ function useInvalidate() {
 
 export function useCreateCollection() {
   const invalidate = useInvalidate();
-  return useMutation({ mutationFn: (v: CreateCollectionVars) => api.createCollection(v), onSuccess: () => invalidate() });
+  return useMutation({
+    mutationFn: (v: CreateCollectionVars) => api.createCollection(v),
+    onSuccess: () => invalidate(),
+  });
 }
 export function usePatchCollection() {
   const invalidate = useInvalidate();
-  return useMutation({ mutationFn: (v: PatchCollectionVars) => api.patchCollection(v), onSuccess: (d) => invalidate(d.id) });
+  return useMutation({
+    mutationFn: (v: PatchCollectionVars) => api.patchCollection(v),
+    onSuccess: (d) => invalidate(d.id),
+  });
 }
 export function useDeleteCollection() {
   const invalidate = useInvalidate();

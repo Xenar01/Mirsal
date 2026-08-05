@@ -60,11 +60,7 @@ export default function AdminPanel() {
           <Link to="/" className="font-body text-sm text-teal">
             {t('admin.backToFiles')}
           </Link>
-          {user && (
-            <span className="min-w-0 max-w-[45vw] truncate font-body text-sm text-ink-2">
-              {user.username}
-            </span>
-          )}
+          {user && <span className="min-w-0 max-w-[45vw] truncate font-body text-sm text-ink-2">{user.username}</span>}
           <Button variant="ghost" onClick={onLogout}>
             {t('account.logout')}
           </Button>

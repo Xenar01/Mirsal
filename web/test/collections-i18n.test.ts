@@ -4,7 +4,7 @@ import en from '../src/i18n/en.json';
 
 function flatten(obj: Record<string, unknown>, prefix = ''): string[] {
   return Object.entries(obj).flatMap(([k, v]) =>
-    v && typeof v === 'object' ? flatten(v as Record<string, unknown>, `${prefix}${k}.`) : [`${prefix}${k}`]
+    v && typeof v === 'object' ? flatten(v as Record<string, unknown>, `${prefix}${k}.`) : [`${prefix}${k}`],
   );
 }
 
@@ -20,9 +20,15 @@ describe('collections i18n', () => {
     const keys = flatten(ar);
     for (const k of [
       'dashboard.nav.collections',
-      'collections.title', 'collections.new', 'collections.empty',
-      'collections.create.title', 'collections.create.departmentsLabel', 'collections.create.submit',
-      'collections.detail.responded', 'collections.detail.missing', 'collections.detail.delete',
+      'collections.title',
+      'collections.new',
+      'collections.empty',
+      'collections.create.title',
+      'collections.create.departmentsLabel',
+      'collections.create.submit',
+      'collections.detail.responded',
+      'collections.detail.missing',
+      'collections.detail.delete',
     ]) {
       expect(keys, `missing ${k}`).toContain(k);
     }

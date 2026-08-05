@@ -91,7 +91,7 @@ async function seedUser(username: string, password: string): Promise<number> {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, quota_bytes, created_at, updated_at)
-       VALUES (?, ?, 'user', 1, 0, NULL, ?, ?)`
+       VALUES (?, ?, 'user', 1, 0, NULL, ?, ?)`,
     )
     .run(username, hash, NOW, NOW);
   return Number(info.lastInsertRowid);
@@ -101,7 +101,11 @@ function findCookie(cookies: InjectedCookie[], name: string): InjectedCookie | u
   return cookies.find((c) => c.name === name);
 }
 
-async function login(built: FastifyInstance, username: string, password: string): Promise<{ session: string; csrf: string }> {
+async function login(
+  built: FastifyInstance,
+  username: string,
+  password: string,
+): Promise<{ session: string; csrf: string }> {
   const res = await built.inject({ method: 'POST', url: '/api/auth/login', payload: { username, password } });
   const session = findCookie(res.cookies as InjectedCookie[], 'mirsal_session')!.value;
   const csrf = findCookie(res.cookies as InjectedCookie[], 'mirsal_csrf')!.value;
@@ -112,8 +116,10 @@ async function login(built: FastifyInstance, username: string, password: string)
 function seedFileNodeFor(uid: number): number {
   const { rootId } = ensureUserRoots(db!, uid, NOW);
   const info = db!
-    .prepare(`INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
-              VALUES (@uid, @rootId, 'file', @name, 5, 'u/1', @now, @now)`)
+    .prepare(
+      `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
+              VALUES (@uid, @rootId, 'file', @name, 5, 'u/1', @now, @now)`,
+    )
     .run({ uid, rootId, name: `f-${Math.random()}`, now: NOW });
   return Number(info.lastInsertRowid);
 }
@@ -126,8 +132,10 @@ test('POST /api/collections -> 201 detail with /c/<token> url, open status, depa
   const { session, csrf } = await login(built, 'alice', 'pw');
 
   const res = await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'POST',
+    url: '/api/collections',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { title: 'Q1', departments: ['HR', 'Finance', 'IT'] },
   });
   expect(res.statusCode).toBe(201);
@@ -142,11 +150,15 @@ test('POST /api/collections -> 201 detail with /c/<token> url, open status, depa
 
   // The collection's own root folder node (whole-collection ZIP target) —
   // must match the folder_node_id actually persisted on the collections row.
-  const row = db!.prepare('SELECT folder_node_id FROM collections WHERE id = ?').get(c.id) as { folder_node_id: number };
+  const row = db!.prepare('SELECT folder_node_id FROM collections WHERE id = ?').get(c.id) as {
+    folder_node_id: number;
+  };
   expect(typeof c.folder_node_id).toBe('number');
   expect(c.folder_node_id).toBe(row.folder_node_id);
 
-  const list = (await built.inject({ method: 'GET', url: '/api/collections', cookies: { mirsal_session: session } })).json();
+  const list = (
+    await built.inject({ method: 'GET', url: '/api/collections', cookies: { mirsal_session: session } })
+  ).json();
   expect(list.some((x: any) => x.id === c.id && x.department_count === 3)).toBe(true);
 });
 
@@ -155,8 +167,10 @@ test('POST with a password -> has_password true, secret never echoed', async () 
   await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
   const res = await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'POST',
+    url: '/api/collections',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { title: 'P', departments: ['A'], password: 'secret-pw' },
   });
   expect(res.statusCode).toBe(201);
@@ -172,8 +186,10 @@ test('POST with a foreign/non-file template -> 400 bad_template', async () => {
   const { session, csrf } = await login(built, 'alice', 'pw');
   const foreign = seedFileNodeFor(bobId); // a file owned by bob (helper below)
   const res = await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'POST',
+    url: '/api/collections',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { title: 'T', departments: ['A'], template_node_id: foreign },
   });
   expect(res.statusCode).toBe(400);
@@ -185,8 +201,10 @@ test('POST with only blank departments -> 400', async () => {
   await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
   const res = await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'POST',
+    url: '/api/collections',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { title: 'T', departments: ['', '  '] },
   });
   expect(res.statusCode).toBe(400);
@@ -197,8 +215,10 @@ test('POST with a department name >200 chars -> 400', async () => {
   await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
   const res = await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'POST',
+    url: '/api/collections',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { title: 'T', departments: ['A'.repeat(201)] },
   });
   expect(res.statusCode).toBe(400);
@@ -211,8 +231,10 @@ test('POST with >500 departments -> 400', async () => {
   const { session, csrf } = await login(built, 'alice', 'pw');
   const departments = Array.from({ length: 501 }, (_, i) => `D${i}`);
   const res = await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'POST',
+    url: '/api/collections',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { title: 'T', departments },
   });
   expect(res.statusCode).toBe(400);
@@ -221,7 +243,11 @@ test('POST with >500 departments -> 400', async () => {
 
 test('POST /api/collections requires auth -> 401', async () => {
   const built = await makeApp();
-  const res = await built.inject({ method: 'POST', url: '/api/collections', payload: { title: 'T', departments: ['A'] } });
+  const res = await built.inject({
+    method: 'POST',
+    url: '/api/collections',
+    payload: { title: 'T', departments: ['A'] },
+  });
   expect(res.statusCode).toBe(401);
 });
 
@@ -231,21 +257,36 @@ test('GET /api/collections/:id is owner-scoped -> 404 for another user', async (
   await seedUser('bob', 'pw');
   const a = await login(built, 'alice', 'pw');
   const b = await login(built, 'bob', 'pw');
-  const c = (await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: a.session }, headers: { 'x-csrf-token': a.csrf },
-    payload: { title: 'T', departments: ['A'] },
-  })).json();
+  const c = (
+    await built.inject({
+      method: 'POST',
+      url: '/api/collections',
+      cookies: { mirsal_session: a.session },
+      headers: { 'x-csrf-token': a.csrf },
+      payload: { title: 'T', departments: ['A'] },
+    })
+  ).json();
 
-  expect((await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: a.session } })).statusCode).toBe(200);
-  expect((await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: b.session } })).statusCode).toBe(404);
+  expect(
+    (await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: a.session } }))
+      .statusCode,
+  ).toBe(200);
+  expect(
+    (await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: b.session } }))
+      .statusCode,
+  ).toBe(404);
 });
 
 async function mkCollection(built: FastifyInstance, session: string, csrf: string, payload: any) {
-  return (await built.inject({
-    method: 'POST', url: '/api/collections',
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf }, payload,
-  })).json();
+  return (
+    await built.inject({
+      method: 'POST',
+      url: '/api/collections',
+      cookies: { mirsal_session: session },
+      headers: { 'x-csrf-token': csrf },
+      payload,
+    })
+  ).json();
 }
 
 test('PATCH is_active:false -> closed; past deadline -> expired; title updates', async () => {
@@ -255,16 +296,20 @@ test('PATCH is_active:false -> closed; past deadline -> expired; title updates',
   const c = await mkCollection(built, session, csrf, { title: 'Old', departments: ['A'] });
 
   const stop = await built.inject({
-    method: 'PATCH', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'PATCH',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { is_active: false, title: 'New' },
   });
   expect(stop.statusCode).toBe(200);
   expect(stop.json()).toMatchObject({ status: 'closed', title: 'New' });
 
   const exp = await built.inject({
-    method: 'PATCH', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'PATCH',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { is_active: true, deadline_at: NOW - 1000 },
   });
   expect(exp.json()).toMatchObject({ status: 'expired' });
@@ -278,18 +323,36 @@ test('PATCH with an empty body -> 400; foreign collection -> 404', async () => {
   const b = await login(built, 'bob', 'pw');
   const c = await mkCollection(built, a.session, a.csrf, { title: 'T', departments: ['A'] });
 
-  expect((await built.inject({
-    method: 'PATCH', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: a.session }, headers: { 'x-csrf-token': a.csrf }, payload: {},
-  })).statusCode).toBe(400);
+  expect(
+    (
+      await built.inject({
+        method: 'PATCH',
+        url: `/api/collections/${c.id}`,
+        cookies: { mirsal_session: a.session },
+        headers: { 'x-csrf-token': a.csrf },
+        payload: {},
+      })
+    ).statusCode,
+  ).toBe(400);
 
-  expect((await built.inject({
-    method: 'PATCH', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: b.session }, headers: { 'x-csrf-token': b.csrf }, payload: { is_active: false },
-  })).statusCode).toBe(404);
+  expect(
+    (
+      await built.inject({
+        method: 'PATCH',
+        url: `/api/collections/${c.id}`,
+        cookies: { mirsal_session: b.session },
+        headers: { 'x-csrf-token': b.csrf },
+        payload: { is_active: false },
+      })
+    ).statusCode,
+  ).toBe(404);
 
   // Discriminating: the foreign PATCH attempt must not have touched the row.
-  const untouched = await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: a.session } });
+  const untouched = await built.inject({
+    method: 'GET',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: a.session },
+  });
   expect(untouched.json()).toMatchObject({ is_active: true, title: 'T' });
 });
 
@@ -300,14 +363,20 @@ test('PATCH { title: "   " } -> 400; stored title unchanged', async () => {
   const c = await mkCollection(built, session, csrf, { title: 'Original', departments: ['A'] });
 
   const res = await built.inject({
-    method: 'PATCH', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'PATCH',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
     payload: { title: '   ' },
   });
   expect(res.statusCode).toBe(400);
   expect(res.json()).toMatchObject({ error: 'invalid_body' });
 
-  const after = await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: session } });
+  const after = await built.inject({
+    method: 'GET',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session },
+  });
   expect(after.json()).toMatchObject({ title: 'Original' });
 });
 
@@ -319,18 +388,24 @@ test('DELETE removes the collection (gone from list, folder node gone); 2nd DELE
   const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
 
   const del = await built.inject({
-    method: 'DELETE', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'DELETE',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
   });
   expect(del.statusCode).toBe(200);
   expect(db!.prepare('SELECT COUNT(*) c FROM nodes WHERE id=?').get(folderId)).toMatchObject({ c: 0 });
 
-  const list = (await built.inject({ method: 'GET', url: '/api/collections', cookies: { mirsal_session: session } })).json();
+  const list = (
+    await built.inject({ method: 'GET', url: '/api/collections', cookies: { mirsal_session: session } })
+  ).json();
   expect(list.some((x: any) => x.id === c.id)).toBe(false);
 
   const again = await built.inject({
-    method: 'DELETE', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'DELETE',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
   });
   expect(again.statusCode).toBe(404);
 });
@@ -345,15 +420,21 @@ test('DELETE is owner-scoped: a foreign DELETE -> 404 and the row/folder survive
   const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
 
   const foreignDel = await built.inject({
-    method: 'DELETE', url: `/api/collections/${c.id}`,
-    cookies: { mirsal_session: b.session }, headers: { 'x-csrf-token': b.csrf },
+    method: 'DELETE',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: b.session },
+    headers: { 'x-csrf-token': b.csrf },
   });
   expect(foreignDel.statusCode).toBe(404);
 
   // Discriminating: bob's failed DELETE must not have removed alice's row.
   expect(db!.prepare('SELECT COUNT(*) c FROM collections WHERE id=?').get(c.id)).toMatchObject({ c: 1 });
   expect(db!.prepare('SELECT COUNT(*) c FROM nodes WHERE id=?').get(folderId)).toMatchObject({ c: 1 });
-  const stillThere = await built.inject({ method: 'GET', url: `/api/collections/${c.id}`, cookies: { mirsal_session: a.session } });
+  const stillThere = await built.inject({
+    method: 'GET',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: a.session },
+  });
   expect(stillThere.statusCode).toBe(200);
 });
 
@@ -366,22 +447,31 @@ test('POST department -> 201; duplicate -> 409; foreign collection -> 404', asyn
   const c = await mkCollection(built, a.session, a.csrf, { title: 'T', departments: ['A'] });
 
   const add = await built.inject({
-    method: 'POST', url: `/api/collections/${c.id}/departments`,
-    cookies: { mirsal_session: a.session }, headers: { 'x-csrf-token': a.csrf }, payload: { name: 'B' },
+    method: 'POST',
+    url: `/api/collections/${c.id}/departments`,
+    cookies: { mirsal_session: a.session },
+    headers: { 'x-csrf-token': a.csrf },
+    payload: { name: 'B' },
   });
   expect(add.statusCode).toBe(201);
   expect(add.json()).toMatchObject({ name: 'B', position: 1 });
 
   const dup = await built.inject({
-    method: 'POST', url: `/api/collections/${c.id}/departments`,
-    cookies: { mirsal_session: a.session }, headers: { 'x-csrf-token': a.csrf }, payload: { name: 'A' },
+    method: 'POST',
+    url: `/api/collections/${c.id}/departments`,
+    cookies: { mirsal_session: a.session },
+    headers: { 'x-csrf-token': a.csrf },
+    payload: { name: 'A' },
   });
   expect(dup.statusCode).toBe(409);
   expect(dup.json()).toMatchObject({ code: 'duplicate' });
 
   const foreign = await built.inject({
-    method: 'POST', url: `/api/collections/${c.id}/departments`,
-    cookies: { mirsal_session: b.session }, headers: { 'x-csrf-token': b.csrf }, payload: { name: 'Z' },
+    method: 'POST',
+    url: `/api/collections/${c.id}/departments`,
+    cookies: { mirsal_session: b.session },
+    headers: { 'x-csrf-token': b.csrf },
+    payload: { name: 'Z' },
   });
   expect(foreign.statusCode).toBe(404);
 });
@@ -391,26 +481,42 @@ test('DELETE department -> 200; a department with a response -> 409 has_response
   const uid = await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
   const c = await mkCollection(built, session, csrf, { title: 'T', departments: ['A', 'B'] });
-  const depts = db!.prepare('SELECT id, name FROM collection_departments WHERE collection_id=? ORDER BY position').all(c.id) as { id: number; name: string }[];
+  const depts = db!
+    .prepare('SELECT id, name FROM collection_departments WHERE collection_id=? ORDER BY position')
+    .all(c.id) as { id: number; name: string }[];
   const b = depts.find((d) => d.name === 'B')!;
 
   const del = await built.inject({
-    method: 'DELETE', url: `/api/collections/${c.id}/departments/${b.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'DELETE',
+    url: `/api/collections/${c.id}/departments/${b.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
   });
   expect(del.statusCode).toBe(200);
 
   // Give dept A a response, then try to delete it.
   const a = depts.find((d) => d.name === 'A')!;
   const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
-  const sub = Number(db!.prepare(`INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
-    VALUES (?,?,'folder','A',0,?,?)`).run(uid, folderId, NOW, NOW).lastInsertRowid);
-  db!.prepare(`INSERT INTO collection_responses(collection_id,department_id,folder_node_id,note,submitted_at)
-    VALUES (?,?,?,NULL,?)`).run(c.id, a.id, sub, NOW);
+  const sub = Number(
+    db!
+      .prepare(
+        `INSERT INTO nodes(owner_id,parent_id,kind,name,size_bytes,created_at,updated_at)
+    VALUES (?,?,'folder','A',0,?,?)`,
+      )
+      .run(uid, folderId, NOW, NOW).lastInsertRowid,
+  );
+  db!
+    .prepare(
+      `INSERT INTO collection_responses(collection_id,department_id,folder_node_id,note,submitted_at)
+    VALUES (?,?,?,NULL,?)`,
+    )
+    .run(c.id, a.id, sub, NOW);
 
   const blocked = await built.inject({
-    method: 'DELETE', url: `/api/collections/${c.id}/departments/${a.id}`,
-    cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf },
+    method: 'DELETE',
+    url: `/api/collections/${c.id}/departments/${a.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
   });
   expect(blocked.statusCode).toBe(409);
   expect(blocked.json()).toMatchObject({ code: 'has_response' });

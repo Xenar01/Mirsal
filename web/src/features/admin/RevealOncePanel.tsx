@@ -15,13 +15,7 @@ import { useToast } from '../../components/Toast';
  * prefers-reduced-motion inside the Seal). "Copy" writes it to the clipboard;
  * "Done" dismisses. It is never persisted or logged in the client.
  */
-export default function RevealOncePanel({
-  password,
-  onDone,
-}: {
-  password: string;
-  onDone: () => void;
-}) {
+export default function RevealOncePanel({ password, onDone }: { password: string; onDone: () => void }) {
   const { t } = useTranslation();
   const { toast } = useToast();
 

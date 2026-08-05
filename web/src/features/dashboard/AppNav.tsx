@@ -29,10 +29,7 @@ export default function AppNav() {
   const { t } = useTranslation();
   const { user } = useAuth();
 
-  const items =
-    user?.role === 'admin'
-      ? [...NAV_ITEMS, { to: '/admin', key: 'dashboard.nav.admin' }]
-      : NAV_ITEMS;
+  const items = user?.role === 'admin' ? [...NAV_ITEMS, { to: '/admin', key: 'dashboard.nav.admin' }] : NAV_ITEMS;
 
   return (
     <nav aria-label={t('dashboard.nav.label')}>

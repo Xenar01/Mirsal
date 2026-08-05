@@ -74,7 +74,7 @@ async function seedUser(username: string, quotaBytes: number | null = null): Pro
   const info = db!
     .prepare(
       `INSERT INTO users(username,password_hash,role,is_active,must_change_password,quota_bytes,created_at,updated_at)
-       VALUES (?, ?, 'user', 1, 0, ?, ?, ?)`
+       VALUES (?, ?, 'user', 1, 0, ?, ?, ?)`,
     )
     .run(username, hash, quotaBytes, NOW, NOW);
   return Number(info.lastInsertRowid);
@@ -90,12 +90,7 @@ async function login(built: FastifyInstance, username: string): Promise<{ sessio
   };
 }
 /** Owner-creates a collection via the Phase-1 owner API; returns its detail DTO. */
-async function makeCollection(
-  built: FastifyInstance,
-  session: string,
-  csrf: string,
-  payload: Record<string, unknown>
-) {
+async function makeCollection(built: FastifyInstance, session: string, csrf: string, payload: Record<string, unknown>) {
   const res = await built.inject({
     method: 'POST',
     url: '/api/collections',
@@ -165,15 +160,29 @@ test('POST unlock: wrong pw -> 401 + audit; correct pw -> 200 + cookie; meta the
   const built = await makeApp();
   await seedUser('alice');
   const { session, csrf } = await login(built, 'alice');
-  const c = await makeCollection(built, session, csrf, { title: 'Secret', departments: ['A', 'B'], password: 'hunter2' });
+  const c = await makeCollection(built, session, csrf, {
+    title: 'Secret',
+    departments: ['A', 'B'],
+    password: 'hunter2',
+  });
 
-  const wrong = await built.inject({ method: 'POST', url: `/api/collect/${c.token}/unlock`, payload: { password: 'nope' } });
+  const wrong = await built.inject({
+    method: 'POST',
+    url: `/api/collect/${c.token}/unlock`,
+    payload: { password: 'nope' },
+  });
   expect(wrong.statusCode).toBe(401);
   expect(wrong.json()).toMatchObject({ error: 'invalid_password' });
-  const audit = db!.prepare("SELECT COUNT(*) n FROM audit_log WHERE action='collection_unlock_failure'").get() as { n: number };
+  const audit = db!.prepare("SELECT COUNT(*) n FROM audit_log WHERE action='collection_unlock_failure'").get() as {
+    n: number;
+  };
   expect(audit.n).toBe(1);
 
-  const ok = await built.inject({ method: 'POST', url: `/api/collect/${c.token}/unlock`, payload: { password: 'hunter2' } });
+  const ok = await built.inject({
+    method: 'POST',
+    url: `/api/collect/${c.token}/unlock`,
+    payload: { password: 'hunter2' },
+  });
   expect(ok.statusCode).toBe(200);
   const setCookie = (ok.cookies as InjectedCookie[]).find((k) => k.name === 'mirsal_collect_unlock');
   expect(setCookie).toBeDefined();
@@ -192,8 +201,13 @@ test('POST unlock: no-password collection -> 400 no_password; closed -> 404; bad
   await seedUser('alice');
   const { session, csrf } = await login(built, 'alice');
   const open = await makeCollection(built, session, csrf, { title: 'T', departments: ['A'] });
-  expect((await built.inject({ method: 'POST', url: `/api/collect/${open.token}/unlock`, payload: { password: 'x' } })).statusCode).toBe(400);
-  expect((await built.inject({ method: 'POST', url: `/api/collect/${open.token}/unlock`, payload: {} })).statusCode).toBe(400);
+  expect(
+    (await built.inject({ method: 'POST', url: `/api/collect/${open.token}/unlock`, payload: { password: 'x' } }))
+      .statusCode,
+  ).toBe(400);
+  expect(
+    (await built.inject({ method: 'POST', url: `/api/collect/${open.token}/unlock`, payload: {} })).statusCode,
+  ).toBe(400);
 
   const withPw = await makeCollection(built, session, csrf, { title: 'P', departments: ['A'], password: 'pw2' });
   await built.inject({
@@ -203,7 +217,10 @@ test('POST unlock: no-password collection -> 400 no_password; closed -> 404; bad
     headers: { 'x-csrf-token': csrf },
     payload: { is_active: false },
   });
-  expect((await built.inject({ method: 'POST', url: `/api/collect/${withPw.token}/unlock`, payload: { password: 'pw2' } })).statusCode).toBe(404);
+  expect(
+    (await built.inject({ method: 'POST', url: `/api/collect/${withPw.token}/unlock`, payload: { password: 'pw2' } }))
+      .statusCode,
+  ).toBe(404);
 });
 
 // ── template ────────────────────────────────────────────────────────────────
@@ -213,17 +230,19 @@ async function uploadOwnerFile(
   session: string,
   csrf: string,
   filename: string,
-  content: string
+  content: string,
 ): Promise<number> {
   const { rootId } = (await import('../../src/nodes/tree.js')).ensureUserRoots(
     db!,
     (db!.prepare('SELECT id FROM users WHERE username=?').get('alice') as { id: number }).id,
-    NOW
+    NOW,
   );
   const boundary = '----tmpl';
   const body = Buffer.concat([
     Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="parent_id"\r\n\r\n${rootId}\r\n`),
-    Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: text/plain\r\n\r\n`),
+    Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: text/plain\r\n\r\n`,
+    ),
     Buffer.from(content),
     Buffer.from(`\r\n--${boundary}--\r\n`),
   ]);
@@ -244,7 +263,11 @@ test('GET template: streams the attached file; missing template -> 404', async (
   const { session, csrf } = await login(built, 'alice');
   const templateNodeId = await uploadOwnerFile(built, session, csrf, 'template.txt', 'HELLO-TEMPLATE');
 
-  const c = await makeCollection(built, session, csrf, { title: 'T', departments: ['A'], template_node_id: templateNodeId });
+  const c = await makeCollection(built, session, csrf, {
+    title: 'T',
+    departments: ['A'],
+    template_node_id: templateNodeId,
+  });
   const res = await built.inject({ method: 'GET', url: `/api/collect/${c.token}/template` });
   expect(res.statusCode).toBe(200);
   expect(res.body).toBe('HELLO-TEMPLATE');
@@ -278,7 +301,9 @@ function buildMultipart(parts: MultipartPart[]): { body: Buffer; contentType: st
   for (const part of parts) {
     chunks.push(Buffer.from(`--${boundary}\r\n`));
     if (part.filename !== undefined) {
-      chunks.push(Buffer.from(`Content-Disposition: form-data; name="${part.name}"; filename="${part.filename}"\r\n`, 'utf8'));
+      chunks.push(
+        Buffer.from(`Content-Disposition: form-data; name="${part.name}"; filename="${part.filename}"\r\n`, 'utf8'),
+      );
       chunks.push(Buffer.from(`Content-Type: ${part.contentType ?? 'application/octet-stream'}\r\n\r\n`));
       chunks.push(part.data ?? Buffer.alloc(0));
       chunks.push(Buffer.from('\r\n'));
@@ -290,13 +315,26 @@ function buildMultipart(parts: MultipartPart[]): { body: Buffer; contentType: st
   chunks.push(Buffer.from(`--${boundary}--\r\n`));
   return { body: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` };
 }
-async function submit(built: FastifyInstance, token: string, parts: MultipartPart[], cookies: Record<string, string> = {}) {
+async function submit(
+  built: FastifyInstance,
+  token: string,
+  parts: MultipartPart[],
+  cookies: Record<string, string> = {},
+) {
   const { body, contentType } = buildMultipart(parts);
-  return built.inject({ method: 'POST', url: `/api/collect/${token}/submit`, headers: { 'content-type': contentType }, cookies, payload: body });
+  return built.inject({
+    method: 'POST',
+    url: `/api/collect/${token}/submit`,
+    headers: { 'content-type': contentType },
+    cookies,
+    payload: body,
+  });
 }
 /** Reads the department rows for a collection straight from the DB. */
 function deptIds(collectionId: number): { id: number; name: string }[] {
-  return db!.prepare('SELECT id, name FROM collection_departments WHERE collection_id=? ORDER BY position').all(collectionId) as { id: number; name: string }[];
+  return db!
+    .prepare('SELECT id, name FROM collection_departments WHERE collection_id=? ORDER BY position')
+    .all(collectionId) as { id: number; name: string }[];
 }
 
 test('submit happy path: 1 file -> 200; response row + file node + used_bytes + audit(actor null)', async () => {
@@ -315,20 +353,34 @@ test('submit happy path: 1 file -> 200; response row + file node + used_bytes + 
   expect(res.json()).toMatchObject({ ok: true });
 
   const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
-  const sub = db!.prepare("SELECT id, name FROM nodes WHERE parent_id=? AND kind='folder'").get(folderId) as { id: number; name: string };
+  const sub = db!.prepare("SELECT id, name FROM nodes WHERE parent_id=? AND kind='folder'").get(folderId) as {
+    id: number;
+    name: string;
+  };
   expect(sub.name).toBe('HR');
-  const files = db!.prepare("SELECT name, storage_path, size_bytes FROM nodes WHERE parent_id=? AND kind='file'").all(sub.id) as { name: string; storage_path: string; size_bytes: number }[];
+  const files = db!
+    .prepare("SELECT name, storage_path, size_bytes FROM nodes WHERE parent_id=? AND kind='file'")
+    .all(sub.id) as { name: string; storage_path: string; size_bytes: number }[];
   expect(files).toHaveLength(1);
   expect(files[0].name).toBe('report.txt');
   expect(files[0].size_bytes).toBe(10);
   const nodeId = files[0].storage_path.split('/')[1];
   expect(fs.existsSync(path.join(dir!, 'storage', String(owner), nodeId))).toBe(true);
   expect((db!.prepare('SELECT used_bytes u FROM users WHERE id=?').get(owner) as { u: number }).u).toBe(10);
-  const row = db!.prepare('SELECT note FROM collection_responses WHERE collection_id=? AND department_id=?').get(c.id, hr.id) as { note: string };
+  const row = db!
+    .prepare('SELECT note FROM collection_responses WHERE collection_id=? AND department_id=?')
+    .get(c.id, hr.id) as { note: string };
   expect(row.note).toBe('here is our report');
-  const audit = db!.prepare("SELECT actor_id, detail FROM audit_log WHERE action='collection_response_submitted'").get() as { actor_id: number | null; detail: string };
+  const audit = db!
+    .prepare("SELECT actor_id, detail FROM audit_log WHERE action='collection_response_submitted'")
+    .get() as { actor_id: number | null; detail: string };
   expect(audit.actor_id).toBeNull();
-  expect(JSON.parse(audit.detail)).toMatchObject({ collection_id: c.id, department_id: hr.id, department_name: 'HR', file_count: 1 });
+  expect(JSON.parse(audit.detail)).toMatchObject({
+    collection_id: c.id,
+    department_id: hr.id,
+    department_name: 'HR',
+    file_count: 1,
+  });
 });
 
 test('submit: 3 files land as 3 nodes under the department subfolder', async () => {
@@ -345,8 +397,11 @@ test('submit: 3 files land as 3 nodes under the department subfolder', async () 
   ]);
   expect(res.statusCode).toBe(200);
   const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
-  const sub = (db!.prepare("SELECT id FROM nodes WHERE parent_id=? AND kind='folder'").get(folderId) as { id: number }).id;
-  expect((db!.prepare("SELECT COUNT(*) n FROM nodes WHERE parent_id=? AND kind='file'").get(sub) as { n: number }).n).toBe(3);
+  const sub = (db!.prepare("SELECT id FROM nodes WHERE parent_id=? AND kind='folder'").get(folderId) as { id: number })
+    .id;
+  expect(
+    (db!.prepare("SELECT COUNT(*) n FROM nodes WHERE parent_id=? AND kind='file'").get(sub) as { n: number }).n,
+  ).toBe(3);
 });
 
 test('submit guards: 0 files -> 400 no_files; >10 files -> 400 too_many_files (nothing stored)', async () => {
@@ -409,15 +464,27 @@ test('submit latest-replaces: re-submit swaps the set, reclaims quota, and keeps
   const c = await makeCollection(built, session, csrf, { title: 'T', departments: ['HR'] });
   const hr = deptIds(c.id)[0];
 
-  await submit(built, c.token, [{ name: 'departmentId', value: String(hr.id) }, { name: 'files', filename: 'old.txt', data: Buffer.from('OLDDATA') }]);
+  await submit(built, c.token, [
+    { name: 'departmentId', value: String(hr.id) },
+    { name: 'files', filename: 'old.txt', data: Buffer.from('OLDDATA') },
+  ]);
   const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
-  const sub = (db!.prepare("SELECT id FROM nodes WHERE parent_id=? AND kind='folder'").get(folderId) as { id: number }).id;
-  const oldNode = db!.prepare("SELECT storage_path sp FROM nodes WHERE parent_id=? AND kind='file'").get(sub) as { sp: string };
+  const sub = (db!.prepare("SELECT id FROM nodes WHERE parent_id=? AND kind='folder'").get(folderId) as { id: number })
+    .id;
+  const oldNode = db!.prepare("SELECT storage_path sp FROM nodes WHERE parent_id=? AND kind='file'").get(sub) as {
+    sp: string;
+  };
   const oldBlob = path.join(dir!, 'storage', oldNode.sp);
   expect(fs.existsSync(oldBlob)).toBe(true);
 
-  await submit(built, c.token, [{ name: 'departmentId', value: String(hr.id) }, { name: 'files', filename: 'new.txt', data: Buffer.from('NEW') }]);
-  const files = db!.prepare("SELECT name, storage_path FROM nodes WHERE parent_id=? AND kind='file'").all(sub) as { name: string; storage_path: string }[];
+  await submit(built, c.token, [
+    { name: 'departmentId', value: String(hr.id) },
+    { name: 'files', filename: 'new.txt', data: Buffer.from('NEW') },
+  ]);
+  const files = db!.prepare("SELECT name, storage_path FROM nodes WHERE parent_id=? AND kind='file'").all(sub) as {
+    name: string;
+    storage_path: string;
+  }[];
   expect(files.map((f) => f.name)).toEqual(['new.txt']);
   // Defect A regression: rowid reuse can give new.txt the SAME storage_path the
   // freed old.txt row held, so the old-set cleanup must not delete the blob that
@@ -426,7 +493,9 @@ test('submit latest-replaces: re-submit swaps the set, reclaims quota, and keeps
   expect(fs.existsSync(newBlob)).toBe(true);
   expect(fs.readFileSync(newBlob, 'utf8')).toBe('NEW');
   expect((db!.prepare('SELECT used_bytes u FROM users WHERE id=?').get(owner) as { u: number }).u).toBe(3);
-  expect((db!.prepare('SELECT COUNT(*) n FROM collection_responses WHERE department_id=?').get(hr.id) as { n: number }).n).toBe(1);
+  expect(
+    (db!.prepare('SELECT COUNT(*) n FROM collection_responses WHERE department_id=?').get(hr.id) as { n: number }).n,
+  ).toBe(1);
 });
 
 test('submit latest-replaces with rowid reuse keeps every surviving file blob (Defect A regression)', async () => {
@@ -437,7 +506,10 @@ test('submit latest-replaces with rowid reuse keeps every surviving file blob (D
   const [d1, d2] = deptIds(c.id);
 
   // d1 gets 1 file; d2 gets 3 — d2's files become the table's current max-id rows.
-  await submit(built, c.token, [{ name: 'departmentId', value: String(d1.id) }, { name: 'files', filename: 'a.txt', data: Buffer.from('A') }]);
+  await submit(built, c.token, [
+    { name: 'departmentId', value: String(d1.id) },
+    { name: 'files', filename: 'a.txt', data: Buffer.from('A') },
+  ]);
   await submit(built, c.token, [
     { name: 'departmentId', value: String(d2.id) },
     { name: 'files', filename: 'b1.txt', data: Buffer.from('B1') },
@@ -454,7 +526,9 @@ test('submit latest-replaces with rowid reuse keeps every surviving file blob (D
   expect(replace.statusCode).toBe(200);
 
   // Every file the DB still lists must have its blob on disk (no reverse-orphan).
-  const current = db!.prepare("SELECT name, storage_path FROM nodes WHERE kind='file' AND storage_path IS NOT NULL").all() as { name: string; storage_path: string }[];
+  const current = db!
+    .prepare("SELECT name, storage_path FROM nodes WHERE kind='file' AND storage_path IS NOT NULL")
+    .all() as { name: string; storage_path: string }[];
   const missing = current.filter((f) => !fs.existsSync(path.join(dir!, 'storage', f.storage_path)));
   expect(missing).toEqual([]);
   expect(current.map((f) => f.name).sort()).toEqual(['a.txt', 'c1.txt', 'c2.txt']);
@@ -467,17 +541,30 @@ test('end-to-end: collect submissions (incl. latest-replaces) are downloadable a
   const c = await makeCollection(built, session, csrf, { title: 'T', departments: ['HR', 'Finance'] });
   const [hr, fin] = deptIds(c.id);
 
-  await submit(built, c.token, [{ name: 'departmentId', value: String(hr.id) }, { name: 'files', filename: 'hr.txt', data: Buffer.from('HR-REPORT') }]);
-  await submit(built, c.token, [{ name: 'departmentId', value: String(fin.id) }, { name: 'files', filename: 'fin.txt', data: Buffer.from('FIN-REPORT') }]);
+  await submit(built, c.token, [
+    { name: 'departmentId', value: String(hr.id) },
+    { name: 'files', filename: 'hr.txt', data: Buffer.from('HR-REPORT') },
+  ]);
+  await submit(built, c.token, [
+    { name: 'departmentId', value: String(fin.id) },
+    { name: 'files', filename: 'fin.txt', data: Buffer.from('FIN-REPORT') },
+  ]);
   // Finance corrects its submission (latest-replaces — the reused-rowid path).
-  await submit(built, c.token, [{ name: 'departmentId', value: String(fin.id) }, { name: 'files', filename: 'fin-v2.txt', data: Buffer.from('FIN-REVISED') }]);
+  await submit(built, c.token, [
+    { name: 'departmentId', value: String(fin.id) },
+    { name: 'files', filename: 'fin-v2.txt', data: Buffer.from('FIN-REVISED') },
+  ]);
 
   const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
 
   // Owner zips the whole collection folder. This is the cross-task path Phase 4
   // exists to serve; it also proves the fixes together — a Defect-A blob loss on
   // the Finance replace would make /zip hang (Defect B), not stream a real zip.
-  const zip = await built.inject({ method: 'GET', url: `/api/nodes/${folderId}/zip`, cookies: { mirsal_session: session } });
+  const zip = await built.inject({
+    method: 'GET',
+    url: `/api/nodes/${folderId}/zip`,
+    cookies: { mirsal_session: session },
+  });
   expect(zip.statusCode).toBe(200);
   expect(zip.headers['content-type']).toBe('application/zip');
   const sig = Buffer.from([0x50, 0x4b, 0x03, 0x04]); // "PK\x03\x04" local-file-header
@@ -493,16 +580,54 @@ test('submit rejects: wrong department -> 404; closed -> 404; non-multipart -> 4
   const c = await makeCollection(built, session, csrf, { title: 'T', departments: ['HR'] });
   const hr = deptIds(c.id)[0];
 
-  expect((await submit(built, c.token, [{ name: 'departmentId', value: '999999' }, { name: 'files', filename: 'f.txt', data: Buffer.from('x') }])).statusCode).toBe(404);
+  expect(
+    (
+      await submit(built, c.token, [
+        { name: 'departmentId', value: '999999' },
+        { name: 'files', filename: 'f.txt', data: Buffer.from('x') },
+      ])
+    ).statusCode,
+  ).toBe(404);
 
-  const nonMultipart = await built.inject({ method: 'POST', url: `/api/collect/${c.token}/submit`, payload: { hi: 1 } });
+  const nonMultipart = await built.inject({
+    method: 'POST',
+    url: `/api/collect/${c.token}/submit`,
+    payload: { hi: 1 },
+  });
   expect(nonMultipart.statusCode).toBe(415);
 
   const pw = await makeCollection(built, session, csrf, { title: 'P', departments: ['HR'], password: 'pw9' });
   const pwHr = deptIds(pw.id)[0];
-  expect((await submit(built, pw.token, [{ name: 'departmentId', value: String(pwHr.id) }, { name: 'files', filename: 'f.txt', data: Buffer.from('x') }])).statusCode).toBe(401);
+  expect(
+    (
+      await submit(built, pw.token, [
+        { name: 'departmentId', value: String(pwHr.id) },
+        { name: 'files', filename: 'f.txt', data: Buffer.from('x') },
+      ])
+    ).statusCode,
+  ).toBe(401);
 
-  await built.inject({ method: 'PATCH', url: `/api/collections/${c.id}`, cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf }, payload: { is_active: false } });
-  expect((await submit(built, c.token, [{ name: 'departmentId', value: String(hr.id) }, { name: 'files', filename: 'f.txt', data: Buffer.from('x') }])).statusCode).toBe(404);
-  expect((await submit(built, 'unknown-token', [{ name: 'departmentId', value: '1' }, { name: 'files', filename: 'f.txt', data: Buffer.from('x') }])).statusCode).toBe(404);
+  await built.inject({
+    method: 'PATCH',
+    url: `/api/collections/${c.id}`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { is_active: false },
+  });
+  expect(
+    (
+      await submit(built, c.token, [
+        { name: 'departmentId', value: String(hr.id) },
+        { name: 'files', filename: 'f.txt', data: Buffer.from('x') },
+      ])
+    ).statusCode,
+  ).toBe(404);
+  expect(
+    (
+      await submit(built, 'unknown-token', [
+        { name: 'departmentId', value: '1' },
+        { name: 'files', filename: 'f.txt', data: Buffer.from('x') },
+      ])
+    ).statusCode,
+  ).toBe(404);
 });

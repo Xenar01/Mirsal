@@ -49,7 +49,7 @@ export default function AutoDeleteMenu({ node, onClose }: { node: NodeDto; onClo
           onClose();
         },
         onError: () => toast({ kind: 'error', message: t('autoDelete.toast.error') }),
-      }
+      },
     );
   }
 
@@ -63,7 +63,7 @@ export default function AutoDeleteMenu({ node, onClose }: { node: NodeDto; onClo
           onClose();
         },
         onError: () => toast({ kind: 'error', message: t('autoDelete.toast.error') }),
-      }
+      },
     );
   }
 

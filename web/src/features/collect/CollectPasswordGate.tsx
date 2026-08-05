@@ -18,13 +18,7 @@ import { unlockCollection } from './api';
  * page re-fetches metadata (the unlock cookie now unlocks it). Rate-limit
  * (429) and header-absent cases degrade to their own authored copy.
  */
-export default function CollectPasswordGate({
-  token,
-  onUnlocked,
-}: {
-  token: string;
-  onUnlocked: () => void;
-}) {
+export default function CollectPasswordGate({ token, onUnlocked }: { token: string; onUnlocked: () => void }) {
   const { t } = useTranslation();
   const inputId = useId();
   const [password, setPassword] = useState('');
@@ -47,7 +41,7 @@ export default function CollectPasswordGate({
         setError(
           result.remaining !== null
             ? t('collect.wrongPassword', { count: result.remaining })
-            : t('collect.wrongPasswordNoCount')
+            : t('collect.wrongPasswordNoCount'),
         );
         return;
       case 'rateLimited':

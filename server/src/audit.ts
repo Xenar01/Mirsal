@@ -15,7 +15,11 @@ export interface AuditEntry {
  * calling this.
  */
 export function writeAudit(db: Database.Database, entry: AuditEntry, now: Clock): void {
-  db.prepare(
-    `INSERT INTO audit_log(actor_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)`
-  ).run(entry.actorId, entry.action, entry.target ?? null, entry.detail ?? null, now());
+  db.prepare(`INSERT INTO audit_log(actor_id, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)`).run(
+    entry.actorId,
+    entry.action,
+    entry.target ?? null,
+    entry.detail ?? null,
+    now(),
+  );
 }

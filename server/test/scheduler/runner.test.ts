@@ -69,7 +69,7 @@ function seedUser(usedBytes = 0): number {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, used_bytes, created_at, updated_at)
-       VALUES (?, 'x', 'user', 1, 0, ?, ?, ?)`
+       VALUES (?, 'x', 'user', 1, 0, ?, ?, ?)`,
     )
     .run(`user-${Math.random()}`, usedBytes, t, t);
   return Number(info.lastInsertRowid);
@@ -90,7 +90,7 @@ function insertNode(row: {
   const info = db!
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, trashed_at, auto_delete_at, purge_after, created_at, updated_at)
-       VALUES (@ownerId, @parentId, @kind, @name, @sizeBytes, @storagePath, @trashedAt, @autoDeleteAt, @purgeAfter, @t, @t)`
+       VALUES (@ownerId, @parentId, @kind, @name, @sizeBytes, @storagePath, @trashedAt, @autoDeleteAt, @purgeAfter, @t, @t)`,
     )
     .run({
       ownerId: row.ownerId,
@@ -108,9 +108,10 @@ function insertNode(row: {
 }
 
 function readNode(id: number): { trashed_at: number | null; purge_after: number | null } {
-  return db!
-    .prepare('SELECT trashed_at, purge_after FROM nodes WHERE id = ?')
-    .get(id) as { trashed_at: number | null; purge_after: number | null };
+  return db!.prepare('SELECT trashed_at, purge_after FROM nodes WHERE id = ?').get(id) as {
+    trashed_at: number | null;
+    purge_after: number | null;
+  };
 }
 
 function nodeExists(id: number): boolean {
@@ -155,13 +156,13 @@ test('runTick trashes a due live node and stamps purge_after = now + GRACE_MS', 
 
 // --- atomicity: trashed_at + purge_after commit together ----------------------
 
-test('auto-trash: if the purge_after stamp fails, trashNode\'s own change is rolled back too (never half-done)', async () => {
+test("auto-trash: if the purge_after stamp fails, trashNode's own change is rolled back too (never half-done)", async () => {
   const uid = seedUser();
   const now = Date.now();
   const id = insertNode({ ownerId: uid, parentId: null, name: 'due', autoDeleteAt: now - 1 });
 
   const originalPrepare = db!.prepare.bind(db!);
-   
+
   (db as any).prepare = (sql: string) => {
     if (sql.includes('SET purge_after = @purgeAfter WHERE id = @id')) {
       throw new Error('boom-purge-after');
@@ -171,7 +172,6 @@ test('auto-trash: if the purge_after stamp fails, trashNode\'s own change is rol
 
   const result = await runTick(db!, now, cfg());
 
-   
   (db as any).prepare = originalPrepare;
 
   expect(result).toEqual({ trashed: 0, purged: 0 });
@@ -380,12 +380,12 @@ test('a tick that throws does not kill the interval — the next tick still runs
 
   const originalPrepare = db!.prepare.bind(db!);
   let calls = 0;
-   
+
   (db as any).prepare = (...args: Parameters<typeof originalPrepare>) => {
     calls++;
     if (calls === 1) throw new Error('boom');
     return (originalPrepare as (...a: Parameters<typeof originalPrepare>) => ReturnType<typeof originalPrepare>)(
-      ...args
+      ...args,
     );
   };
 
@@ -393,7 +393,6 @@ test('a tick that throws does not kill the interval — the next tick still runs
   await vi.advanceTimersByTimeAsync(1000); // first tick: db.prepare throws inside dueTrash
   expect(readNode(id).trashed_at).toBeNull(); // tick failed before mutating anything
 
-   
   (db as any).prepare = originalPrepare;
 
   await vi.advanceTimersByTimeAsync(1000); // second tick: interval survived, runs normally

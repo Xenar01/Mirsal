@@ -89,14 +89,14 @@ async function makeApp(): Promise<FastifyInstance> {
 async function seedUser(
   username: string,
   password: string,
-  overrides: Partial<{ role: string; quotaBytes: number | null }> = {}
+  overrides: Partial<{ role: string; quotaBytes: number | null }> = {},
 ): Promise<number> {
   const passwordService = createPasswordService(TEST_ARGON);
   const hash = await passwordService.hashPassword(password);
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, quota_bytes, created_at, updated_at)
-       VALUES (?, ?, ?, 1, 0, ?, ?, ?)`
+       VALUES (?, ?, ?, 1, 0, ?, ?, ?)`,
     )
     .run(username, hash, overrides.role ?? 'user', overrides.quotaBytes ?? null, NOW, NOW);
   return Number(info.lastInsertRowid);
@@ -109,7 +109,7 @@ function findCookie(cookies: InjectedCookie[], name: string): InjectedCookie | u
 async function login(
   built: FastifyInstance,
   username: string,
-  password: string
+  password: string,
 ): Promise<{ session: string; csrf: string }> {
   const res = await built.inject({
     method: 'POST',
@@ -140,10 +140,7 @@ function buildMultipart(parts: MultipartPart[]): { body: Buffer; contentType: st
     chunks.push(Buffer.from(`--${boundary}\r\n`));
     if (part.filename !== undefined) {
       chunks.push(
-        Buffer.from(
-          `Content-Disposition: form-data; name="${part.name}"; filename="${part.filename}"\r\n`,
-          'utf8'
-        )
+        Buffer.from(`Content-Disposition: form-data; name="${part.name}"; filename="${part.filename}"\r\n`, 'utf8'),
       );
       chunks.push(Buffer.from(`Content-Type: ${part.contentType ?? 'application/octet-stream'}\r\n\r\n`));
       chunks.push(part.data ?? Buffer.alloc(0));
@@ -168,7 +165,7 @@ async function uploadFile(
   built: FastifyInstance,
   session: string,
   csrf: string,
-  opts: UploadOpts
+  opts: UploadOpts,
 ): Promise<{ statusCode: number; body: any }> {
   const { body, contentType } = buildMultipart([
     { name: 'parent_id', value: String(opts.parentId) },
@@ -591,7 +588,7 @@ test('permanent delete removes an uploaded file blob from disk', async () => {
 // Download: Arabic filename + RFC 6266 + missing blob
 // ---------------------------------------------------------------------------
 
-test('download of an Arabic-named file -> RFC 6266 filename*=UTF-8\'\', no raw CR/LF, bytes round-trip', async () => {
+test("download of an Arabic-named file -> RFC 6266 filename*=UTF-8'', no raw CR/LF, bytes round-trip", async () => {
   const built = await makeApp();
   const uid = await seedUser('alice', 'pw');
   const { session, csrf } = await login(built, 'alice', 'pw');
@@ -616,7 +613,9 @@ test('download of an Arabic-named file -> RFC 6266 filename*=UTF-8\'\', no raw C
   expect(res.statusCode).toBe(200);
   const disposition = res.headers['content-disposition'] as string;
   expect(disposition).toContain("filename*=UTF-8''");
-  expect(disposition).toContain(encodeURIComponent('تقرير.pdf').replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`));
+  expect(disposition).toContain(
+    encodeURIComponent('تقرير.pdf').replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`),
+  );
   expect(disposition).not.toMatch(/[\r\n]/);
   expect(res.headers['x-content-type-options']).toBe('nosniff');
   expect(res.rawPayload.equals(content)).toBe(true);
@@ -882,14 +881,14 @@ test('rollup size on a pathologically wide live folder is bounded, not an unboun
   const folderInfo = db!
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
-       VALUES (@uid, @rootId, 'folder', 'Wide', 0, @now, @now)`
+       VALUES (@uid, @rootId, 'folder', 'Wide', 0, @now, @now)`,
     )
     .run({ uid, rootId, now: NOW });
   const folderId = Number(folderInfo.lastInsertRowid);
 
   const insertFile = db!.prepare(
     `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
-     VALUES (@uid, @folderId, 'file', @name, 1, @now, @now)`
+     VALUES (@uid, @folderId, 'file', @name, 1, @now, @now)`,
   );
   const insertMany = db!.transaction((count: number) => {
     for (let i = 0; i < count; i++) {
@@ -938,7 +937,11 @@ test('POST /api/nodes/trash/empty permanently deletes all trashed nodes, frees q
     payload: { parent_id: rootId, name: 'Box' },
   });
   const folder = folderRes.json();
-  const insideUp = await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'inside.txt', data: Buffer.from('hello') }); // 5
+  const insideUp = await uploadFile(built, session, csrf, {
+    parentId: folder.id,
+    filename: 'inside.txt',
+    data: Buffer.from('hello'),
+  }); // 5
   const insideId = insideUp.body.id as number;
   const looseUp = await uploadFile(built, session, csrf, {
     parentId: rootId,
@@ -946,10 +949,21 @@ test('POST /api/nodes/trash/empty permanently deletes all trashed nodes, frees q
     data: Buffer.from('worldwide'),
   }); // 9
 
-  await built.inject({ method: 'POST', url: `/api/nodes/${folder.id}/trash`, cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf } });
-  await built.inject({ method: 'POST', url: `/api/nodes/${looseUp.body.id}/trash`, cookies: { mirsal_session: session }, headers: { 'x-csrf-token': csrf } });
+  await built.inject({
+    method: 'POST',
+    url: `/api/nodes/${folder.id}/trash`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+  });
+  await built.inject({
+    method: 'POST',
+    url: `/api/nodes/${looseUp.body.id}/trash`,
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+  });
 
-  const usedBefore = (db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number }).used_bytes;
+  const usedBefore = (db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number })
+    .used_bytes;
   expect(usedBefore).toBe(6 + 5 + 9);
 
   const res = await built.inject({
@@ -962,13 +976,18 @@ test('POST /api/nodes/trash/empty permanently deletes all trashed nodes, frees q
   expect(res.json().freedBytes).toBe(5 + 9); // the two trashed subtrees, not the live file
 
   // Trash now empty; live file still listed.
-  const trashList = (await built.inject({ method: 'GET', url: '/api/nodes/trash', cookies: { mirsal_session: session } })).json();
+  const trashList = (
+    await built.inject({ method: 'GET', url: '/api/nodes/trash', cookies: { mirsal_session: session } })
+  ).json();
   expect(trashList).toEqual([]);
-  const rootList = (await built.inject({ method: 'GET', url: '/api/nodes', cookies: { mirsal_session: session } })).json() as Array<{ id: number }>;
+  const rootList = (
+    await built.inject({ method: 'GET', url: '/api/nodes', cookies: { mirsal_session: session } })
+  ).json() as Array<{ id: number }>;
   expect(rootList.some((n) => n.id === liveId)).toBe(true);
 
   // Quota dropped by exactly the trashed bytes; live file's blob still on disk.
-  const usedAfter = (db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number }).used_bytes;
+  const usedAfter = (db!.prepare('SELECT used_bytes FROM users WHERE id = ?').get(uid) as { used_bytes: number })
+    .used_bytes;
   expect(usedAfter).toBe(6);
   expect(fs.existsSync(path.join(storageDir!, String(uid), String(liveId)))).toBe(true);
 
@@ -1100,7 +1119,11 @@ test('GET /api/nodes/:id/zip when a subtree blob is missing on disk -> 404, neve
   });
   const folder = folderRes.json();
 
-  const upload = await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'ghost.txt', data: Buffer.from('will vanish') });
+  const upload = await uploadFile(built, session, csrf, {
+    parentId: folder.id,
+    filename: 'ghost.txt',
+    data: Buffer.from('will vanish'),
+  });
   const nodeId = upload.body.id as number;
   // Reverse-orphan: the row exists but its blob is gone (the exact end state
   // Defect A could produce). /zip must fail cleanly like /download's ENOENT->404,
@@ -1117,7 +1140,7 @@ test('GET /api/nodes/:id/zip when a subtree blob is missing on disk -> 404, neve
   expect(res.json()).toEqual({ error: 'not_found' });
 }, 10_000);
 
-test('POST /api/nodes/trash/empty is owner-scoped — never touches another user\'s trash', async () => {
+test("POST /api/nodes/trash/empty is owner-scoped — never touches another user's trash", async () => {
   const built = await makeApp();
   const aliceId = await seedUser('alice', 'pw');
   const bobId = await seedUser('bob', 'pw');
@@ -1125,14 +1148,30 @@ test('POST /api/nodes/trash/empty is owner-scoped — never touches another user
   const bob = await login(built, 'bob', 'pw');
 
   // Bob trashes a file.
-  const bobUp = await uploadFile(built, bob.session, bob.csrf, { parentId: rootIdFor(bobId), filename: 'b.txt', data: Buffer.from('bob') });
-  await built.inject({ method: 'POST', url: `/api/nodes/${bobUp.body.id}/trash`, cookies: { mirsal_session: bob.session }, headers: { 'x-csrf-token': bob.csrf } });
+  const bobUp = await uploadFile(built, bob.session, bob.csrf, {
+    parentId: rootIdFor(bobId),
+    filename: 'b.txt',
+    data: Buffer.from('bob'),
+  });
+  await built.inject({
+    method: 'POST',
+    url: `/api/nodes/${bobUp.body.id}/trash`,
+    cookies: { mirsal_session: bob.session },
+    headers: { 'x-csrf-token': bob.csrf },
+  });
 
   // Alice empties HER trash (empty) — Bob's trashed file must remain.
-  const aliceEmptyRes = await built.inject({ method: 'POST', url: '/api/nodes/trash/empty', cookies: { mirsal_session: alice.session }, headers: { 'x-csrf-token': alice.csrf } });
+  const aliceEmptyRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/trash/empty',
+    cookies: { mirsal_session: alice.session },
+    headers: { 'x-csrf-token': alice.csrf },
+  });
   expect(aliceEmptyRes.statusCode).toBe(200);
 
-  const bobTrash = (await built.inject({ method: 'GET', url: '/api/nodes/trash', cookies: { mirsal_session: bob.session } })).json() as Array<{ id: number }>;
+  const bobTrash = (
+    await built.inject({ method: 'GET', url: '/api/nodes/trash', cookies: { mirsal_session: bob.session } })
+  ).json() as Array<{ id: number }>;
   expect(bobTrash.some((n) => n.id === bobUp.body.id)).toBe(true);
   expect(aliceId).not.toBe(bobId);
 });

@@ -14,13 +14,7 @@ import Seal from '../../components/Seal';
  * (the J1 Seal no-ops that under prefers-reduced-motion). The wordmark is a
  * logotype, not a heading; the page's own `<h1>` is `title`.
  */
-export default function AuthCard({
-  title,
-  children,
-}: {
-  title: string;
-  children: ReactNode;
-}) {
+export default function AuthCard({ title, children }: { title: string; children: ReactNode }) {
   const { t } = useTranslation();
   return (
     <main className="flex min-h-dvh items-center justify-center bg-paper px-4 py-10 text-ink">

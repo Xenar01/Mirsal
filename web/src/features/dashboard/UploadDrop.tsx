@@ -164,9 +164,7 @@ export default function UploadDrop({ parentId }: UploadDropProps) {
                     </bdi>
                   </div>
                 )}
-                {item.status === 'done' && (
-                  <p className="mt-0.5 font-body text-xs text-emerald">{t('upload.done')}</p>
-                )}
+                {item.status === 'done' && <p className="mt-0.5 font-body text-xs text-emerald">{t('upload.done')}</p>}
                 {item.status === 'error' && (
                   <p role="alert" className="mt-0.5 font-body text-xs text-clay">
                     {item.message}

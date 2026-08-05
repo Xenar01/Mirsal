@@ -63,7 +63,7 @@ function coercePositiveInt(value: unknown): number | null {
 export function resolveInSubtree(
   db: Database.Database,
   share: Pick<Share, 'node_id' | 'owner_id'>,
-  requestedNodeId: unknown
+  requestedNodeId: unknown,
 ): Node {
   const id = coercePositiveInt(requestedNodeId);
   if (id === null) {
@@ -93,9 +93,7 @@ export function resolveInSubtree(
       throw new ForbiddenError();
     }
 
-    current = db.prepare('SELECT * FROM nodes WHERE id = @id').get({ id: current.parent_id }) as
-      | Node
-      | undefined;
+    current = db.prepare('SELECT * FROM nodes WHERE id = @id').get({ id: current.parent_id }) as Node | undefined;
   }
 
   throw new ForbiddenError();
@@ -115,7 +113,7 @@ export function resolveInSubtree(
 export function listPublic(
   db: Database.Database,
   share: Pick<Share, 'node_id' | 'owner_id'>,
-  folderId: unknown
+  folderId: unknown,
 ): Node[] {
   const resolved = resolveInSubtree(db, share, folderId);
 

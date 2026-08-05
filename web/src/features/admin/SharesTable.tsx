@@ -113,10 +113,7 @@ function ShareRow({
 
   if (variant === 'card') {
     return (
-      <div
-        data-testid={`share-card-${share.id}`}
-        className="rounded-[10px] border border-line bg-surface p-3"
-      >
+      <div data-testid={`share-card-${share.id}`} className="rounded-[10px] border border-line bg-surface p-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <bdi dir="ltr" className="block truncate font-mono text-ink">

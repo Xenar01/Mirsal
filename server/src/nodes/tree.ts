@@ -20,8 +20,7 @@ export class CollisionError extends Error {
 function isUniqueConstraintError(e: unknown): boolean {
   return (
     e instanceof Error &&
-    ((e as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT_UNIQUE' ||
-      /UNIQUE constraint failed/i.test(e.message))
+    ((e as NodeJS.ErrnoException).code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint failed/i.test(e.message))
   );
 }
 
@@ -56,9 +55,10 @@ export interface UserRoots {
  */
 export function ensureUserRoots(db: Database.Database, userId: number, now: number): UserRoots {
   const run = db.transaction((): UserRoots => {
-    const user = db
-      .prepare('SELECT root_node_id, trash_node_id FROM users WHERE id = @userId')
-      .get({ userId }) as { root_node_id: number | null; trash_node_id: number | null };
+    const user = db.prepare('SELECT root_node_id, trash_node_id FROM users WHERE id = @userId').get({ userId }) as {
+      root_node_id: number | null;
+      trash_node_id: number | null;
+    };
 
     if (user.root_node_id !== null && user.trash_node_id !== null) {
       return { rootId: user.root_node_id, trashId: user.trash_node_id };
@@ -66,15 +66,17 @@ export function ensureUserRoots(db: Database.Database, userId: number, now: numb
 
     const insertNode = db.prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, created_at, updated_at)
-       VALUES (@userId, NULL, @kind, @kind, @now, @now)`
+       VALUES (@userId, NULL, @kind, @kind, @now, @now)`,
     );
 
     const rootId = Number(insertNode.run({ userId, kind: 'root', now }).lastInsertRowid);
     const trashId = Number(insertNode.run({ userId, kind: 'trash', now }).lastInsertRowid);
 
-    db.prepare(
-      'UPDATE users SET root_node_id = @rootId, trash_node_id = @trashId WHERE id = @userId'
-    ).run({ rootId, trashId, userId });
+    db.prepare('UPDATE users SET root_node_id = @rootId, trash_node_id = @trashId WHERE id = @userId').run({
+      rootId,
+      trashId,
+      userId,
+    });
 
     return { rootId, trashId };
   });
@@ -94,11 +96,10 @@ export function createFolder(
   ownerId: number,
   parentId: number,
   name: string,
-  now: number
+  now: number,
 ): Node {
-  const parent = db
-    .prepare('SELECT owner_id, kind FROM nodes WHERE id = @parentId')
-    .get({ parentId }) as { owner_id: number; kind: Node['kind'] } | undefined;
+  const parent = db.prepare('SELECT owner_id, kind FROM nodes WHERE id = @parentId').get({ parentId }) as
+    { owner_id: number; kind: Node['kind'] } | undefined;
 
   if (!parent || parent.owner_id !== ownerId || (parent.kind !== 'root' && parent.kind !== 'folder')) {
     throw new Error(`Invalid parent for createFolder: ${parentId}`);
@@ -107,7 +108,7 @@ export function createFolder(
   const info = db
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
-       VALUES (@ownerId, @parentId, 'folder', @name, 0, @now, @now)`
+       VALUES (@ownerId, @parentId, 'folder', @name, 0, @now, @now)`,
     )
     .run({ ownerId, parentId, name, now });
 
@@ -123,7 +124,7 @@ export function listChildren(db: Database.Database, ownerId: number, parentId: n
     .prepare(
       `SELECT * FROM nodes
        WHERE owner_id = @ownerId AND parent_id = @parentId AND trashed_at IS NULL
-       ORDER BY (kind = 'folder') DESC, name COLLATE NOCASE ASC`
+       ORDER BY (kind = 'folder') DESC, name COLLATE NOCASE ASC`,
     )
     .all({ ownerId, parentId }) as Node[];
 }
@@ -141,7 +142,7 @@ export function rollupSize(db: Database.Database, nodeId: number): number {
          UNION ALL SELECT n.id FROM nodes n JOIN sub ON n.parent_id = sub.id WHERE n.trashed_at IS NULL
        )
        SELECT COALESCE(SUM(size_bytes), 0) AS total FROM nodes
-       WHERE id IN (SELECT id FROM sub) AND kind = 'file' AND trashed_at IS NULL`
+       WHERE id IN (SELECT id FROM sub) AND kind = 'file' AND trashed_at IS NULL`,
     )
     .get({ nodeId }) as { total: number };
 
@@ -161,7 +162,7 @@ export function isAncestor(db: Database.Database, maybeAncestorId: number, nodeI
          SELECT id, parent_id FROM nodes WHERE id = @nodeId
          UNION ALL SELECT n.id, n.parent_id FROM nodes n JOIN up ON n.id = up.parent_id
        )
-       SELECT 1 FROM up WHERE parent_id = @maybeAncestorId LIMIT 1`
+       SELECT 1 FROM up WHERE parent_id = @maybeAncestorId LIMIT 1`,
     )
     .get({ nodeId, maybeAncestorId });
 
@@ -186,24 +187,17 @@ export function moveNode(
   ownerId: number,
   nodeId: number,
   newParentId: number,
-  now: number
+  now: number,
 ): Node {
   const node = db.prepare('SELECT owner_id, kind FROM nodes WHERE id = @nodeId').get({ nodeId }) as
-    | { owner_id: number; kind: Node['kind'] }
-    | undefined;
-  if (
-    !node ||
-    node.owner_id !== ownerId ||
-    (node.kind !== 'folder' && node.kind !== 'file')
-  ) {
+    { owner_id: number; kind: Node['kind'] } | undefined;
+  if (!node || node.owner_id !== ownerId || (node.kind !== 'folder' && node.kind !== 'file')) {
     throw new Error(`Invalid node for moveNode: ${nodeId}`);
   }
 
   const newParent = db
     .prepare('SELECT owner_id, kind, trashed_at FROM nodes WHERE id = @newParentId')
-    .get({ newParentId }) as
-    | { owner_id: number; kind: Node['kind']; trashed_at: number | null }
-    | undefined;
+    .get({ newParentId }) as { owner_id: number; kind: Node['kind']; trashed_at: number | null } | undefined;
   if (
     !newParent ||
     newParent.owner_id !== ownerId ||
@@ -219,7 +213,7 @@ export function moveNode(
 
   try {
     db.prepare(
-      'UPDATE nodes SET parent_id = @newParentId, updated_at = @now WHERE id = @nodeId AND owner_id = @ownerId'
+      'UPDATE nodes SET parent_id = @newParentId, updated_at = @now WHERE id = @nodeId AND owner_id = @ownerId',
     ).run({ nodeId, newParentId, now, ownerId });
   } catch (e) {
     if (isUniqueConstraintError(e)) {
@@ -237,28 +231,20 @@ export function moveNode(
  * renamed). A live-name clash under the same parent (`ux_live_name` UNIQUE
  * violation) throws `CollisionError` instead of the raw SQLite error.
  */
-export function renameNode(
-  db: Database.Database,
-  ownerId: number,
-  nodeId: number,
-  newName: string,
-  now: number
-): Node {
+export function renameNode(db: Database.Database, ownerId: number, nodeId: number, newName: string, now: number): Node {
   const node = db.prepare('SELECT owner_id, kind FROM nodes WHERE id = @nodeId').get({ nodeId }) as
-    | { owner_id: number; kind: Node['kind'] }
-    | undefined;
-  if (
-    !node ||
-    node.owner_id !== ownerId ||
-    (node.kind !== 'folder' && node.kind !== 'file')
-  ) {
+    { owner_id: number; kind: Node['kind'] } | undefined;
+  if (!node || node.owner_id !== ownerId || (node.kind !== 'folder' && node.kind !== 'file')) {
     throw new Error(`Invalid node for renameNode: ${nodeId}`);
   }
 
   try {
-    db.prepare(
-      'UPDATE nodes SET name = @newName, updated_at = @now WHERE id = @nodeId AND owner_id = @ownerId'
-    ).run({ nodeId, newName, now, ownerId });
+    db.prepare('UPDATE nodes SET name = @newName, updated_at = @now WHERE id = @nodeId AND owner_id = @ownerId').run({
+      nodeId,
+      newName,
+      now,
+      ownerId,
+    });
   } catch (e) {
     if (isUniqueConstraintError(e)) {
       throw new CollisionError();

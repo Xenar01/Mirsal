@@ -5,7 +5,10 @@ export const LATEST_VERSION = 4;
 /** Back-compat alias for any importer of the old single-shot constant. */
 export const SCHEMA_VERSION = LATEST_VERSION;
 
-interface MigrationStep { version: number; up(db: Database.Database): void; }
+interface MigrationStep {
+  version: number;
+  up(db: Database.Database): void;
+}
 
 const STEPS: MigrationStep[] = [
   {
@@ -79,12 +82,14 @@ const STEPS: MigrationStep[] = [
  */
 export function migrate(db: Database.Database): void {
   db.exec('CREATE TABLE IF NOT EXISTS schema_version(version INTEGER NOT NULL, applied_at INTEGER NOT NULL)');
-  let current = (db.prepare('SELECT MAX(version) AS version FROM schema_version').get() as {
-    version: number | null;
-  }).version ?? 0;
+  let current =
+    (
+      db.prepare('SELECT MAX(version) AS version FROM schema_version').get() as {
+        version: number | null;
+      }
+    ).version ?? 0;
 
-  const hasCore =
-    db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='shares'").get() !== undefined;
+  const hasCore = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='shares'").get() !== undefined;
 
   if (current === 0 && !hasCore) {
     const schemaSql = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8');

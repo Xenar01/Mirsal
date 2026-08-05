@@ -56,7 +56,7 @@ test('ux_live_name enforces live-name uniqueness per parent, ignores trashed/roo
   db!
     .prepare(
       `INSERT INTO users(id, username, password_hash, role, used_bytes, is_active, must_change_password, created_at, updated_at)
-       VALUES (1, 'owner', 'x', 'user', 0, 1, 0, ?, ?)`
+       VALUES (1, 'owner', 'x', 'user', 0, 1, 0, ?, ?)`,
     )
     .run(t, t);
 
@@ -65,23 +65,23 @@ test('ux_live_name enforces live-name uniqueness per parent, ignores trashed/roo
   db!
     .prepare(
       `INSERT INTO nodes(id, owner_id, parent_id, kind, name, created_at, updated_at)
-       VALUES (1, 1, NULL, 'root', 'top', ?, ?)`
+       VALUES (1, 1, NULL, 'root', 'top', ?, ?)`,
     )
     .run(t, t);
   expect(() =>
     db!
       .prepare(
         `INSERT INTO nodes(id, owner_id, parent_id, kind, name, created_at, updated_at)
-         VALUES (2, 1, NULL, 'trash', 'top', ?, ?)`
+         VALUES (2, 1, NULL, 'trash', 'top', ?, ?)`,
       )
-      .run(t, t)
+      .run(t, t),
   ).not.toThrow();
 
   // A folder under the root, to serve as parent for the live-name collision test.
   db!
     .prepare(
       `INSERT INTO nodes(id, owner_id, parent_id, kind, name, created_at, updated_at)
-       VALUES (3, 1, 1, 'folder', 'Documents', ?, ?)`
+       VALUES (3, 1, 1, 'folder', 'Documents', ?, ?)`,
     )
     .run(t, t);
 
@@ -89,7 +89,7 @@ test('ux_live_name enforces live-name uniqueness per parent, ignores trashed/roo
   db!
     .prepare(
       `INSERT INTO nodes(id, owner_id, parent_id, kind, name, created_at, updated_at)
-       VALUES (4, 1, 3, 'file', 'a.txt', ?, ?)`
+       VALUES (4, 1, 3, 'file', 'a.txt', ?, ?)`,
     )
     .run(t, t);
 
@@ -98,9 +98,9 @@ test('ux_live_name enforces live-name uniqueness per parent, ignores trashed/roo
     db!
       .prepare(
         `INSERT INTO nodes(id, owner_id, parent_id, kind, name, created_at, updated_at)
-         VALUES (5, 1, 3, 'file', 'a.txt', ?, ?)`
+         VALUES (5, 1, 3, 'file', 'a.txt', ?, ?)`,
       )
-      .run(t, t)
+      .run(t, t),
   ).toThrow(/UNIQUE/i);
 
   // Trash the first child, then the same name live again — OK.
@@ -110,9 +110,9 @@ test('ux_live_name enforces live-name uniqueness per parent, ignores trashed/roo
     db!
       .prepare(
         `INSERT INTO nodes(id, owner_id, parent_id, kind, name, created_at, updated_at)
-         VALUES (6, 1, 3, 'file', 'a.txt', ?, ?)`
+         VALUES (6, 1, 3, 'file', 'a.txt', ?, ?)`,
       )
-      .run(t, t)
+      .run(t, t),
   ).not.toThrow();
 });
 
@@ -170,7 +170,8 @@ describe('migrate v2 download-limit columns', () => {
   });
 
   it('fresh and upgraded shares schemas converge (identical table_info)', () => {
-    const fresh = new Database(':memory:'); migrate(fresh);
+    const fresh = new Database(':memory:');
+    migrate(fresh);
     const upgraded = new Database(':memory:');
     upgraded.exec(V1_SHARES);
     upgraded.exec(V1_USERS);
@@ -178,13 +179,17 @@ describe('migrate v2 download-limit columns', () => {
     upgraded.prepare('INSERT INTO schema_version(version, applied_at) VALUES (1, 0)').run();
     migrate(upgraded);
     expect(fresh.prepare('PRAGMA table_info(shares)').all()).toEqual(
-      upgraded.prepare('PRAGMA table_info(shares)').all()
+      upgraded.prepare('PRAGMA table_info(shares)').all(),
     );
   });
 
   it('is idempotent on repeated boots', () => {
-    const db = new Database(':memory:'); migrate(db);
-    expect(() => { migrate(db); migrate(db); }).not.toThrow();
+    const db = new Database(':memory:');
+    migrate(db);
+    expect(() => {
+      migrate(db);
+      migrate(db);
+    }).not.toThrow();
     expect((db.prepare('SELECT COUNT(*) c FROM schema_version').get() as { c: number }).c).toBe(1);
   });
 
@@ -237,27 +242,31 @@ describe('migrate v3 users.display_name column', () => {
   });
 
   it('fresh and upgraded users schemas converge (identical table_info)', () => {
-    const fresh = new Database(':memory:'); migrate(fresh);
+    const fresh = new Database(':memory:');
+    migrate(fresh);
     const upgraded = new Database(':memory:');
     upgraded.exec(V2_USERS);
     upgraded.exec('CREATE TABLE schema_version(version INTEGER NOT NULL, applied_at INTEGER NOT NULL)');
     upgraded.prepare('INSERT INTO schema_version(version, applied_at) VALUES (2, 0)').run();
     migrate(upgraded);
-    expect(fresh.prepare('PRAGMA table_info(users)').all()).toEqual(
-      upgraded.prepare('PRAGMA table_info(users)').all()
-    );
+    expect(fresh.prepare('PRAGMA table_info(users)').all()).toEqual(upgraded.prepare('PRAGMA table_info(users)').all());
   });
 
   it('is idempotent across repeated boots at v3', () => {
-    const db = new Database(':memory:'); migrate(db);
-    expect(() => { migrate(db); migrate(db); }).not.toThrow();
+    const db = new Database(':memory:');
+    migrate(db);
+    expect(() => {
+      migrate(db);
+      migrate(db);
+    }).not.toThrow();
     expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
   });
 });
 
 function tableNames(db: Database.Database): string[] {
-  return (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[])
-    .map((r) => r.name);
+  return (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map(
+    (r) => r.name,
+  );
 }
 
 describe('migrate v4 collections tables', () => {
@@ -265,9 +274,7 @@ describe('migrate v4 collections tables', () => {
     const db = new Database(':memory:');
     migrate(db);
     const names = tableNames(db);
-    expect(names).toEqual(
-      expect.arrayContaining(['collections', 'collection_departments', 'collection_responses'])
-    );
+    expect(names).toEqual(expect.arrayContaining(['collections', 'collection_departments', 'collection_responses']));
     expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
   });
 
@@ -284,7 +291,7 @@ describe('migrate v4 collections tables', () => {
     db.prepare('INSERT INTO schema_version(version, applied_at) VALUES (3, 0)').run();
     migrate(db);
     expect(tableNames(db)).toEqual(
-      expect.arrayContaining(['collections', 'collection_departments', 'collection_responses'])
+      expect.arrayContaining(['collections', 'collection_departments', 'collection_responses']),
     );
     expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
   });
@@ -299,18 +306,23 @@ describe('migrate v4 collections tables', () => {
     upgraded.prepare('INSERT INTO schema_version(version, applied_at) VALUES (1, 0)').run();
     migrate(upgraded);
     const ddl = (db: Database.Database) =>
-      (db
-        .prepare(
-          "SELECT sql FROM sqlite_master WHERE name IN ('collections','collection_departments','collection_responses') ORDER BY name"
-        )
-        .all() as { sql: string }[]).map((r) => r.sql);
+      (
+        db
+          .prepare(
+            "SELECT sql FROM sqlite_master WHERE name IN ('collections','collection_departments','collection_responses') ORDER BY name",
+          )
+          .all() as { sql: string }[]
+      ).map((r) => r.sql);
     expect(ddl(fresh)).toEqual(ddl(upgraded));
   });
 
   it('is idempotent at v4', () => {
     const db = new Database(':memory:');
     migrate(db);
-    expect(() => { migrate(db); migrate(db); }).not.toThrow();
+    expect(() => {
+      migrate(db);
+      migrate(db);
+    }).not.toThrow();
     expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
   });
 });

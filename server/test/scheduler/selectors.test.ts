@@ -39,7 +39,7 @@ function seedUser(): number {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, used_bytes, created_at, updated_at)
-       VALUES (?, 'x', 'user', 1, 0, 0, ?, ?)`
+       VALUES (?, 'x', 'user', 1, 0, 0, ?, ?)`,
     )
     .run(`user-${Math.random()}`, t, t);
   return Number(info.lastInsertRowid);
@@ -59,7 +59,7 @@ function insertNode(row: {
   const info = db!
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, storage_path, trashed_at, auto_delete_at, purge_after, created_at, updated_at)
-       VALUES (@ownerId, @parentId, @kind, @name, @storagePath, @trashedAt, @autoDeleteAt, @purgeAfter, @t, @t)`
+       VALUES (@ownerId, @parentId, @kind, @name, @storagePath, @trashedAt, @autoDeleteAt, @purgeAfter, @t, @t)`,
     )
     .run({
       ownerId: row.ownerId,
@@ -253,9 +253,7 @@ test('orphanBlobs walks a large STORAGE_DIR without one unbroken synchronous bur
     // the enumeration demonstrably broke into multiple yielded chunks rather
     // than running as one blocking pass. (`- 1` tolerates the final partial
     // window not reaching the threshold.)
-    expect(setImmediateSpy.mock.calls.length).toBeGreaterThanOrEqual(
-      Math.floor(FILE_COUNT / YIELD_EVERY) - 1
-    );
+    expect(setImmediateSpy.mock.calls.length).toBeGreaterThanOrEqual(Math.floor(FILE_COUNT / YIELD_EVERY) - 1);
   } finally {
     setImmediateSpy.mockRestore();
     fs.rmSync(storageDir, { recursive: true, force: true });

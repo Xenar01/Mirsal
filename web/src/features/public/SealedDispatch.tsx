@@ -45,7 +45,7 @@ export default function SealedDispatch() {
       document.documentElement.lang = 'ar';
       document.documentElement.dir = 'rtl';
     },
-    []
+    [],
   );
 
   // A password share is treated as locked on every fresh mount (#11): `revealed`

@@ -30,6 +30,7 @@
 ## File Structure
 
 **Owner feature — `web/src/features/collections/` (all new):**
+
 - `types.ts` — client mirrors of the server DTOs (`CollectionSummaryDto`, `CollectionDetailDto`, `RosterDeptDto`). Single source of truth for owner shapes.
 - `api.ts` — typed wrappers over `/api/collections*` via `lib/api` (list/get/create/patch/delete/add-dept/remove-dept) + the `CreateCollectionVars`/`PatchCollectionVars` input types.
 - `queries.ts` — TanStack-Query hooks + query keys (`collectionsKey`, `collectionKey(id)`); mutations invalidate the list and the affected detail.
@@ -38,6 +39,7 @@
 - `CollectionDetail.tsx` — the roster + lifecycle console for one collection: X/N headline, responded/missing split, per-department file count + note + submitted time + lazy per-file download, and controls (open/close, edit title/password/deadline, add/remove department, delete collection).
 
 **Public feature — `web/src/features/collect/` (all new):**
+
 - `api.ts` — direct-fetch client for `/api/collect/:token/*`: `fetchCollectMeta` (returns a discriminated `CollectMetaResult`), `unlockCollection`, `submitResponse` (multipart), `templateUrl`.
 - `queries.ts` — `useCollectMeta(token, reveal)` (never throws for an expected state, mirrors `usePublicMeta`).
 - `CollectPage.tsx` — the `/c/:token` page: bilingual (AR default + EN toggle flips `dir`), branches loading/closed/notFound/password/open-form/confirmation. Mirrors `SealedDispatch` + `DispatchFrame`.
@@ -45,12 +47,14 @@
 - `CollectForm.tsx` — the open uploader form: title, template download, department `<select>`, multi-file `<input>`, note, submit, client-side guards, per-error copy, success confirmation.
 
 **Wiring / shared (modify):**
+
 - `web/src/app/router.tsx` — add `<Route path="/collections">` (RequireAuth → CollectionsView), `<Route path="/collections/:id">` (RequireAuth → CollectionDetail), and `<Route path="/c/:token">` (public → CollectPage).
 - `web/src/features/dashboard/AppNav.tsx` — add `{ to: '/collections', key: 'dashboard.nav.collections' }` to `NAV_ITEMS`.
 - `web/src/i18n/ar.json` — add `dashboard.nav.collections`, the `collections.*` block (owner), and the `collect.*` block (public AR).
 - `web/src/i18n/en.json` — add the `collect.*` block (public EN, parity with ar).
 
 **Tests (new):**
+
 - `web/test/collections-api.test.ts` — owner api layer (method/path/body per call).
 - `web/test/collections-i18n.test.ts` — `collect.*` ar/en key parity + presence of core owner keys.
 - `web/test/collections-view.test.tsx` — list render, empty state, opens create modal, nav pill.
@@ -63,12 +67,14 @@
 ## Task 1: Owner data layer (types + api + queries)
 
 **Files:**
+
 - Create: `web/src/features/collections/types.ts`
 - Create: `web/src/features/collections/api.ts`
 - Create: `web/src/features/collections/queries.ts`
 - Test: `web/test/collections-api.test.ts`
 
 **Interfaces:**
+
 - Consumes: `apiGet`/`apiPost`/`apiPatch`/`apiDelete` from `../../lib/api`; the shared TanStack Query client (provided by `App`/tests).
 - Produces (later tasks rely on these EXACT names/shapes):
   - Types: `CollectionSummaryDto`, `CollectionDetailDto`, `RosterDeptDto`.
@@ -139,7 +145,8 @@ import * as api from '../src/features/collections/api';
 
 function jsonResponse(status: number, body?: unknown): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), {
-    status, headers: { 'content-type': 'application/json' },
+    status,
+    headers: { 'content-type': 'application/json' },
   });
 }
 function stubFetch(map: Record<string, unknown>) {
@@ -157,7 +164,10 @@ function stubFetch(map: Record<string, unknown>) {
   return mock;
 }
 const calls: Array<{ path: string; method: string; body: BodyInit | null | undefined }> = [];
-afterEach(() => { vi.unstubAllGlobals(); calls.length = 0; });
+afterEach(() => {
+  vi.unstubAllGlobals();
+  calls.length = 0;
+});
 
 describe('collections api', () => {
   test('createCollection POSTs /api/collections with the mapped snake_case body', async () => {
@@ -166,7 +176,10 @@ describe('collections api', () => {
     const call = calls.find((c) => c.method === 'POST');
     expect(call?.path).toBe('/api/collections');
     expect(JSON.parse(String(call?.body))).toEqual({
-      title: 'مسح', departments: ['المالية', 'الموارد'], deadline_at: 123, password: 'pw',
+      title: 'مسح',
+      departments: ['المالية', 'الموارد'],
+      deadline_at: 123,
+      password: 'pw',
     });
   });
 
@@ -286,11 +299,17 @@ function useInvalidate() {
 
 export function useCreateCollection() {
   const invalidate = useInvalidate();
-  return useMutation({ mutationFn: (v: CreateCollectionVars) => api.createCollection(v), onSuccess: () => invalidate() });
+  return useMutation({
+    mutationFn: (v: CreateCollectionVars) => api.createCollection(v),
+    onSuccess: () => invalidate(),
+  });
 }
 export function usePatchCollection() {
   const invalidate = useInvalidate();
-  return useMutation({ mutationFn: (v: PatchCollectionVars) => api.patchCollection(v), onSuccess: (d) => invalidate(d.id) });
+  return useMutation({
+    mutationFn: (v: PatchCollectionVars) => api.patchCollection(v),
+    onSuccess: (d) => invalidate(d.id),
+  });
 }
 export function useDeleteCollection() {
   const invalidate = useInvalidate();
@@ -327,11 +346,13 @@ git commit -m "feat(collections): owner data layer (types + api + queries)"
 ## Task 2: i18n keys (owner AR + public AR/EN)
 
 **Files:**
+
 - Modify: `web/src/i18n/ar.json` (add `dashboard.nav.collections`, `collections.*`, `collect.*`)
 - Modify: `web/src/i18n/en.json` (add `collect.*`)
 - Test: `web/test/collections-i18n.test.ts`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: the translation keys every later task's `t('collections.*')` / `t('collect.*')` calls resolve against.
 
@@ -346,7 +367,7 @@ import en from '../src/i18n/en.json';
 
 function flatten(obj: Record<string, unknown>, prefix = ''): string[] {
   return Object.entries(obj).flatMap(([k, v]) =>
-    v && typeof v === 'object' ? flatten(v as Record<string, unknown>, `${prefix}${k}.`) : [`${prefix}${k}`]
+    v && typeof v === 'object' ? flatten(v as Record<string, unknown>, `${prefix}${k}.`) : [`${prefix}${k}`],
   );
 }
 
@@ -362,9 +383,15 @@ describe('collections i18n', () => {
     const keys = flatten(ar);
     for (const k of [
       'dashboard.nav.collections',
-      'collections.title', 'collections.new', 'collections.empty',
-      'collections.create.title', 'collections.create.departmentsLabel', 'collections.create.submit',
-      'collections.detail.responded', 'collections.detail.missing', 'collections.detail.delete',
+      'collections.title',
+      'collections.new',
+      'collections.empty',
+      'collections.create.title',
+      'collections.create.departmentsLabel',
+      'collections.create.submit',
+      'collections.detail.responded',
+      'collections.detail.missing',
+      'collections.detail.delete',
     ]) {
       expect(keys, `missing ${k}`).toContain(k);
     }
@@ -567,12 +594,14 @@ git commit -m "feat(collections): i18n — owner AR keys + bilingual collect.* k
 ## Task 3: CollectionsView (owner list) + nav pill + routes
 
 **Files:**
+
 - Create: `web/src/features/collections/CollectionsView.tsx`
 - Modify: `web/src/features/dashboard/AppNav.tsx` (add the Collections pill)
 - Modify: `web/src/app/router.tsx` (add `/collections`, `/collections/:id`, `/c/:token` routes — CollectionDetail/CollectPage are stubbed to unblock routing, filled in Tasks 5 & 7)
 - Test: `web/test/collections-view.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `useCollections`, `collectionsKey` (Task 1); `DashboardShell`; `StatusChip` (maps `open→active`, `closed→stopped`, `expired→expired`); `useToast`; `formatDate`.
 - Produces: `CollectionsView` default export; a `<Link to={/collections/:id}>` per row; a "new collection" button that mounts `CreateCollectionModal` (Task 4) — until Task 4 lands, wire the button to open a placeholder Modal or leave the modal import for Task 4. To keep this task self-contained and testable, render the button and track `open` state, mounting `CreateCollectionModal` (create the file as a minimal stub in Task 4; here import it and gate on state).
 
@@ -639,10 +668,12 @@ git commit -m "feat(collections): owner list view + nav pill + routes (detail/co
 ## Task 4: CreateCollectionModal (create flow)
 
 **Files:**
+
 - Modify (replace stub): `web/src/features/collections/CreateCollectionModal.tsx`
 - Test: `web/test/collections-create.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `useCreateCollection` (Task 1); `uploadFile` from `../dashboard/api` (template upload → node id); `Modal`, `Button`, `Seal`, `useToast`, `Copy` icon; `damascusInputToUtcMs` from `../dashboard/share/datetime`; `MAX_FILE_BYTES` from `../dashboard/format`.
 - Produces: `CreateCollectionModal({ onClose }: { onClose: () => void })` default export.
 
@@ -681,7 +712,10 @@ function parseDepartments(raw: string): string[] {
   const out: string[] = [];
   for (const line of raw.split('\n')) {
     const name = line.trim();
-    if (name && !seen.has(name)) { seen.add(name); out.push(name); }
+    if (name && !seen.has(name)) {
+      seen.add(name);
+      out.push(name);
+    }
   }
   return out;
 }
@@ -693,26 +727,44 @@ Submit handler skeleton:
 async function submit(e?: FormEvent) {
   e?.preventDefault();
   const depts = parseDepartments(departmentsRaw);
-  if (!title.trim()) { setError(t('collections.create.titleRequired')); return; }
-  if (depts.length === 0) { setError(t('collections.create.departmentsRequired')); return; }
+  if (!title.trim()) {
+    setError(t('collections.create.titleRequired'));
+    return;
+  }
+  if (depts.length === 0) {
+    setError(t('collections.create.departmentsRequired'));
+    return;
+  }
   let deadlineAt: number | null | undefined;
   if (deadline) {
     const ms = damascusInputToUtcMs(deadline);
-    if (ms === null) { setError(t('collections.create.deadlineInvalid')); return; }
-    if (ms <= Date.now()) { setError(t('collections.create.deadlinePast')); return; }
+    if (ms === null) {
+      setError(t('collections.create.deadlineInvalid'));
+      return;
+    }
+    if (ms <= Date.now()) {
+      setError(t('collections.create.deadlinePast'));
+      return;
+    }
     deadlineAt = ms;
   }
   setError(null);
   try {
     let templateNodeId: number | undefined;
     if (file) {
-      if (file.size > MAX_FILE_BYTES) { setError(t('upload.tooLarge')); return; }
+      if (file.size > MAX_FILE_BYTES) {
+        setError(t('upload.tooLarge'));
+        return;
+      }
       const node = await uploadFile({ file, parentId: null });
       templateNodeId = node.id;
     }
     const created = await create.mutateAsync({
-      title: title.trim(), departments: depts,
-      templateNodeId, password: password.trim() || undefined, deadlineAt,
+      title: title.trim(),
+      departments: depts,
+      templateNodeId,
+      password: password.trim() || undefined,
+      deadlineAt,
     });
     toast({ kind: 'success', message: t('collections.toast.created') });
     setResult(created); // flips to Step 2 (link + copy)
@@ -737,14 +789,17 @@ git commit -m "feat(collections): create-collection modal (title/departments/tem
 ## Task 5: CollectionDetail (roster + lifecycle console)
 
 **Files:**
+
 - Modify (replace stub): `web/src/features/collections/CollectionDetail.tsx`
 - Test: `web/test/collections-detail.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `useCollection`, `usePatchCollection`, `useDeleteCollection`, `useAddDepartment`, `useRemoveDepartment` (Task 1); `listNodes` from `../dashboard/api` + `downloadUrl` (per-file download); `NodeDto`; `DashboardShell`, `Modal`, `Button`, `StatusChip`, `useToast`; `formatDate`, `formatBytes`; `useParams`, `useNavigate`, `Link`.
 - Produces: `CollectionDetail` default export (reads `:id` from the route).
 
 **Layout:** DashboardShell-framed. Header: back-link to `/collections`, title, `<StatusChip status={mapStatus}/>`, `{responded}/{total}` headline, and the `/c/<token>` link + copy. Two sections:
+
 - **Responded** (`departments.filter(d => d.responded)`): per department — name, `t('collections.detail.files', { count: file_count })`, submitted time (`formatDate(submitted_at)` in `<bdi dir="ltr">`), note (if any), and a "show files" toggle. On expand, lazily `listNodes(folder_node_id)` (a local `useQuery` keyed `['nodes', folder_node_id]`, enabled only when expanded) and render each file with `formatBytes(size_bytes)` + a download anchor `href={downloadUrl(file.id)}` (plain `<a>` — carries the session cookie, RFC-6266 attachment).
 - **Missing** (`!d.responded`): per department — name + a remove button (calls `useRemoveDepartment`; a `409 has_response` maps to the `removeBlocked` toast — belt-and-braces even though missing ones have no response).
 
@@ -754,8 +809,17 @@ git commit -m "feat(collections): create-collection modal (title/departments/tem
 
 ```ts
 const detail = {
-  id: 7, token: 'tok7', title: 'مسح ربعي', is_active: true, has_password: false, has_template: true,
-  deadline_at: null, created_at: NOW, status: 'open', department_count: 3, responded_count: 1,
+  id: 7,
+  token: 'tok7',
+  title: 'مسح ربعي',
+  is_active: true,
+  has_password: false,
+  has_template: true,
+  deadline_at: null,
+  created_at: NOW,
+  status: 'open',
+  department_count: 3,
+  responded_count: 1,
   url: 'https://project4.system.mow.gov.sy/c/tok7',
   template: { node_id: 9, name: 'template.xlsx' },
   departments: [
@@ -765,15 +829,25 @@ const detail = {
   ],
 };
 
-test('renders X/N, the responded department with its file count and note, and the missing ones', async () => { /* … */ });
+test('renders X/N, the responded department with its file count and note, and the missing ones', async () => {
+  /* … */
+});
 test('expanding a responded department lists its files (GET /api/nodes?parent=50) with download links', async () => {
   // stub GET /api/nodes -> [{ id:60, kind:'file', name:'a.pdf', size_bytes:2048, ... }]
   // click "show files" → a download anchor with href '/api/nodes/60/download' appears.
 });
-test('close toggles is_active via PATCH', async () => { /* stub PATCH /api/collections/7 → {…is_active:false} ; click close → assert PATCH body { is_active:false } */ });
-test('add department POSTs; duplicate (409) shows the duplicate toast', async () => { /* … */ });
-test('remove a missing department DELETEs it', async () => { /* click remove on الموارد → DELETE /api/collections/7/departments/2 */ });
-test('delete collection confirms then navigates back to /collections', async () => { /* … */ });
+test('close toggles is_active via PATCH', async () => {
+  /* stub PATCH /api/collections/7 → {…is_active:false} ; click close → assert PATCH body { is_active:false } */
+});
+test('add department POSTs; duplicate (409) shows the duplicate toast', async () => {
+  /* … */
+});
+test('remove a missing department DELETEs it', async () => {
+  /* click remove on الموارد → DELETE /api/collections/7/departments/2 */
+});
+test('delete collection confirms then navigates back to /collections', async () => {
+  /* … */
+});
 ```
 
 - [x] **Step 2: Run it, verify it fails** — `cd web && npx vitest run test/collections-detail.test.tsx` → FAIL.
@@ -788,17 +862,25 @@ function DepartmentFiles({ folderNodeId }: { folderNodeId: number }) {
     queryFn: () => listNodes(folderNodeId),
   });
   if (isPending) return <p className="font-body text-xs text-ink-2">{t('collections.detail.filesLoading')}</p>;
-  if (isError) return <p role="alert" className="font-body text-xs text-clay">{t('collections.detail.filesError')}</p>;
+  if (isError)
+    return (
+      <p role="alert" className="font-body text-xs text-clay">
+        {t('collections.detail.filesError')}
+      </p>
+    );
   return (
     <ul className="mt-1 flex flex-col gap-1">
-      {(data ?? []).filter((n) => n.kind === 'file').map((f) => (
-        <li key={f.id} className="flex items-center justify-between gap-2">
-          <bdi className="min-w-0 truncate font-body text-sm text-ink">{f.name}</bdi>
-          <a href={downloadUrl(f.id)} className="inline-flex items-center gap-1 text-teal">
-            <DownloadArrow size={16} />{t('collections.detail.download')}
-          </a>
-        </li>
-      ))}
+      {(data ?? [])
+        .filter((n) => n.kind === 'file')
+        .map((f) => (
+          <li key={f.id} className="flex items-center justify-between gap-2">
+            <bdi className="min-w-0 truncate font-body text-sm text-ink">{f.name}</bdi>
+            <a href={downloadUrl(f.id)} className="inline-flex items-center gap-1 text-teal">
+              <DownloadArrow size={16} />
+              {t('collections.detail.download')}
+            </a>
+          </li>
+        ))}
     </ul>
   );
 }
@@ -819,11 +901,13 @@ git commit -m "feat(collections): roster/detail view — responded/missing, per-
 ## Task 6: Public collect data layer (api + queries)
 
 **Files:**
+
 - Create: `web/src/features/collect/api.ts`
 - Create: `web/src/features/collect/queries.ts`
 - Test: `web/test/collect-api.test.ts`
 
 **Interfaces:**
+
 - Consumes: raw `fetch`/`XMLHttpRequest` (the ONE unauthenticated surface — no `lib/api`, no CSRF). `MAX_FILE_BYTES` for the client cap.
 - Produces:
   - `CollectMeta { title; hasTemplate: boolean; templateName: string | null; departments: { id: number; name: string }[]; needsPassword: boolean }`.
@@ -843,12 +927,16 @@ git commit -m "feat(collections): roster/detail view — responded/missing, per-
 - [x] **Step 1: Write the failing api test** (`web/test/collect-api.test.ts`) — stub `fetch`, assert each mapping:
 
 ```ts
-test('meta: 404 → notFound; isOpen:false → closed; needsPassword → password; departments → open', async () => { /* four fetch stubs */ });
+test('meta: 404 → notFound; isOpen:false → closed; needsPassword → password; departments → open', async () => {
+  /* four fetch stubs */
+});
 test('meta omits credentials until reveal (gate re-appears each fresh open)', async () => {
   // spy fetch; call fetchCollectMeta(token) → init.credentials === 'omit';
   // call fetchCollectMeta(token,{reveal:true}) → 'include'.
 });
-test('unlock: 200→ok, 401 reads x-ratelimit-remaining→wrong{remaining}, 429→rateLimited', async () => { /* … */ });
+test('unlock: 200→ok, 401 reads x-ratelimit-remaining→wrong{remaining}, 429→rateLimited', async () => {
+  /* … */
+});
 test('submit: builds multipart with departmentId + files + note and maps status codes', async () => {
   // stub fetch returning 200 {ok:true}; call submitResponse; assert init.body is FormData containing the fields;
   // then stub 413 {error:'quota_exceeded'} → kind 'quota'; 400 {error:'too_many_files'} → 'tooManyFiles'.
@@ -892,16 +980,19 @@ git commit -m "feat(collect): public data layer — meta/unlock/submit/template 
 ## Task 7: Public CollectPage + password gate + upload form
 
 **Files:**
+
 - Modify (replace stub): `web/src/features/collect/CollectPage.tsx`
 - Create: `web/src/features/collect/CollectPasswordGate.tsx`
 - Create: `web/src/features/collect/CollectForm.tsx`
 - Test: `web/test/collect.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `useCollectMeta`, `unlockCollection`, `submitResponse`, `templateUrl` (Task 6); `DispatchFrame`, `SealHeader` (reuse from `../public/DispatchFrame`); `PrimaryLink`, `DownloadGlyph` from `../public/controls`; `Button`; `i18n`, `dirForLang`; `useParams`; `COLLECTION_MAX_FILES_PER_RESPONSE` client mirror + `MAX_FILE_BYTES`.
 - Produces: `CollectPage` default export (route `/c/:token`).
 
 **CollectPage** mirrors `SealedDispatch`: `initialLang()` from `navigator.language`, `useEffect` applying `i18n.changeLanguage(lang)` + `document.documentElement.dir/lang`, cleanup restoring AR/RTL on unmount, a `revealed` state (false on mount → meta omits the unlock cookie), and the AR/EN toggle in `DispatchFrame`. Branch on `useCollectMeta(token, revealed)`:
+
 - `isPending` → loading line.
 - `isError` / `state:'error'` → `t('collect.error')`.
 - `state:'notFound'` → `t('collect.notFound')`.
@@ -918,10 +1009,16 @@ git commit -m "feat(collect): public data layer — meta/unlock/submit/template 
 - [x] **Step 1: Write the failing page test** (`web/test/collect.test.tsx`) — mirror `test/public.test.tsx` (QueryClient + I18nextProvider + MemoryRouter at `/c/:token`, `jsonResponse` helper, `setNavigatorLanguage`, isolate-strip). Cases:
 
 ```ts
-test('open: renders title, department select, file input; AR default then EN toggle flips dir + copy', async () => { /* stub GET meta open */ });
-test('closed meta → neutral closed copy (AR + EN)', async () => { /* isOpen:false */ });
+test('open: renders title, department select, file input; AR default then EN toggle flips dir + copy', async () => {
+  /* stub GET meta open */
+});
+test('closed meta → neutral closed copy (AR + EN)', async () => {
+  /* isOpen:false */
+});
 test('notFound (404) → not-found copy', async () => {});
-test('password state → gate; unlock success re-fetches and shows the form', async () => { /* meta password, then POST /unlock 200, refetch → open */ });
+test('password state → gate; unlock success re-fetches and shows the form', async () => {
+  /* meta password, then POST /unlock 200, refetch → open */
+});
 test('submitting files issues a multipart POST and shows the confirmation', async () => {
   // meta open; choose a File; pick a department; submit;
   // stub POST /api/collect/tok/submit -> {ok:true}; assert the POST fired multipart and t('collect.success') renders.
@@ -971,4 +1068,7 @@ git commit -m "docs(collections): Phase 3 plan checkboxes complete"
 - **Bilingual constraint** (collect.* in ar+en) → Task 2 parity test.
 - **Deferred to Phase 4 (flagged):** per-department ZIP + whole-collection ZIP download (no owner ZIP route exists — needs server work); upload-progress bar; whole-collection E2E sweep; RUNBOOK "Collections" note. These are exactly the spec §12 Phase-4 items.
 - **Not needed:** template inline-upload endpoint (worked around via existing `/api/nodes/upload`).
+
+```
+
 ```

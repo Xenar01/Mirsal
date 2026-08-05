@@ -27,11 +27,7 @@ afterEach(() => {
 });
 
 test('writeAudit inserts one row matching audit_log columns', () => {
-  writeAudit(
-    db!,
-    { actorId: 7, action: 'login', target: 'user:7', detail: 'ok' },
-    () => 1_700_000_000_000
-  );
+  writeAudit(db!, { actorId: 7, action: 'login', target: 'user:7', detail: 'ok' }, () => 1_700_000_000_000);
 
   const row = db!.prepare('SELECT * FROM audit_log').get() as Record<string, unknown>;
 

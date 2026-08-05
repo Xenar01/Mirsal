@@ -11,7 +11,7 @@ function renderModal(props: Partial<Parameters<typeof Modal>[0]> = {}) {
       <Modal open onClose={onClose} title="عنوان الحوار" {...props}>
         <p>محتوى</p>
       </Modal>
-    </I18nextProvider>
+    </I18nextProvider>,
   );
   return { onClose };
 }
@@ -43,7 +43,7 @@ describe('Modal', () => {
         <Modal open={false} onClose={vi.fn()} title="عنوان">
           <p>محتوى</p>
         </Modal>
-      </I18nextProvider>
+      </I18nextProvider>,
     );
     expect(screen.queryByRole('dialog')).toBeNull();
   });

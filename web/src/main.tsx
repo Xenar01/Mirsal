@@ -45,7 +45,7 @@ createRoot(rootElement).render(
         </AuthProvider>
       </I18nextProvider>
     </QueryClientProvider>
-  </StrictMode>
+  </StrictMode>,
 );
 
 // Register the service worker (§P1). `virtual:pwa-register` is bundled into

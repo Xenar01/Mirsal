@@ -84,7 +84,7 @@ interface PublicUser {
  */
 function toPublicUser(
   row: Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password' | 'quota_bytes' | 'used_bytes'>,
-  rootNodeId: number
+  rootNodeId: number,
 ): PublicUser {
   return {
     id: row.id,
@@ -187,7 +187,7 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
       const row = db
         .prepare(
           `SELECT id, username, password_hash, role, is_active, must_change_password, quota_bytes, used_bytes
-           FROM users WHERE username = ?`
+           FROM users WHERE username = ?`,
         )
         .get(username) as UserRow | undefined;
 
@@ -197,10 +197,7 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
       // so a correct password on an inactive account is detectable; the dummy
       // hash only when there is no such user — so timing can't reveal which of
       // "no such user" / "inactive" / "wrong password" occurred.
-      const verified = await passwordService.verifyPassword(
-        hasUser ? row!.password_hash : dummyHash,
-        password
-      );
+      const verified = await passwordService.verifyPassword(hasUser ? row!.password_hash : dummyHash, password);
 
       // Disclose "deactivated" ONLY to a fully-correct username+password — a
       // wrong password on an inactive account still gets the generic 401, so no
@@ -249,8 +246,7 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
     const row = db
       .prepare(`SELECT id, username, role, must_change_password, quota_bytes, used_bytes FROM users WHERE id = ?`)
       .get(req.user!.id) as
-      | Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password' | 'quota_bytes' | 'used_bytes'>
-      | undefined;
+      Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password' | 'quota_bytes' | 'used_bytes'> | undefined;
 
     if (!row) {
       reply.code(401).send();
@@ -269,8 +265,7 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
     const { current, new: newPassword } = parsed.data;
 
     const row = db.prepare(`SELECT id, password_hash FROM users WHERE id = ?`).get(req.user!.id) as
-      | { id: number; password_hash: string }
-      | undefined;
+      { id: number; password_hash: string } | undefined;
     if (!row) {
       reply.code(401).send();
       return;
@@ -296,7 +291,7 @@ export default async function authRoutes(app: FastifyInstance, deps: AuthRouteDe
       db.prepare(`UPDATE users SET password_hash = ?, must_change_password = 0, updated_at = ? WHERE id = ?`).run(
         newHash,
         nowMs,
-        row.id
+        row.id,
       );
 
       // Revoke every session (including the one used for this request) then

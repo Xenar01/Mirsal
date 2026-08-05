@@ -32,7 +32,7 @@ export function dueTrash(db: Database.Database, now: number, limit: number): Nod
       `SELECT * FROM nodes
        WHERE auto_delete_at IS NOT NULL AND auto_delete_at <= @now AND trashed_at IS NULL
        ORDER BY auto_delete_at ASC
-       LIMIT @limit`
+       LIMIT @limit`,
     )
     .all({ now, limit }) as Node[];
 }
@@ -50,7 +50,7 @@ export function duePurge(db: Database.Database, now: number, limit: number): Nod
       `SELECT * FROM nodes
        WHERE purge_after IS NOT NULL AND purge_after <= @now
        ORDER BY purge_after ASC
-       LIMIT @limit`
+       LIMIT @limit`,
     )
     .all({ now, limit }) as Node[];
 }
@@ -87,7 +87,7 @@ export function duePurge(db: Database.Database, now: number, limit: number): Nod
 export async function* orphanBlobs(
   db: Database.Database,
   storageDir: string,
-  opts?: { yieldEvery?: number }
+  opts?: { yieldEvery?: number },
 ): AsyncGenerator<string, void, unknown> {
   let ownerDir: import('node:fs').Dir;
   try {

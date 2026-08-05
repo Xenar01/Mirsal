@@ -63,7 +63,7 @@ deploy/smoke.sh http://127.0.0.1:18084 ./data-smoke/db/admin-credential.txt
 docker rm -f mirsal-smoke && rm -rf data-smoke
 ```
 
-## 5. Go live — the nginx vhost flip  ⚠️ "ship it" step
+## 5. Go live — the nginx vhost flip ⚠️ "ship it" step
 
 This is the one public-facing, deliberately-gated action. It makes Mirsal
 reachable at `https://project4.system.mow.gov.sy`. Only do it when launch is
@@ -78,14 +78,14 @@ systemctl reload nginx
 curl -sI --resolve project4.system.mow.gov.sy:443:127.0.0.1 https://project4.system.mow.gov.sy/api/health
 ```
 
-Expect `HTTP/1.1 200`. If project4 is unreachable *externally* afterwards, ask
+Expect `HTTP/1.1 200`. If project4 is unreachable _externally_ afterwards, ask
 IT to confirm the project4 gateway route is open (it was proven public by the
 earlier ODK deploy).
 
 Rollback (instant): `rm /etc/nginx/sites-enabled/mirsal && systemctl reload nginx`
 → project4 falls back to the nginx default; the container keeps running untouched.
 
-## 6. Backups  ⚠️ cron install is part of "ship it"
+## 6. Backups ⚠️ cron install is part of "ship it"
 
 `deploy/backup-mirsal.sh` snapshots blob storage + a consistent SQLite dump into
 `data/backups/` (keeps the newest 2 of each; no downtime). Off-box shipping is

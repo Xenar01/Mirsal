@@ -100,7 +100,7 @@ const patchShareSchema = z
       v.expires_at !== undefined ||
       v.download_limit !== undefined ||
       v.on_exhaust !== undefined,
-    { message: 'at least one field is required' }
+    { message: 'at least one field is required' },
   );
 
 /**
@@ -137,8 +137,7 @@ export default async function sharesRoutes(app: FastifyInstance, deps: SharesRou
     // to the owner so a foreign/missing node reveals nothing here (it falls
     // through to createShare, which throws -> generic 404 below).
     const node = db.prepare('SELECT owner_id, kind FROM nodes WHERE id = @nodeId').get({ nodeId }) as
-      | { owner_id: number; kind: string }
-      | undefined;
+      { owner_id: number; kind: string } | undefined;
     if (node && node.owner_id === uid && (node.kind === 'root' || node.kind === 'trash')) {
       reply.code(400).send({ code: 'unshareable' });
       return;
@@ -175,7 +174,7 @@ export default async function sharesRoutes(app: FastifyInstance, deps: SharesRou
     if (parsed.data.download_limit !== undefined) {
       const row = db
         .prepare(
-          'SELECT n.kind AS kind FROM shares s JOIN nodes n ON n.id = s.node_id WHERE s.id = @id AND s.owner_id = @uid'
+          'SELECT n.kind AS kind FROM shares s JOIN nodes n ON n.id = s.node_id WHERE s.id = @id AND s.owner_id = @uid',
         )
         .get({ id, uid }) as { kind: string } | undefined;
       if (!row) {
@@ -217,8 +216,7 @@ export default async function sharesRoutes(app: FastifyInstance, deps: SharesRou
     // and the delete are both synchronous with no await between them, so no
     // other request can interleave — the check is effectively atomic.
     const existing = db.prepare('SELECT id FROM shares WHERE id = @id AND owner_id = @uid').get({ id, uid }) as
-      | { id: number }
-      | undefined;
+      { id: number } | undefined;
     if (!existing) {
       reply.code(404).send({ error: 'not_found' });
       return;

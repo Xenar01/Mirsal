@@ -19,6 +19,7 @@ dependency updates. This is the foundation the rest of the roadmap rides on.
 ## Scope
 
 **In (this slice — "core gate first"):**
+
 1. ESLint (new) — flat config, zero-violation baseline.
 2. Prettier (new) — one isolated reformat commit.
 3. Root npm scripts as single CI entry points.
@@ -28,6 +29,7 @@ dependency updates. This is the foundation the rest of the roadmap rides on.
 7. Contributor niceties (`.nvmrc`).
 
 **Explicitly deferred to a follow-on slice (Phase 1b):**
+
 - Playwright browser E2E in CI.
 - CodeQL SAST.
 - Signed GHCR image publish + SBOM (premature while the repo is private; belongs with
@@ -40,6 +42,7 @@ docs site (Phase 5).
 ## Design
 
 ### 1. ESLint — `eslint.config.js` (flat, repo root)
+
 - One root flat config covering both workspaces, file-scoped:
   - Base: `typescript-eslint` **recommended** (non-type-checked — faster CI, lower churn
     than `recommended-type-checked`).
@@ -53,6 +56,7 @@ docs site (Phase 5).
   hand → **zero violations** so CI can gate. Test files included (they are real code).
 
 ### 2. Prettier
+
 - `.prettierrc` (project defaults: single quotes, semicolons, trailing commas, print
   width matching current style ~120) + `.prettierignore` (dist, node_modules, coverage,
   lockfiles, generated assets).
@@ -63,7 +67,9 @@ docs site (Phase 5).
 - CI runs `prettier --check .`.
 
 ### 3. Root npm scripts
+
 Currently root `package.json` has only `test`. Add:
+
 - `lint` → `eslint .`
 - `lint:fix` → `eslint . --fix`
 - `format` → `prettier --write .`
@@ -73,6 +79,7 @@ Currently root `package.json` has only `test`. Add:
 - (`test` already fans out to both workspaces.)
 
 ### 4. GitHub Actions — `.github/workflows/ci.yml`
+
 - **Triggers:** `pull_request` and `push` to `main`.
 - **Runtime:** `ubuntu-latest`, Node 20 (`actions/setup-node` with `cache: npm`),
   `npm ci` at root (installs both workspaces).
@@ -85,6 +92,7 @@ Currently root `package.json` has only `test`. Add:
   logically (each job installs its own deps — simplest, no artifact passing for this size).
 
 ### 5. Secret scanning — gitleaks
+
 - gitleaks GitHub Action scanning the current tree + PR commits.
 - `.gitleaks.toml` allowlist for **obvious test fixtures** (e.g. `'a'.repeat(32)`,
   `'b'.repeat(32)`, argon test params, seeded fake tokens) to avoid false positives.
@@ -94,28 +102,32 @@ Currently root `package.json` has only `test`. Add:
   fixed here.
 
 ### 6. Dependabot — `.github/dependabot.yml`
+
 - Config-only (no CI cost). Ecosystems: `npm` (root, workspaces-aware), `github-actions`,
   `docker` (base image). Weekly schedule, grouped minor/patch PRs to limit noise.
 - Chosen over Renovate: native to GitHub, zero extra service, simpler for a self-host repo.
 
 ### 7. Contributor niceties
+
 - `.nvmrc` pinning Node 20 for consistent local toolchains.
 
 ## Build & verification approach
+
 - Branch: `chore/phase1-ci` (off `main` @ current HEAD).
 - Commit sequence, each independently green:
   1. `chore: add ESLint flat config + zero-violation baseline` (+ root lint scripts).
   2. `style: adopt Prettier (bulk reformat)` (isolated; SHA → `.git-blame-ignore-revs`)
-     + `eslint-config-prettier` + format scripts.
+     - `eslint-config-prettier` + format scripts.
   3. `ci: GitHub Actions gate + gitleaks + Dependabot` (+ `.nvmrc`).
 - **Local gates before pushing:** `npm run lint`, `npm run format:check`, `npm run
-  typecheck`, `npm test`, `npm run build`, and `docker compose build` all green.
+typecheck`, `npm test`, `npm run build`, and `docker compose build` all green.
 - **Push branch + open a PR** so Actions actually runs; the real proof is watching the CI
   run go **green** on GitHub (`gh pr checks` / Actions UI).
 - **Phase-pause:** stop at the green PR for user review before merging to `main`
   (per the save-often / phase-pause working agreement).
 
 ## Success criteria
+
 - CI runs on the PR and is green: lint, format:check, typecheck, tests (429 + 238),
   build, docker build, and gitleaks all pass.
 - `npm run lint` reports **zero** violations on the tree.
@@ -124,6 +136,7 @@ Currently root `package.json` has only `test`. Add:
 - No production/runtime code behavior changes (this slice is tooling + formatting only).
 
 ## Risks / open items
+
 - **Lint churn size is unknown until the ruleset runs.** Pragmatic (non-type-checked)
   keeps it moderate, but if a rule proves noisy on existing code we down-tune it to a
   warning (documented) rather than mass-editing logic. No behavioral code changes.

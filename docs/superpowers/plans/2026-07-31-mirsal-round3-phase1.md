@@ -40,10 +40,12 @@
 ## Task 1: (#3 server) `/me` and `/login` expose `quotaBytes` + `usedBytes`
 
 **Files:**
+
 - Modify: `server/src/routes/auth.ts`
 - Test: `server/test/routes/auth.test.ts`
 
 **Interfaces:**
+
 - Produces: `PublicUser` now includes `quotaBytes: number | null` and `usedBytes: number` in the JSON returned by `POST /api/auth/login` (`{ user }`) and `GET /api/auth/me`. Task 2 (web) consumes these.
 
 - [ ] **Step 1: Write the failing tests** — append to `server/test/routes/auth.test.ts`:
@@ -84,22 +86,25 @@ Expected: FAIL — `quotaBytes`/`usedBytes` are `undefined` on the returned user
 - [ ] **Step 3: Implement** in `server/src/routes/auth.ts`:
 
 (a) Extend the `UserRow` interface (currently id/username/password_hash/role/is_active/must_change_password) with:
+
 ```ts
-  quota_bytes: number | null;
-  used_bytes: number;
+quota_bytes: number | null;
+used_bytes: number;
 ```
 
 (b) Extend `PublicUser` with:
+
 ```ts
-  quotaBytes: number | null;
-  usedBytes: number;
+quotaBytes: number | null;
+usedBytes: number;
 ```
 
 (c) Update `toPublicUser` — widen the `Pick` and return the two fields:
+
 ```ts
 function toPublicUser(
   row: Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password' | 'quota_bytes' | 'used_bytes'>,
-  rootNodeId: number
+  rootNodeId: number,
 ): PublicUser {
   return {
     id: row.id,
@@ -114,18 +119,19 @@ function toPublicUser(
 ```
 
 (d) Add the two columns to the login SELECT:
+
 ```ts
 `SELECT id, username, password_hash, role, is_active, must_change_password, quota_bytes, used_bytes
- FROM users WHERE username = ?`
+ FROM users WHERE username = ?`;
 ```
 
 (e) Add them to the `/me` SELECT and widen its type annotation:
+
 ```ts
 const row = db
   .prepare(`SELECT id, username, role, must_change_password, quota_bytes, used_bytes FROM users WHERE id = ?`)
   .get(req.user!.id) as
-  | Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password' | 'quota_bytes' | 'used_bytes'>
-  | undefined;
+  Pick<UserRow, 'id' | 'username' | 'role' | 'must_change_password' | 'quota_bytes' | 'used_bytes'> | undefined;
 ```
 
 - [ ] **Step 4: Run to verify pass**
@@ -145,10 +151,12 @@ git commit -m "fix(server): expose quotaBytes+usedBytes on /me and /login (#3)"
 ## Task 2: (#3 web) StorageMeter shows the quota bar
 
 **Files:**
+
 - Modify: `web/src/features/auth/auth-context.tsx`, `web/src/features/dashboard/StorageMeter.tsx`
 - Test: `web/test/storage-meter.test.tsx` (create)
 
 **Interfaces:**
+
 - Consumes: `useAuth().user.quotaBytes` (number|null) and `.usedBytes` (number) from Task 1.
 
 - [ ] **Step 1: Write the failing test** — create `web/test/storage-meter.test.tsx`:
@@ -176,7 +184,7 @@ function renderMeter() {
   return render(
     <I18nextProvider i18n={i18n}>
       <StorageMeter />
-    </I18nextProvider>
+    </I18nextProvider>,
   );
 }
 
@@ -186,7 +194,15 @@ afterEach(() => {
 
 describe('StorageMeter', () => {
   test('a user WITH a quota shows a progress bar (25%) and NOT the no-quota note', () => {
-    mockUser = { id: 1, username: 'u', role: 'user', mustChangePassword: false, rootNodeId: 2, quotaBytes: 1000, usedBytes: 250 };
+    mockUser = {
+      id: 1,
+      username: 'u',
+      role: 'user',
+      mustChangePassword: false,
+      rootNodeId: 2,
+      quotaBytes: 1000,
+      usedBytes: 250,
+    };
     renderMeter();
     const bar = screen.getByRole('progressbar');
     expect(bar).toHaveAttribute('aria-valuenow', '25');
@@ -194,7 +210,15 @@ describe('StorageMeter', () => {
   });
 
   test('a user with NO quota shows the no-quota note and no progress bar', () => {
-    mockUser = { id: 1, username: 'u', role: 'user', mustChangePassword: false, rootNodeId: 2, quotaBytes: null, usedBytes: 250 };
+    mockUser = {
+      id: 1,
+      username: 'u',
+      role: 'user',
+      mustChangePassword: false,
+      rootNodeId: 2,
+      quotaBytes: null,
+      usedBytes: 250,
+    };
     renderMeter();
     expect(screen.getByText(i18n.t('storage.noQuota'))).toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
@@ -210,12 +234,14 @@ Expected: FAIL — current StorageMeter renders no `progressbar` and reads no `u
 - [ ] **Step 3: Implement**
 
 (a) `web/src/features/auth/auth-context.tsx` — add to `PublicUser`:
+
 ```ts
-  quotaBytes: number | null;
-  usedBytes: number;
+quotaBytes: number | null;
+usedBytes: number;
 ```
 
 (b) Replace `web/src/features/dashboard/StorageMeter.tsx` entirely with:
+
 ```tsx
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../auth/auth-context';
@@ -248,13 +274,17 @@ export default function StorageMeter() {
         <div className="flex items-center justify-between gap-3">
           <dt className="text-ink-2">{t('storage.used')}</dt>
           <dd className="text-ink">
-            <bdi dir="ltr" className="font-mono">{formatBytes(usedBytes)}</bdi>
+            <bdi dir="ltr" className="font-mono">
+              {formatBytes(usedBytes)}
+            </bdi>
           </dd>
         </div>
         <div className="flex items-center justify-between gap-3">
           <dt className="text-ink-2">{t('storage.trash')}</dt>
           <dd className="text-ink-2">
-            <bdi dir="ltr" className="font-mono">{formatBytes(trashBytes)}</bdi>
+            <bdi dir="ltr" className="font-mono">
+              {formatBytes(trashBytes)}
+            </bdi>
           </dd>
         </div>
       </dl>
@@ -282,6 +312,7 @@ export default function StorageMeter() {
   );
 }
 ```
+
 Note: `bg-clay`/`bg-brass`/`bg-paper`/`border-line` are existing theme tokens (see `web/src/features/admin/UsersTable.tsx` `UsageCell` ~lines 141-157 for the same bar recipe). If any token is missing at build time, mirror `UsageCell`'s exact classes.
 
 - [ ] **Step 4: Run to verify pass**
@@ -306,15 +337,18 @@ git commit -m "fix(web): show real quota bar on the user dashboard (#3)"
 ## Task 3: (#9 server) Deactivated login → 403 `account_deactivated` (correct password only)
 
 **Files:**
+
 - Modify: `server/src/routes/auth.ts` (login handler)
 - Test: `server/test/routes/auth.test.ts` (rewrite one existing test + add one)
 
 **Interfaces:**
+
 - Produces: `POST /api/auth/login` returns `403 { error: 'account_deactivated' }` when username+password are BOTH correct and the account is inactive; every other failure stays `401 { error: 'invalid_credentials' }`. Task 4 (web) consumes the 403.
 
 - [ ] **Step 1: Update the existing inactive test + add the wrong-password case** in `server/test/routes/auth.test.ts`.
 
 Replace the existing test titled `login: inactive user -> 401 invalid_credentials (generic, not a distinct reason)` with:
+
 ```ts
 test('login: inactive user with the CORRECT password -> 403 account_deactivated', async () => {
   const built = await makeApp();
@@ -345,6 +379,7 @@ test('login: inactive user with a WRONG password -> 401 generic (no deactivation
   expect(res.json()).toEqual({ error: 'invalid_credentials' });
 });
 ```
+
 (Leave the `unknown username -> 401` and `wrong password -> 401` tests as-is — they must stay 401.)
 
 - [ ] **Step 2: Run to verify the updated test fails**
@@ -353,16 +388,14 @@ Run: `cd server && npx vitest run test/routes/auth.test.ts`
 Expected: FAIL — the correct-password inactive case currently returns 401, not 403.
 
 - [ ] **Step 3: Implement** — replace the verify+branch block in the `/api/auth/login` handler (currently the `isUsable` / `verified` / `if (!isUsable || !verified)` section) with:
+
 ```ts
 const hasUser = !!row;
 // Constant-work anti-enumeration: exactly one real argon2 verify per attempt.
 // Use the REAL hash whenever the row exists (active OR inactive) so a correct
 // password on an inactive account is detectable; the dummy hash only when
 // there is no such user.
-const verified = await passwordService.verifyPassword(
-  hasUser ? row!.password_hash : dummyHash,
-  password
-);
+const verified = await passwordService.verifyPassword(hasUser ? row!.password_hash : dummyHash, password);
 
 // Disclose "deactivated" ONLY to a fully-correct username+password — a wrong
 // password on an inactive account still gets the generic 401, so no one can
@@ -379,6 +412,7 @@ if (!hasUser || !verified || row!.is_active !== 1) {
   return;
 }
 ```
+
 The success path below is unchanged (it already uses `row!` and `toPublicUser`).
 
 - [ ] **Step 4: Run to verify pass**
@@ -398,10 +432,12 @@ git commit -m "fix(server): deactivated login returns account_deactivated on cor
 ## Task 4: (#9 web) LoginPage shows the deactivated message
 
 **Files:**
+
 - Modify: `web/src/features/auth/LoginPage.tsx`, `web/src/i18n/ar.json`
 - Test: `web/test/login.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `403 { error: 'account_deactivated' }` from Task 3 (`apiPost` throws `ApiError` with `.status === 403`).
 
 - [ ] **Step 1: Write the failing test** — append to `web/test/login.test.tsx`:
@@ -435,12 +471,15 @@ Expected: FAIL — no `login.error.deactivated` key / a 403 falls through to the
 - [ ] **Step 3: Implement**
 
 (a) `web/src/i18n/ar.json` — add to the `login.error` object:
+
 ```json
 "deactivated": "هذا الحساب معطَّل. تواصل مع المسؤول."
 ```
+
 (Add a comma after the preceding `"generic"` line so the JSON stays valid.)
 
 (b) `web/src/features/auth/LoginPage.tsx` — in the `catch`, add a 403 branch before the generic `else`:
+
 ```tsx
 } else if (err instanceof ApiError && err.status === 403) {
   setError(t('login.error.deactivated'));
@@ -466,13 +505,16 @@ git commit -m "fix(web): show a distinct 'account deactivated' login message (#9
 ## Task 5: (#10 server) Folder shares block `/list` and per-file `/download`
 
 **Files:**
+
 - Modify: `server/src/routes/public.ts`
 - Test: `server/test/routes/public.test.ts` (rewrite the folder-share test)
 
 **Interfaces:**
+
 - Produces: for a share whose node `kind === 'folder'`, `GET /api/public/:token/list` and BOTH `GET`/`POST /api/public/:token/download` (with or without `?node=`) return `403 { error: 'forbidden' }`. `GET /api/public/:token/zip` and `GET /api/public/:token` (meta) are unchanged. File shares are unaffected.
 
 - [ ] **Step 1: Rewrite the folder-share test** — in `server/test/routes/public.test.ts`, replace the whole test titled `folder share: list children, download a descendant; sibling-outside + moved-out -> 403 forbidden` with:
+
 ```ts
 test('folder share hides contents: /list and per-file /download are 403; only /zip + meta work (#10)', async () => {
   const built = await makeApp();
@@ -481,7 +523,11 @@ test('folder share hides contents: /list and per-file /download are 403; only /z
   const rootId = rootIdFor(uid);
 
   const folder = await makeFolder(built, session, csrf, rootId, 'Album');
-  const inside = await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'inside.txt', data: Buffer.from('IN') });
+  const inside = await uploadFile(built, session, csrf, {
+    parentId: folder.id,
+    filename: 'inside.txt',
+    data: Buffer.from('IN'),
+  });
   const share = await createShare(built, session, csrf, { node_id: folder.id });
 
   // meta still works — the recipient sees the folder name + isFolder.
@@ -508,6 +554,7 @@ test('folder share hides contents: /list and per-file /download are 403; only /z
   expect(zipRes.statusCode).toBe(200);
 });
 ```
+
 (Leave the `folder share: /zip streams a zip...` test and all file-share tests unchanged.)
 
 - [ ] **Step 2: Run to verify it fails**
@@ -518,11 +565,11 @@ Expected: FAIL — `/list` currently 200 and per-file `/download` currently 200.
 - [ ] **Step 3: Implement** in `server/src/routes/public.ts`.
 
 (a) In the `GET /api/public/:token/list` handler, after `if (!requireUnlocked(req, reply, share)) return;` and before the `listPublic` call, add:
+
 ```ts
 // #10: a folder share exposes ONLY the ZIP — its contents are never listed.
 const listNode = db.prepare('SELECT kind FROM nodes WHERE id = @id').get({ id: share.node_id }) as
-  | { kind: string }
-  | undefined;
+  { kind: string } | undefined;
 if (listNode?.kind === 'folder') {
   reply.code(403).send({ error: 'forbidden' });
   return;
@@ -530,12 +577,12 @@ if (listNode?.kind === 'folder') {
 ```
 
 (b) In `resolveDownloadableFile`, right after the `if (!share.allow_download) { ... }` block (before the `resolveInSubtree` call), add:
+
 ```ts
 // #10: a folder share allows no per-file download (with or without ?node=) —
 // only the ZIP. Constant-shape 403, identical to an out-of-subtree rejection.
 const shareNode = db.prepare('SELECT kind FROM nodes WHERE id = @id').get({ id: share.node_id }) as
-  | { kind: string }
-  | undefined;
+  { kind: string } | undefined;
 if (shareNode?.kind === 'folder') {
   reply.code(403).send({ error: 'forbidden' });
   return null;
@@ -559,13 +606,16 @@ git commit -m "fix(server): folder shares expose ZIP only — block /list and pe
 ## Task 6: (#10 web) PublicFolder shows name + ZIP only
 
 **Files:**
+
 - Modify: `web/src/features/public/PublicFolder.tsx`
 - Test: `web/test/public.test.tsx` (add a folder test)
 
 **Interfaces:**
+
 - Consumes: `PublicMeta` (`name`, `isFolder`, `allow_download`) + `zipUrl(token)`. No longer calls `usePublicList`.
 
 - [ ] **Step 1: Write the failing test** — append inside the `describe('SealedDispatch — public share page', ...)` block in `web/test/public.test.tsx`:
+
 ```tsx
 test('a folder share shows the name + Download-all-as-ZIP and NO file listing (#10)', async () => {
   setNavigatorLanguage('en-US');
@@ -601,6 +651,7 @@ Run: `cd web && npx vitest run test/public.test.tsx`
 Expected: FAIL — current PublicFolder calls `/list` and renders a listing table.
 
 - [ ] **Step 3: Implement** — replace `web/src/features/public/PublicFolder.tsx` entirely with:
+
 ```tsx
 import { useTranslation } from 'react-i18next';
 import { SealHeader } from './DispatchFrame';
@@ -650,22 +701,26 @@ git commit -m "fix(web): folder recipient page shows name + ZIP only, no listing
 ## Task 7: (#11 server) Unlock cookie → session cookie, 600s server lifetime
 
 **Files:**
+
 - Modify: `server/src/routes/public.ts`
 - Test: `server/test/routes/public.test.ts` (update the lifetime test + add a session-cookie test)
 
 **Interfaces:**
+
 - Produces: the `mirsal_unlock` cookie is a session cookie (no `Max-Age`/`Expires`) with a server-enforced 600s lifetime.
 
 - [ ] **Step 1: Update the lifetime test + add a session-cookie test** in `server/test/routes/public.test.ts`.
 
 In the test `unlock cookie lifetime is enforced server-side, not only via the Max-Age attribute`, change the clock-advance line and its comment from 1800 to 600:
+
 ```ts
-  // Advance the server's own clock past the 600s lifetime and confirm the SAME
-  // cookie is now rejected (expiry enforced by the route, not the client Max-Age).
-  mockNow = NOW + 600 * 1000 + 1;
+// Advance the server's own clock past the 600s lifetime and confirm the SAME
+// cookie is now rejected (expiry enforced by the route, not the client Max-Age).
+mockNow = NOW + 600 * 1000 + 1;
 ```
 
 Add a new test (next to it):
+
 ```ts
 test('unlock cookie is a session cookie (no Max-Age / Expires) so it dies with the browser session (#11)', async () => {
   const built = await makeApp();
@@ -699,6 +754,7 @@ Expected: FAIL — the cookie currently carries `Max-Age=1800`; the lifetime tes
 - [ ] **Step 3: Implement** in `server/src/routes/public.ts`:
 
 (a) Change the constant + its comment:
+
 ```ts
 /** Unlock cookie server-side lifetime (10 min). A short bridge only — the client re-prompts on every fresh open (#11); this bounds the transport window. */
 const UNLOCK_COOKIE_MAX_AGE_S = 600;
@@ -723,13 +779,16 @@ git commit -m "fix(server): unlock cookie is a session cookie w/ 600s lifetime (
 ## Task 8: (#11 web) Meta omits the unlock cookie until unlocked in-session
 
 **Files:**
+
 - Modify: `web/src/features/public/api.ts`, `web/src/features/public/queries.ts`, `web/src/features/public/SealedDispatch.tsx`
 - Test: `web/test/public.test.tsx` (add a re-prompt test)
 
 **Interfaces:**
+
 - Produces: `fetchPublicMeta(token, opts?: { reveal?: boolean })` — `credentials: 'omit'` unless `reveal`. `usePublicMeta(token, reveal: boolean)`. SealedDispatch passes `revealed` (in-memory, false on every fresh mount) so a password share always shows the gate on open, then flips `revealed` true on unlock.
 
 - [ ] **Step 1: Write the failing test** — append inside the `describe('SealedDispatch — public share page', ...)` block in `web/test/public.test.tsx`:
+
 ```tsx
 test('a password share re-prompts on every fresh open even if the unlock cookie is still valid (#11)', async () => {
   setNavigatorLanguage('en-US');
@@ -770,6 +829,7 @@ Expected: FAIL — current meta fetch uses `credentials:'include'`, so the "vali
 - [ ] **Step 3: Implement**
 
 (a) `web/src/features/public/api.ts` — change `fetchPublicMeta`'s signature + the fetch `credentials`:
+
 ```ts
 export async function fetchPublicMeta(
   token: string,
@@ -787,6 +847,7 @@ export async function fetchPublicMeta(
 ```
 
 (b) `web/src/features/public/queries.ts` — thread `reveal` into the key + query fn:
+
 ```ts
 export const publicMetaKey = (token: string, reveal: boolean) =>
   ['public', token, 'meta', reveal ? 'reveal' : 'gate'] as const;
@@ -801,12 +862,16 @@ export function usePublicMeta(token: string, reveal: boolean) {
 ```
 
 (c) `web/src/features/public/SealedDispatch.tsx`:
+
 - Import `useState` is already imported. Add the reveal state and pass it:
+
 ```tsx
-  const [revealed, setRevealed] = useState(false);
-  const meta = usePublicMeta(token, revealed);
+const [revealed, setRevealed] = useState(false);
+const meta = usePublicMeta(token, revealed);
 ```
+
 - Change the `'password'` case so unlocking flips `revealed` (and refetches the current query as a fallback for a re-unlock while already revealed):
+
 ```tsx
       case 'password':
         return (

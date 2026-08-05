@@ -1,12 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { apiGet, apiPost, ApiError } from '../../lib/api';
 
 /** The user shape the server returns from `/api/auth/login` and `/api/auth/me`. */
@@ -114,11 +106,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refresh }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={{ user, loading, login, logout, refresh }}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextValue {

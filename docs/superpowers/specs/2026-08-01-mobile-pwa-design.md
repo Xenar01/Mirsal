@@ -16,7 +16,7 @@ The audit found essentially zero responsive design today: every data table is a 
 2. **Table → card via the two-layout pattern, never in-place mutation.** For each data table:
    - wrap the existing `<table>`'s scroll container in `hidden md:block` (desktop keeps the table verbatim),
    - add a sibling `md:hidden` **card list** rendering the same rows from the same data/query.
-   Extract the per-row derived values (labels, guards, handlers) so both layouts call the same logic — no duplicated business logic, only two presentations. This preserves all existing table tests (they run in jsdom which has no viewport, so both layouts render in tests; assert card presence via a `data-testid`).
+     Extract the per-row derived values (labels, guards, handlers) so both layouts call the same logic — no duplicated business logic, only two presentations. This preserves all existing table tests (they run in jsdom which has no viewport, so both layouts render in tests; assert card presence via a `data-testid`).
 3. **Card anatomy** (reuse existing tokens — `rounded-[10px] border border-line bg-surface`):
    - **Header row:** the primary identity — file/folder name + kind icon, or username — with `min-w-0` + `truncate` so long names never blow out the width. A trailing status/role chip may sit inline-end.
    - **Meta line:** secondary fields (size · date, or role · state · usage) in `text-xs text-ink-2`, wrapping.
@@ -56,12 +56,14 @@ The audit found essentially zero responsive design today: every data table is a 
 - **V — Verification:** full `npm test` + `npm run typecheck` both workspaces green; `npm run build` (web) succeeds and emits manifest+sw; headless-render `/login`, `/` (dashboard), and the admin users screen at a 390×844 viewport to visually confirm the mobile layouts; then merge to main.
 
 ## Acceptance
+
 - Every existing test still passes; new smoke tests assert the responsive card lists exist and the touch-target/nav changes are present.
 - `npm run build` (web) produces `dist/manifest.webmanifest`, `dist/sw.js` (with `/api/` + `/s/` in the navigateFallback denylist), and the icon set; `index.html` links the manifest + theme-color pair.
 - No change to server, routes, API, or the CSP directives.
 - Desktop (`≥ md`) layout and behaviour are unchanged (the table blocks are untouched, only wrapped).
 
 ## Out of scope (noted, not built)
+
 - Kebab/overflow action menus (wrapped chips used instead for v1).
 - Fixed bottom tab bar (horizontal pill strip used instead).
 - Offline-first data caching (the SW is app-shell + static only; all data stays network-live by design).

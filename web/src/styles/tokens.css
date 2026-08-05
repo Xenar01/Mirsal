@@ -12,21 +12,21 @@
 
 :root {
   /* Ink & Brass — light (§4.1) */
-  --paper: #F4F5F3;
-  --surface: #FFFFFF;
-  --ink: #0F1C2E;
-  --ink-2: #45566A;
-  --line: #E2E5E1;
+  --paper: #f4f5f3;
+  --surface: #ffffff;
+  --ink: #0f1c2e;
+  --ink-2: #45566a;
+  --line: #e2e5e1;
 
-  --brass: #C0913C;
-  --brass-ink: #0F1C2E;
-  --brass-ring: #7A5A20;
+  --brass: #c0913c;
+  --brass-ink: #0f1c2e;
+  --brass-ring: #7a5a20;
 
-  --teal: #0E5A63;
-  --emerald: #24694B;
-  --clay: #A13D28;
+  --teal: #0e5a63;
+  --emerald: #24694b;
+  --clay: #a13d28;
 
-  --focus: #0E5A63;
+  --focus: #0e5a63;
 
   /* Type scale (§4.2), rem.
    *
@@ -57,70 +57,70 @@
   /* Font families (§4.2) — self-hosted via @fontsource, see styles/fonts.ts.
      Cairo is the primary Arabic face for both display and body (the common,
      familiar Arabic-web look); IBM Plex Mono stays for data/tokens. */
-  --font-display: "Cairo", system-ui, sans-serif;
-  --font-body: "Cairo", system-ui, sans-serif;
-  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-display: 'Cairo', system-ui, sans-serif;
+  --font-body: 'Cairo', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
     /* Ink & Brass — dark, OS preference (§4.1) */
-    --paper: #0C1622;
-    --surface: #12212F;
-    --ink: #EAF0F2;
-    --ink-2: #93A4B5;
-    --line: #23384B;
+    --paper: #0c1622;
+    --surface: #12212f;
+    --ink: #eaf0f2;
+    --ink-2: #93a4b5;
+    --line: #23384b;
 
-    --brass: #D2A24C;
-    --brass-ink: #0C1622;
+    --brass: #d2a24c;
+    --brass-ink: #0c1622;
     /* Spec-silent for dark (see task-I1-report.md): a lighter brass that
        keeps >=3:1 non-text contrast on dark paper/surface. */
-    --brass-ring: #E3B667;
+    --brass-ring: #e3b667;
 
-    --teal: #6FC5CE;
-    --emerald: #5FBF92;
-    --clay: #E08A74;
+    --teal: #6fc5ce;
+    --emerald: #5fbf92;
+    --clay: #e08a74;
 
     /* Spec-silent for dark (see task-I1-report.md): reuses dark --teal. */
-    --focus: #6FC5CE;
+    --focus: #6fc5ce;
   }
 }
 
-:root[data-theme="dark"] {
+:root[data-theme='dark'] {
   /* Ink & Brass — dark, explicit theme-toggle override (§4.1) */
-  --paper: #0C1622;
-  --surface: #12212F;
-  --ink: #EAF0F2;
-  --ink-2: #93A4B5;
-  --line: #23384B;
+  --paper: #0c1622;
+  --surface: #12212f;
+  --ink: #eaf0f2;
+  --ink-2: #93a4b5;
+  --line: #23384b;
 
-  --brass: #D2A24C;
-  --brass-ink: #0C1622;
-  --brass-ring: #E3B667;
+  --brass: #d2a24c;
+  --brass-ink: #0c1622;
+  --brass-ring: #e3b667;
 
-  --teal: #6FC5CE;
-  --emerald: #5FBF92;
-  --clay: #E08A74;
+  --teal: #6fc5ce;
+  --emerald: #5fbf92;
+  --clay: #e08a74;
 
-  --focus: #6FC5CE;
+  --focus: #6fc5ce;
 }
 
-:root[data-theme="light"] {
+:root[data-theme='light'] {
   /* Ink & Brass — light, explicit theme-toggle override (§4.1); wins over
      the prefers-color-scheme media query even when the OS is set to dark */
-  --paper: #F4F5F3;
-  --surface: #FFFFFF;
-  --ink: #0F1C2E;
-  --ink-2: #45566A;
-  --line: #E2E5E1;
+  --paper: #f4f5f3;
+  --surface: #ffffff;
+  --ink: #0f1c2e;
+  --ink-2: #45566a;
+  --line: #e2e5e1;
 
-  --brass: #C0913C;
-  --brass-ink: #0F1C2E;
-  --brass-ring: #7A5A20;
+  --brass: #c0913c;
+  --brass-ink: #0f1c2e;
+  --brass-ring: #7a5a20;
 
-  --teal: #0E5A63;
-  --emerald: #24694B;
-  --clay: #A13D28;
+  --teal: #0e5a63;
+  --emerald: #24694b;
+  --clay: #a13d28;
 
-  --focus: #0E5A63;
+  --focus: #0e5a63;
 }

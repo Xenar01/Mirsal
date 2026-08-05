@@ -90,7 +90,7 @@ async function seedUser(username: string, password: string): Promise<number> {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, quota_bytes, created_at, updated_at)
-       VALUES (?, ?, 'user', 1, 0, NULL, ?, ?)`
+       VALUES (?, ?, 'user', 1, 0, NULL, ?, ?)`,
     )
     .run(username, hash, NOW, NOW);
   return Number(info.lastInsertRowid);
@@ -100,7 +100,11 @@ function findCookie(cookies: InjectedCookie[], name: string): InjectedCookie | u
   return cookies.find((c) => c.name === name);
 }
 
-async function login(built: FastifyInstance, username: string, password: string): Promise<{ session: string; csrf: string }> {
+async function login(
+  built: FastifyInstance,
+  username: string,
+  password: string,
+): Promise<{ session: string; csrf: string }> {
   const res = await built.inject({ method: 'POST', url: '/api/auth/login', payload: { username, password } });
   const session = findCookie(res.cookies as InjectedCookie[], 'mirsal_session')!.value;
   const csrf = findCookie(res.cookies as InjectedCookie[], 'mirsal_csrf')!.value;
@@ -121,13 +125,19 @@ function seedFileNode(uid: number): number {
   const info = db!
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
-       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @now, @now)`
+       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @now, @now)`,
     )
     .run({ ownerId: uid, parentId: rootId, name: `f-${Math.random()}`, now: NOW });
   return Number(info.lastInsertRowid);
 }
 
-async function makeFolder(built: FastifyInstance, session: string, csrf: string, parentId: number, name: string): Promise<any> {
+async function makeFolder(
+  built: FastifyInstance,
+  session: string,
+  csrf: string,
+  parentId: number,
+  name: string,
+): Promise<any> {
   const res = await built.inject({
     method: 'POST',
     url: '/api/nodes/folder',
@@ -168,7 +178,9 @@ test('POST /api/shares on a folder -> 201 with public url + active status; GET l
   const listRes = await built.inject({ method: 'GET', url: '/api/shares', cookies: { mirsal_session: session } });
   expect(listRes.statusCode).toBe(200);
   const list = listRes.json() as Array<{ id: number; url: string; status: string }>;
-  expect(list.some((s) => s.id === share.id && s.status === 'active' && s.url.endsWith(`/s/${share.token}`))).toBe(true);
+  expect(list.some((s) => s.id === share.id && s.status === 'active' && s.url.endsWith(`/s/${share.token}`))).toBe(
+    true,
+  );
 });
 
 test('POST /api/shares refuses the synthetic root node -> 400 unshareable', async () => {
@@ -412,9 +424,7 @@ test('GET /api/shares exposes download-limit fields and an exhausted status', as
     })
   ).json();
 
-  db!
-    .prepare('UPDATE shares SET download_limit = 1, download_count = 1, is_active = 1 WHERE id = ?')
-    .run(share.id);
+  db!.prepare('UPDATE shares SET download_limit = 1, download_count = 1, is_active = 1 WHERE id = ?').run(share.id);
 
   const listRes = await built.inject({ method: 'GET', url: '/api/shares', cookies: { mirsal_session: session } });
   expect(listRes.statusCode).toBe(200);

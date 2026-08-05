@@ -1,5 +1,5 @@
-@import "tailwindcss";
-@import "./tokens.css";
+@import 'tailwindcss';
+@import './tokens.css';
 
 /* Map the raw §4.1 tokens onto Tailwind's theme with `@theme inline` so the
    generated utilities (bg-paper, text-ink, font-display, ...) emit
@@ -47,17 +47,17 @@ body {
     color-scheme: dark;
   }
 }
-:root[data-theme="dark"] {
+:root[data-theme='dark'] {
   color-scheme: dark;
 }
-:root[data-theme="light"] {
+:root[data-theme='light'] {
   color-scheme: light;
 }
 
 /* Make the datetime-local calendar-picker glyph clearly visible and on-brand:
    a brass tint, full opacity, pointer affordance. `color-scheme` above already
    flips its base light/dark; the brass tint gives it the app's accent. */
-input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+input[type='datetime-local']::-webkit-calendar-picker-indicator {
   cursor: pointer;
   opacity: 1;
   filter: invert(64%) sepia(38%) saturate(560%) hue-rotate(2deg) brightness(92%);

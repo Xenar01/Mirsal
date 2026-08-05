@@ -46,13 +46,5 @@ export default function Button({
     .filter(Boolean)
     .join(' ');
 
-  return (
-    <button
-      type={type}
-      disabled={disabled}
-      aria-disabled={disabled || undefined}
-      className={classes}
-      {...rest}
-    />
-  );
+  return <button type={type} disabled={disabled} aria-disabled={disabled || undefined} className={classes} {...rest} />;
 }

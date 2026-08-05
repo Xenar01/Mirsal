@@ -34,11 +34,7 @@ export interface GuardState {
  * the server's ordering: dropping the last active admin is necessarily a self
  * action, but reports as `last_admin`).
  */
-export function loweringGuard(
-  row: AdminUserDto,
-  users: AdminUserDto[],
-  currentUserId: number | undefined
-): GuardState {
+export function loweringGuard(row: AdminUserDto, users: AdminUserDto[], currentUserId: number | undefined): GuardState {
   if (onlyActiveAdminId(users) === row.id) {
     return { blocked: true, reasonKey: 'admin.guard.lastAdmin' };
   }

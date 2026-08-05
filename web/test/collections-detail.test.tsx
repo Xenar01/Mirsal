@@ -69,7 +69,7 @@ function stubFetch(map: Record<string, unknown>, opts: StubOptions = {}): Return
 function findCall(
   fetchMock: ReturnType<typeof vi.fn>,
   method: string,
-  path: string
+  path: string,
 ): [RequestInfo | URL, RequestInit | undefined] | undefined {
   return fetchMock.mock.calls.find(([u, init]) => {
     const p = String(u).split('?')[0];
@@ -134,7 +134,7 @@ function renderDetail(id = 7) {
           </ToastProvider>
         </AuthProvider>
       </I18nextProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -151,17 +151,13 @@ describe('CollectionDetail — roster + lifecycle (Collections Phase 3 / Task 5)
     renderDetail();
 
     expect(await screen.findByText('مسح ربعي')).toBeInTheDocument();
-    expect(
-      screen.getByText(i18n.t('collections.count', { responded: 1, total: 3 }))
-    ).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('collections.count', { responded: 1, total: 3 }))).toBeInTheDocument();
     expect(screen.getByText(i18n.t('status.active'))).toBeInTheDocument();
 
     // Responded department: name, file count, note.
     const responded = screen.getByTestId('department-responded-1');
     expect(within(responded).getByText('المالية')).toBeInTheDocument();
-    expect(
-      within(responded).getByText(i18n.t('collections.detail.files', { count: 2 }))
-    ).toBeInTheDocument();
+    expect(within(responded).getByText(i18n.t('collections.detail.files', { count: 2 }))).toBeInTheDocument();
     expect(within(responded).getByText('مرفق')).toBeInTheDocument();
 
     // Missing departments: name + remove button, one row each.
@@ -169,9 +165,7 @@ describe('CollectionDetail — roster + lifecycle (Collections Phase 3 / Task 5)
     const missing3 = screen.getByTestId('department-missing-3');
     expect(within(missing2).getByText('الموارد')).toBeInTheDocument();
     expect(within(missing3).getByText('الشؤون')).toBeInTheDocument();
-    expect(
-      screen.getAllByRole('button', { name: i18n.t('collections.detail.removeDepartment') })
-    ).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: i18n.t('collections.detail.removeDepartment') })).toHaveLength(2);
   });
 
   test('expanding a responded department lists its files (GET /api/nodes?parent=50) with download links', async () => {
@@ -229,7 +223,7 @@ describe('CollectionDetail — roster + lifecycle (Collections Phase 3 / Task 5)
   test('close toggles is_active via PATCH', async () => {
     const fetchMock = stubFetch(
       { '/api/collections/7': mkDetail(), '/api/auth/me': USER },
-      { overrides: { 'PATCH /api/collections/7': [200, mkDetail({ is_active: false, status: 'closed' })] } }
+      { overrides: { 'PATCH /api/collections/7': [200, mkDetail({ is_active: false, status: 'closed' })] } },
     );
     renderDetail();
 
@@ -246,21 +240,17 @@ describe('CollectionDetail — roster + lifecycle (Collections Phase 3 / Task 5)
   test('add department POSTs; duplicate (409) shows the duplicate toast', async () => {
     const fetchMock = stubFetch(
       { '/api/collections/7': mkDetail(), '/api/auth/me': USER },
-      { overrides: { 'POST /api/collections/7/departments': [409, { code: 'duplicate' }] } }
+      { overrides: { 'POST /api/collections/7/departments': [409, { code: 'duplicate' }] } },
     );
     renderDetail();
 
     const input = await screen.findByLabelText(i18n.t('collections.detail.addDepartmentLabel'));
     fireEvent.change(input, { target: { value: 'المالية' } });
     await act(async () => {
-      fireEvent.click(
-        screen.getByRole('button', { name: i18n.t('collections.detail.addDepartmentSubmit') })
-      );
+      fireEvent.click(screen.getByRole('button', { name: i18n.t('collections.detail.addDepartmentSubmit') }));
     });
 
-    expect(
-      await screen.findByText(i18n.t('collections.detail.duplicateDepartment'))
-    ).toBeInTheDocument();
+    expect(await screen.findByText(i18n.t('collections.detail.duplicateDepartment'))).toBeInTheDocument();
     const post = findCall(fetchMock, 'POST', '/api/collections/7/departments');
     expect(post).toBeDefined();
     expect(JSON.parse(String((post![1] as RequestInit).body))).toEqual({ name: 'المالية' });
@@ -269,15 +259,13 @@ describe('CollectionDetail — roster + lifecycle (Collections Phase 3 / Task 5)
   test('remove a missing department DELETEs it', async () => {
     const fetchMock = stubFetch(
       { '/api/collections/7': mkDetail(), '/api/auth/me': USER },
-      { overrides: { 'DELETE /api/collections/7/departments/2': [200, { ok: true }] } }
+      { overrides: { 'DELETE /api/collections/7/departments/2': [200, { ok: true }] } },
     );
     renderDetail();
 
     const row = await screen.findByTestId('department-missing-2');
     await act(async () => {
-      fireEvent.click(
-        within(row).getByRole('button', { name: i18n.t('collections.detail.removeDepartment') })
-      );
+      fireEvent.click(within(row).getByRole('button', { name: i18n.t('collections.detail.removeDepartment') }));
     });
 
     expect(findCall(fetchMock, 'DELETE', '/api/collections/7/departments/2')).toBeDefined();
@@ -286,15 +274,13 @@ describe('CollectionDetail — roster + lifecycle (Collections Phase 3 / Task 5)
   test('removing a department the server reports as answered shows the removeBlocked toast', async () => {
     stubFetch(
       { '/api/collections/7': mkDetail(), '/api/auth/me': USER },
-      { overrides: { 'DELETE /api/collections/7/departments/2': [409, { code: 'has_response' }] } }
+      { overrides: { 'DELETE /api/collections/7/departments/2': [409, { code: 'has_response' }] } },
     );
     renderDetail();
 
     const row = await screen.findByTestId('department-missing-2');
     await act(async () => {
-      fireEvent.click(
-        within(row).getByRole('button', { name: i18n.t('collections.detail.removeDepartment') })
-      );
+      fireEvent.click(within(row).getByRole('button', { name: i18n.t('collections.detail.removeDepartment') }));
     });
 
     expect(await screen.findByText(i18n.t('collections.detail.removeBlocked'))).toBeInTheDocument();
@@ -303,16 +289,14 @@ describe('CollectionDetail — roster + lifecycle (Collections Phase 3 / Task 5)
   test('delete collection confirms then navigates back to /collections', async () => {
     const fetchMock = stubFetch(
       { '/api/collections/7': mkDetail(), '/api/auth/me': USER },
-      { overrides: { 'DELETE /api/collections/7': [200, { ok: true }] } }
+      { overrides: { 'DELETE /api/collections/7': [200, { ok: true }] } },
     );
     renderDetail();
 
     fireEvent.click(await screen.findByRole('button', { name: i18n.t('collections.detail.delete') }));
     const dialog = await screen.findByRole('dialog');
     await act(async () => {
-      fireEvent.click(
-        within(dialog).getByRole('button', { name: i18n.t('collections.detail.deleteConfirm') })
-      );
+      fireEvent.click(within(dialog).getByRole('button', { name: i18n.t('collections.detail.deleteConfirm') }));
     });
 
     expect(await screen.findByTestId('collections-root')).toBeInTheDocument();

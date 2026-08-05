@@ -177,14 +177,8 @@ export default function DriveView() {
         />
       </div>
 
-      <NewFolderModal
-        open={newFolderOpen}
-        onClose={() => setNewFolderOpen(false)}
-        parentId={parentId}
-      />
-      {renameTarget && (
-        <RenameModal node={renameTarget} onClose={() => setRenameTarget(null)} />
-      )}
+      <NewFolderModal open={newFolderOpen} onClose={() => setNewFolderOpen(false)} parentId={parentId} />
+      {renameTarget && <RenameModal node={renameTarget} onClose={() => setRenameTarget(null)} />}
       {moveTarget && (
         <MoveModal
           node={moveTarget}
@@ -195,12 +189,8 @@ export default function DriveView() {
           siblings={children}
         />
       )}
-      {shareTarget && (
-        <ShareModal node={shareTarget} onClose={() => setShareTarget(null)} />
-      )}
-      {autoDeleteTarget && (
-        <AutoDeleteMenu node={autoDeleteTarget} onClose={() => setAutoDeleteTarget(null)} />
-      )}
+      {shareTarget && <ShareModal node={shareTarget} onClose={() => setShareTarget(null)} />}
+      {autoDeleteTarget && <AutoDeleteMenu node={autoDeleteTarget} onClose={() => setAutoDeleteTarget(null)} />}
       {bulkConfirmOpen && (
         <Modal
           open
@@ -217,9 +207,7 @@ export default function DriveView() {
             </>
           }
         >
-          <p className="font-body text-sm text-ink">
-            {t('dashboard.select.confirmBody', { n: selected.size })}
-          </p>
+          <p className="font-body text-sm text-ink">{t('dashboard.select.confirmBody', { n: selected.size })}</p>
         </Modal>
       )}
     </DashboardShell>
@@ -366,19 +354,31 @@ function Register({
                 />
               </th>
               <th aria-sort={ariaSort('name')} className="ps-3 pe-3 py-2 text-start font-medium">
-                <button type="button" onClick={() => onSortKey('name')} className="inline-flex items-center gap-1 hover:text-ink">
+                <button
+                  type="button"
+                  onClick={() => onSortKey('name')}
+                  className="inline-flex items-center gap-1 hover:text-ink"
+                >
                   {t('dashboard.col.name')}
                   {sort.key === 'name' && <span aria-hidden="true">{sort.dir === 'asc' ? '↑' : '↓'}</span>}
                 </button>
               </th>
               <th aria-sort={ariaSort('size')} className="ps-3 pe-3 py-2 text-start font-medium">
-                <button type="button" onClick={() => onSortKey('size')} className="inline-flex items-center gap-1 hover:text-ink">
+                <button
+                  type="button"
+                  onClick={() => onSortKey('size')}
+                  className="inline-flex items-center gap-1 hover:text-ink"
+                >
                   {t('dashboard.col.size')}
                   {sort.key === 'size' && <span aria-hidden="true">{sort.dir === 'asc' ? '↑' : '↓'}</span>}
                 </button>
               </th>
               <th aria-sort={ariaSort('date')} className="ps-3 pe-3 py-2 text-start font-medium">
-                <button type="button" onClick={() => onSortKey('date')} className="inline-flex items-center gap-1 hover:text-ink">
+                <button
+                  type="button"
+                  onClick={() => onSortKey('date')}
+                  className="inline-flex items-center gap-1 hover:text-ink"
+                >
                   {t('dashboard.col.date')}
                   {sort.key === 'date' && <span aria-hidden="true">{sort.dir === 'asc' ? '↑' : '↓'}</span>}
                 </button>
@@ -512,9 +512,7 @@ function ShareStatus({
       </div>
       {(share.has_password || share.expires_at != null || share.download_limit != null) && (
         <div className="flex flex-wrap items-center gap-1">
-          {share.has_password && (
-            <SharePill icon={<Lock size={12} />} label={t('dashboard.share.password')} />
-          )}
+          {share.has_password && <SharePill icon={<Lock size={12} />} label={t('dashboard.share.password')} />}
           {share.download_limit != null && (
             <SharePill
               icon={<DownloadArrow size={12} />}
@@ -633,16 +631,11 @@ function NodeRow({
 
   // Remaining downloads for a capped share (never below 0).
   const downloadsLeft =
-    share && share.download_limit != null
-      ? Math.max(0, share.download_limit - share.download_count)
-      : null;
+    share && share.download_limit != null ? Math.max(0, share.download_limit - share.download_count) : null;
 
   if (variant === 'card') {
     return (
-      <div
-        data-testid={`drive-card-${node.id}`}
-        className="rounded-[10px] border border-line bg-surface p-3"
-      >
+      <div data-testid={`drive-card-${node.id}`} className="rounded-[10px] border border-line bg-surface p-3">
         <div className="mb-2 flex items-center gap-2">
           <input
             type="checkbox"
@@ -661,9 +654,7 @@ function NodeRow({
             <span data-testid="icon-folder" className="inline-flex shrink-0 text-brass">
               <FolderDossier size={20} />
             </span>
-            <span className="min-w-0 flex-1 truncate font-medium text-ink group-hover:text-teal">
-              {node.name}
-            </span>
+            <span className="min-w-0 flex-1 truncate font-medium text-ink group-hover:text-teal">{node.name}</span>
             <span className="inline-flex shrink-0 text-ink-2 group-hover:text-teal">
               <ChevronEnter size={16} />
             </span>
@@ -784,15 +775,7 @@ function NodeRow({
 
 /* ── Modals: new folder / rename / move (all 409-aware) ───────────────── */
 
-function NewFolderModal({
-  open,
-  onClose,
-  parentId,
-}: {
-  open: boolean;
-  onClose: () => void;
-  parentId: number | null;
-}) {
+function NewFolderModal({ open, onClose, parentId }: { open: boolean; onClose: () => void; parentId: number | null }) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const create = useCreateFolder();
@@ -829,10 +812,10 @@ function NewFolderModal({
           setError(
             err instanceof ApiError && err.status === 409
               ? t('dashboard.folder.conflict')
-              : t('dashboard.folder.error')
+              : t('dashboard.folder.error'),
           );
         },
-      }
+      },
     );
   }
 
@@ -900,10 +883,10 @@ function RenameModal({ node, onClose }: { node: NodeDto; onClose: () => void }) 
           setError(
             err instanceof ApiError && err.status === 409
               ? t('dashboard.folder.conflict')
-              : t('dashboard.rename.error')
+              : t('dashboard.rename.error'),
           );
         },
-      }
+      },
     );
   }
 
@@ -998,12 +981,10 @@ function MoveModal({
         },
         onError: (err) => {
           setError(
-            err instanceof ApiError && err.status === 409
-              ? t('dashboard.folder.conflict')
-              : t('dashboard.move.error')
+            err instanceof ApiError && err.status === 409 ? t('dashboard.folder.conflict') : t('dashboard.move.error'),
           );
         },
-      }
+      },
     );
   }
 
@@ -1017,11 +998,7 @@ function MoveModal({
           <Button variant="secondary" onClick={onClose}>
             {t('common.cancel')}
           </Button>
-          <Button
-            variant="primary"
-            onClick={() => submit()}
-            disabled={move.isPending || targets.length === 0}
-          >
+          <Button variant="primary" onClick={() => submit()} disabled={move.isPending || targets.length === 0}>
             {t('dashboard.move.submit')}
           </Button>
         </>

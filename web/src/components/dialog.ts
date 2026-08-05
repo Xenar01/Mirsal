@@ -18,7 +18,7 @@ const FOCUSABLE_SELECTOR =
 
 export function focusableWithin(panel: HTMLElement): HTMLElement[] {
   return Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
-    (el) => el.getAttribute('aria-hidden') !== 'true'
+    (el) => el.getAttribute('aria-hidden') !== 'true',
   );
 }
 
@@ -44,7 +44,7 @@ function isTopDialog(id: string): boolean {
 export function useDialog<T extends HTMLElement>(
   open: boolean,
   onClose: () => void,
-  panelRef: RefObject<T | null>
+  panelRef: RefObject<T | null>,
 ): void {
   const id = useId();
   const openerRef = useRef<Element | null>(null);

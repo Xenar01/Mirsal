@@ -23,6 +23,7 @@
 ## File Structure
 
 **Server**
+
 - Create `server/src/util/zip.ts` — shared ZIP helpers: `MAX_ZIP_ENTRIES`, `MAX_ZIP_WALK_NODES`, `ZIP_COMPRESSION_LEVEL`, `collectSubtreeFiles(db, ownerId, root)`, `zipFileName(rawName)`, `appendFilesToArchive(archive, files, blobStore)`.
 - Create `server/test/util/zip.test.ts` — unit tests for the walk bounds + filename sanitizer.
 - Modify `server/src/routes/public.ts` — delete the inlined copies of the above; import them from `util/zip.ts`. Behaviour unchanged; existing public-zip tests must stay green.
@@ -32,6 +33,7 @@
 - Modify `server/test/routes/collections.test.ts` — assert the detail DTO carries `folder_node_id`.
 
 **Web**
+
 - Modify `web/src/features/dashboard/api.ts` — add `zipUrl(id)`.
 - Modify `web/src/features/collections/types.ts` — add `folder_node_id: number | null` to the collection-detail type.
 - Modify `web/src/features/collections/CollectionDetail.tsx` — whole-collection ZIP button (header) + per-department ZIP link (responded roster row).
@@ -42,6 +44,7 @@
 - Add/modify component tests alongside each changed component.
 
 **Docs**
+
 - Modify `docs/RUNBOOK.md` — a "Collections (طلب تجميع)" section.
 
 ---
@@ -49,11 +52,13 @@
 ### Task 1: Extract shared ZIP module (refactor, behaviour-preserving)
 
 **Files:**
+
 - Create: `server/src/util/zip.ts`
 - Create: `server/test/util/zip.test.ts`
 - Modify: `server/src/routes/public.ts` (remove inlined `collectSubtreeFiles`, `zipFileName`, `MAX_ZIP_ENTRIES`, `MAX_ZIP_WALK_NODES`, `ZIP_COMPRESSION_LEVEL`; import from `util/zip.ts`)
 
 **Interfaces:**
+
 - Produces:
   - `const MAX_ZIP_ENTRIES = 10_000`
   - `const MAX_ZIP_WALK_NODES = 20_000`
@@ -69,13 +74,15 @@
 import { describe, it, expect } from 'vitest';
 import Database from 'better-sqlite3';
 import { collectSubtreeFiles, zipFileName, MAX_ZIP_ENTRIES } from './zip.js';
-import { runMigrations } from '../db/migrate.js';        // match the project's migration entrypoint
-import { createFolder } from '../nodes/tree.js';         // match actual helper names/signatures
+import { runMigrations } from '../db/migrate.js'; // match the project's migration entrypoint
+import { createFolder } from '../nodes/tree.js'; // match actual helper names/signatures
 
 function seedOwner(db: Database.Database): number {
-  db.prepare(`INSERT INTO users(email, password_hash, role, quota_bytes, created_at)
-              VALUES ('o@x','h','user', 1000000000, 0)`).run();
-  return Number(db.prepare('SELECT id FROM users WHERE email = ?').get('o@x') as any['id'] ?? 1);
+  db.prepare(
+    `INSERT INTO users(email, password_hash, role, quota_bytes, created_at)
+              VALUES ('o@x','h','user', 1000000000, 0)`,
+  ).run();
+  return Number((db.prepare('SELECT id FROM users WHERE email = ?').get('o@x') as any['id']) ?? 1);
 }
 
 describe('zipFileName', () => {
@@ -112,7 +119,7 @@ Expected: FAIL — `Cannot find module './zip.js'`.
 ```ts
 import type Database from 'better-sqlite3';
 import { ZipArchive } from 'archiver';
-import type { Node } from '../nodes/types.js';       // match actual Node import path
+import type { Node } from '../nodes/types.js'; // match actual Node import path
 import { listChildren } from '../nodes/tree.js';
 import type { BlobStore } from '../storage/blobs.js';
 
@@ -120,14 +127,22 @@ export const MAX_ZIP_ENTRIES = 10_000;
 export const MAX_ZIP_WALK_NODES = 20_000;
 export const ZIP_COMPRESSION_LEVEL = 6;
 
-export function zipFileName(rawName: string): string { /* moved verbatim */ }
+export function zipFileName(rawName: string): string {
+  /* moved verbatim */
+}
 
 export function collectSubtreeFiles(
-  db: Database.Database, ownerId: number, root: Node
-): Array<{ storagePath: string; name: string }> { /* moved verbatim */ }
+  db: Database.Database,
+  ownerId: number,
+  root: Node,
+): Array<{ storagePath: string; name: string }> {
+  /* moved verbatim */
+}
 
 export function appendFilesToArchive(
-  archive: ZipArchive, files: Array<{ storagePath: string; name: string }>, blobStore: BlobStore
+  archive: ZipArchive,
+  files: Array<{ storagePath: string; name: string }>,
+  blobStore: BlobStore,
 ): void {
   for (const f of files) archive.append(blobStore.readBlob(f.storagePath), { name: f.name });
 }
@@ -152,10 +167,12 @@ git commit -m "refactor(zip): extract shared ZIP helpers from public route into 
 ### Task 2: Authenticated `GET /api/nodes/:id/zip` (owner-scoped, folder-only, concurrency-bounded)
 
 **Files:**
+
 - Modify: `server/src/routes/nodes.ts` (add the route near the existing `/api/nodes/:id/download`, line ~674)
 - Modify: `server/test/routes/nodes.test.ts` (the suite covering node routes — match the repo's actual test file)
 
 **Interfaces:**
+
 - Consumes: `getOwnedNode(db, uid, id)`, `parseIdParam(req)`, `buildContentDisposition`, and from `util/zip.ts`: `collectSubtreeFiles`, `zipFileName`, `appendFilesToArchive`, `ZIP_COMPRESSION_LEVEL`.
 - Produces: route `GET /api/nodes/:id/zip` → `200 application/zip` (folder subtree, streamed) · `404 {error:'not_found'}` (bad id / not owned / missing) · `400 {error:'not_a_folder'}` (id is a file/root/trash) · `429 {error:'too_many_requests'}` (concurrency cap).
 
@@ -163,7 +180,7 @@ git commit -m "refactor(zip): extract shared ZIP helpers from public route into 
 
 ```ts
 it('zips an owned folder subtree (authenticated)', async () => {
-  const { app, agent, ownerId } = await bootAuthedApp();          // reuse existing test bootstrap
+  const { app, agent, ownerId } = await bootAuthedApp(); // reuse existing test bootstrap
   const folderId = await makeFolderWithFiles(app, ownerId, ['a.txt', 'b.txt']);
   const res = await agent.get(`/api/nodes/${folderId}/zip`);
   expect(res.statusCode).toBe(200);
@@ -208,24 +225,37 @@ function releaseNodeZipSlot(req: FastifyRequest) {
 
 app.get('/api/nodes/:id/zip', { preHandler: guards.requireAuth }, async (req, reply) => {
   const id = parseIdParam(req);
-  if (id === null) { reply.code(404).send({ error: 'not_found' }); return; }
+  if (id === null) {
+    reply.code(404).send({ error: 'not_found' });
+    return;
+  }
 
   const uid = req.user!.id;
   const node = getOwnedNode(db, uid, id);
-  if (!node) { reply.code(404).send({ error: 'not_found' }); return; }
-  if (node.kind !== 'folder') { reply.code(400).send({ error: 'not_a_folder' }); return; }
+  if (!node) {
+    reply.code(404).send({ error: 'not_found' });
+    return;
+  }
+  if (node.kind !== 'folder') {
+    reply.code(400).send({ error: 'not_a_folder' });
+    return;
+  }
 
   if (activeNodeZipCount >= MAX_CONCURRENT_NODE_ZIPS) {
-    reply.code(429).send({ error: 'too_many_requests' }); return;
+    reply.code(429).send({ error: 'too_many_requests' });
+    return;
   }
   const files = collectSubtreeFiles(db, uid, node);
 
   activeNodeZipCount++;
   nodeZipSlots.add(req);
-  reply.raw.once('close', () => releaseNodeZipSlot(req));   // fires on finish AND mid-stream abort
+  reply.raw.once('close', () => releaseNodeZipSlot(req)); // fires on finish AND mid-stream abort
 
   const archive = new ZipArchive({ zlib: { level: ZIP_COMPRESSION_LEVEL } });
-  archive.on('error', (err) => { req.log.error({ err }, 'node zip stream failed'); reply.raw.destroy(err); });
+  archive.on('error', (err) => {
+    req.log.error({ err }, 'node zip stream failed');
+    reply.raw.destroy(err);
+  });
   appendFilesToArchive(archive, files, blobStore);
 
   reply.header('Content-Type', 'application/zip');
@@ -261,10 +291,12 @@ git commit -m "feat(nodes): authenticated owner-scoped GET /api/nodes/:id/zip (f
 ### Task 3: Expose collection root `folder_node_id` in the detail DTO
 
 **Files:**
+
 - Modify: `server/src/routes/collections.ts` (`CollectionDetailDto` + `buildDetailDto`, lines ~38–47, ~73+)
 - Modify: `server/test/routes/collections.test.ts`
 
 **Interfaces:**
+
 - Produces: `CollectionDetailDto.folder_node_id: number` (the collection's own root folder node — the whole-collection ZIP target). `Collection.folder_node_id` already exists (`collections/collections.ts:18`), so this is a passthrough.
 
 - [ ] **Step 1: Failing test** — in `collections.test.ts`, extend the existing "GET /api/collections/:id returns detail" test:
@@ -300,6 +332,7 @@ git commit -m "feat(collections): expose collection root folder_node_id in detai
 ### Task 4: Owner ZIP buttons — per-department + whole-collection
 
 **Files:**
+
 - Modify: `web/src/features/dashboard/api.ts` (add `zipUrl`)
 - Modify: `web/src/features/collections/types.ts` (add `folder_node_id`)
 - Modify: `web/src/features/collections/CollectionDetail.tsx` (whole-collection button + per-dept link)
@@ -307,6 +340,7 @@ git commit -m "feat(collections): expose collection root folder_node_id in detai
 - Modify/Add: `web/test/collections-detail.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `zipUrl(id: number): string` → `/api/nodes/${id}/zip`; `detail.folder_node_id` (Task 3); `dept.folder_node_id` (already present on responded rows).
 - Produces: two anchor links (`<a href={zipUrl(...)}>`), no new API calls (ZIP is a plain authenticated GET the browser follows).
 
@@ -315,14 +349,17 @@ git commit -m "feat(collections): expose collection root folder_node_id in detai
 ```tsx
 it('renders a whole-collection ZIP link pointing at the collection folder node', () => {
   renderDetail({ folder_node_id: 42, departments: [] });
-  const all = screen.getByRole('link', { name: /تنزيل الكل/ });   // collections.detail.downloadAllZip
+  const all = screen.getByRole('link', { name: /تنزيل الكل/ }); // collections.detail.downloadAllZip
   expect(all).toHaveAttribute('href', '/api/nodes/42/zip');
 });
 
 it('renders a per-department ZIP link for a responded department', () => {
-  renderDetail({ folder_node_id: 42, departments: [
-    { id: 1, name: 'المالية', responded: true, file_count: 2, submitted_at: 1, note: null, folder_node_id: 77 },
-  ]});
+  renderDetail({
+    folder_node_id: 42,
+    departments: [
+      { id: 1, name: 'المالية', responded: true, file_count: 2, submitted_at: 1, note: null, folder_node_id: 77 },
+    ],
+  });
   const dept = screen.getByRole('link', { name: /تنزيل كملف مضغوط/ }); // collections.detail.downloadDeptZip
   expect(dept).toHaveAttribute('href', '/api/nodes/77/zip');
 });
@@ -365,12 +402,14 @@ git commit -m "feat(collections): per-department + whole-collection ZIP download
 ### Task 5: Upload-progress bar on the uploader submit
 
 **Files:**
+
 - Modify: `web/src/features/collect/api.ts` (`submitResponse` → XHR + `onProgress`)
 - Modify: `web/src/features/collect/CollectForm.tsx` (progress state + bar; route `closed`/`locked` to proper screen — carry #5)
 - Modify: `web/src/i18n/ar.json` + `web/src/i18n/en.json` (`collect.uploading`)
 - Modify/Add: `web/test/collect.test.tsx`, `web/test/collect-api.test.ts`
 
 **Interfaces:**
+
 - Consumes: existing multipart contract — field name `files`, `departmentId`, optional `note` — unchanged on the wire.
 - Produces: `submitResponse(token, body, opts?: { onProgress?: (fraction: number) => void }): Promise<SubmitResult>` where `fraction ∈ [0,1]`. Mirror the XHR shape in `dashboard/api.ts` (`xhr.upload.onprogress` → `e.loaded / e.total`).
 
@@ -378,10 +417,13 @@ git commit -m "feat(collections): per-department + whole-collection ZIP download
 
 ```ts
 it('reports upload progress and resolves ok on 200', async () => {
-  const xhr = installMockXHR();                    // helper mocking upload.onprogress + load
+  const xhr = installMockXHR(); // helper mocking upload.onprogress + load
   const seen: number[] = [];
-  const p = submitResponse('tok', { departmentId: 1, files: [new File(['x'],'a.txt')] },
-                            { onProgress: (f) => seen.push(f) });
+  const p = submitResponse(
+    'tok',
+    { departmentId: 1, files: [new File(['x'], 'a.txt')] },
+    { onProgress: (f) => seen.push(f) },
+  );
   xhr.emitProgress(50, 100);
   xhr.emitLoad(200, JSON.stringify({ ok: true }));
   await expect(p).resolves.toMatchObject({ kind: 'ok' });
@@ -397,18 +439,30 @@ Run: `cd web && npx vitest run test/collect-api.test.ts test/collect.test.tsx`
 Expected: FAIL — `onProgress` not supported / no progressbar.
 
 - [ ] **Step 3: Implement**
-  - `collect/api.ts`: rewrite `submitResponse` body to build the same `FormData` and send it via `XMLHttpRequest` (mirror `dashboard/api.ts` `uploadFile`): `xhr.open('POST', \`/api/collect/${token}/submit\`)`, `xhr.upload.onprogress = (e) => { if (e.lengthComputable) opts?.onProgress?.(e.loaded / e.total); }`, map `xhr.status` → the existing `SubmitResult` kinds (200→ok, 413→quota/tooLarge per body, 401→locked, 404→closed, 400→tooManyFiles, else error). Keep the **no-CSRF, no-credentials-cookie-for-meta** posture the file documents; submit still posts to the unlock-cookie-scoped path.
+  - `collect/api.ts`: rewrite `submitResponse` body to build the same `FormData` and send it via `XMLHttpRequest` (mirror `dashboard/api.ts` `uploadFile`): `xhr.open('POST', \`/api/collect/${token}/submit\`)`, `xhr.upload.onprogress = (e) => { if (e.lengthComputable) opts?.onProgress?.(e.loaded / e.total); }`, map `xhr.status`→ the existing`SubmitResult` kinds (200→ok, 413→quota/tooLarge per body, 401→locked, 404→closed, 400→tooManyFiles, else error). Keep the **no-CSRF, no-credentials-cookie-for-meta** posture the file documents; submit still posts to the unlock-cookie-scoped path.
   - `CollectForm.tsx`: add `const [progress, setProgress] = useState(0)`; pass `{ onProgress: setProgress }` to `submitResponse`; while `submitting`, render a bar:
     ```tsx
-    {submitting && (
-      <div className="w-full max-w-sm" role="progressbar" aria-valuemin={0} aria-valuemax={100}
-           aria-valuenow={Math.round(progress * 100)}>
-        <div className="h-2 rounded bg-line">
-          <div className="h-2 rounded bg-teal transition-[width]" style={{ width: `${Math.round(progress * 100)}%` }} />
+    {
+      submitting && (
+        <div
+          className="w-full max-w-sm"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(progress * 100)}
+        >
+          <div className="h-2 rounded bg-line">
+            <div
+              className="h-2 rounded bg-teal transition-[width]"
+              style={{ width: `${Math.round(progress * 100)}%` }}
+            />
+          </div>
+          <p className="mt-1 font-body text-xs text-ink-2">
+            {t('collect.uploading', { pct: Math.round(progress * 100) })}
+          </p>
         </div>
-        <p className="mt-1 font-body text-xs text-ink-2">{t('collect.uploading', { pct: Math.round(progress * 100) })}</p>
-      </div>
-    )}
+      );
+    }
     ```
   - Carry #5: in the `switch (result.kind)`, replace the `case 'closed'` / `case 'locked'` fall-through into `submitError` with re-routing — surface a distinct localized message (`collect.closedNow` / re-trigger the meta refetch so the page moves to its closed/gate screen). Minimum: show `t('collect.closedNow')` for `closed` and `t('collect.lockedNow')` for `locked` instead of the generic error, and reset `submitting`.
   - i18n: `collect.uploading` = `"جارٍ الرفع… {{pct}}%"` (ar) / `"Uploading… {{pct}}%"` (en); add `collect.closedNow` / `collect.lockedNow` in both.
@@ -437,6 +491,7 @@ git commit -m "feat(collect): upload-progress bar + route closed/locked submit t
 ### Task 6: RUNBOOK "Collections" section + dead-i18n cleanup
 
 **Files:**
+
 - Modify: `docs/RUNBOOK.md`
 - Modify: `web/src/i18n/ar.json` (+ `en.json` if any dead `collect.*` keys) — remove carry #2 dead keys: `collections.status.{open,closed,expired}`, `collections.open`, `collect.{filesPick,toEnglish,toArabic}` (verify each is truly unreferenced with `grep -rn "key" web/src` before deleting).
 
@@ -498,7 +553,7 @@ Expected: all green.
   2. Hit `/api/collect/<token>` meta (locked → unlock with password), download the template.
   3. Submit **1 file** for dept A; submit **3 files** for dept B; **re-submit** dept B (latest-replaces → old set gone, quota reclaimed).
   4. Owner detail: roster shows **2/3**; per-department ZIP for dept B returns `200 application/zip` with the **replacement** files only; whole-collection ZIP returns `200` containing A + B subfolders.
-  5. Owner-scope negative: a *second* owner requesting `/api/nodes/<foreign folder>/zip` → **404**.
+  5. Owner-scope negative: a _second_ owner requesting `/api/nodes/<foreign folder>/zip` → **404**.
   6. Close the collection (or trip the deadline) → submit now blocked; meta shows closed.
   7. Delete `server/e2e-boot.ts` and the scratch DB/data root.
 
@@ -509,6 +564,7 @@ Expected: all green.
 ## Self-Review
 
 **1. Spec coverage (§ lines 51, 132, 168, 193):**
+
 - "download that department's set as a ZIP" → Task 2 (route) + Task 4 (per-dept link). ✅
 - "download the whole collection as one ZIP" → Task 2 + Task 3 (root folder_node_id) + Task 4 (all link). ✅
 - "reuses folder `/zip`" → Task 1 extraction + Task 2 authenticated route (the route the spec names did **not** previously exist; Phase 4 creates it). ✅ (flagged correction)

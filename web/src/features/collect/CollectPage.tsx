@@ -44,7 +44,7 @@ export default function CollectPage() {
       document.documentElement.lang = 'ar';
       document.documentElement.dir = 'rtl';
     },
-    []
+    [],
   );
 
   // A password collection is treated as locked on every fresh mount:

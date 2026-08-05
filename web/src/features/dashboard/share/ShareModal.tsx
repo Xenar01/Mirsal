@@ -46,9 +46,7 @@ function WizardSteps({ current }: { current: 1 | 2 }) {
             >
               {n}
             </span>
-            <span className={['font-body text-xs', active ? 'text-ink' : 'text-ink-2'].join(' ')}>
-              {label}
-            </span>
+            <span className={['font-body text-xs', active ? 'text-ink' : 'text-ink-2'].join(' ')}>{label}</span>
             {n === 1 && <span aria-hidden="true" className="mx-1 h-px w-8 bg-line" />}
           </li>
         );
@@ -60,7 +58,7 @@ function WizardSteps({ current }: { current: 1 | 2 }) {
 export default function ShareModal({ node, onClose }: { node: NodeDto; onClose: () => void }) {
   const { t } = useTranslation();
   const { data, isPending, isError } = useShares();
-  const share = Array.isArray(data) ? data.find((s) => s.node_id === node.id) ?? null : null;
+  const share = Array.isArray(data) ? (data.find((s) => s.node_id === node.id) ?? null) : null;
   // The stamp is the dispatch MOMENT — it fires only when a link is PUBLISHED in
   // this session, never on every reopen of an already-shared node (§4.4).
   const [justPublished, setJustPublished] = useState(false);
@@ -83,13 +81,7 @@ export default function ShareModal({ node, onClose }: { node: NodeDto; onClose: 
     );
   } else {
     // Step 1 — configure the link before it exists.
-    body = (
-      <ConfigureStep
-        nodeId={node.id}
-        nodeKind={node.kind}
-        onPublished={() => setJustPublished(true)}
-      />
-    );
+    body = <ConfigureStep nodeId={node.id} nodeKind={node.kind} onPublished={() => setJustPublished(true)} />;
   }
 
   return (
@@ -227,25 +219,13 @@ function ConfigureStep({
             className="w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-mono text-sm text-ink"
           />
           <fieldset className="flex flex-col gap-1">
-            <legend className="font-body text-sm text-ink-2">
-              {t('share.downloadLimit.onExhaust')}
-            </legend>
+            <legend className="font-body text-sm text-ink-2">{t('share.downloadLimit.onExhaust')}</legend>
             <label className="flex items-center gap-2 font-body text-sm text-ink">
-              <input
-                type="radio"
-                name="onExhaust"
-                checked={mode === 'delete'}
-                onChange={() => setMode('delete')}
-              />
+              <input type="radio" name="onExhaust" checked={mode === 'delete'} onChange={() => setMode('delete')} />
               {t('share.downloadLimit.modeDelete')}
             </label>
             <label className="flex items-center gap-2 font-body text-sm text-ink">
-              <input
-                type="radio"
-                name="onExhaust"
-                checked={mode === 'stop'}
-                onChange={() => setMode('stop')}
-              />
+              <input type="radio" name="onExhaust" checked={mode === 'stop'} onChange={() => setMode('stop')} />
               {t('share.downloadLimit.modeStop')}
             </label>
             {mode === 'delete' && (
@@ -277,15 +257,7 @@ function ConfigureStep({
 
 /* ── Step 2 — the published link: copy, manage, edit, revoke ────────────── */
 
-function PublishedStep({
-  share,
-  stamp,
-  nodeKind,
-}: {
-  share: ShareDto;
-  stamp: boolean;
-  nodeKind: NodeDto['kind'];
-}) {
+function PublishedStep({ share, stamp, nodeKind }: { share: ShareDto; stamp: boolean; nodeKind: NodeDto['kind'] }) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const patch = usePatchShare();
@@ -309,7 +281,7 @@ function PublishedStep({
           }
         },
         onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
-      }
+      },
     );
   }
 
@@ -352,11 +324,7 @@ function PublishedStep({
         <Button variant="secondary" onClick={toggleActive} disabled={patch.isPending}>
           {share.is_active ? t('share.stop') : t('share.start')}
         </Button>
-        <Button
-          variant="ghost"
-          onClick={() => setEditing((v) => !v)}
-          aria-expanded={editing}
-        >
+        <Button variant="ghost" onClick={() => setEditing((v) => !v)} aria-expanded={editing}>
           {t('share.wizard.editSettings')}
         </Button>
       </div>
@@ -402,7 +370,7 @@ function PasswordSection({ share }: { share: ShareDto }) {
           setValue('');
         },
         onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
-      }
+      },
     );
   }
 
@@ -412,7 +380,7 @@ function PasswordSection({ share }: { share: ShareDto }) {
       {
         onSuccess: () => toast({ kind: 'success', message: t('share.toast.passwordCleared') }),
         onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
-      }
+      },
     );
   }
 
@@ -462,9 +430,7 @@ function ExpirySection({ share }: { share: ShareDto }) {
   const { toast } = useToast();
   const patch = usePatchShare();
   const inputId = useId();
-  const [value, setValue] = useState(
-    share.expires_at != null ? utcMsToDamascusInput(share.expires_at) : ''
-  );
+  const [value, setValue] = useState(share.expires_at != null ? utcMsToDamascusInput(share.expires_at) : '');
   const [error, setError] = useState<string | null>(null);
 
   function apply(event?: FormEvent) {
@@ -484,7 +450,7 @@ function ExpirySection({ share }: { share: ShareDto }) {
       {
         onSuccess: () => toast({ kind: 'success', message: t('share.toast.expirySet') }),
         onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
-      }
+      },
     );
   }
 
@@ -498,7 +464,7 @@ function ExpirySection({ share }: { share: ShareDto }) {
           setValue('');
         },
         onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
-      }
+      },
     );
   }
 
@@ -555,20 +521,12 @@ function ExpirySection({ share }: { share: ShareDto }) {
 
 /* ── Download limit: burn-after-N downloads → stop the link or delete the file ─ */
 
-function DownloadLimitSection({
-  share,
-  nodeKind,
-}: {
-  share: ShareDto;
-  nodeKind: NodeDto['kind'];
-}) {
+function DownloadLimitSection({ share, nodeKind }: { share: ShareDto; nodeKind: NodeDto['kind'] }) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const patch = usePatchShare();
   const inputId = useId();
-  const [value, setValue] = useState(
-    share.download_limit != null ? String(share.download_limit) : ''
-  );
+  const [value, setValue] = useState(share.download_limit != null ? String(share.download_limit) : '');
   const [mode, setMode] = useState<'delete' | 'stop'>(share.on_exhaust);
   const [error, setError] = useState<string | null>(null);
   // v1: a per-file download cap has no meaning for a whole-folder share.
@@ -587,7 +545,7 @@ function DownloadLimitSection({
       {
         onSuccess: () => toast({ kind: 'success', message: t('share.downloadLimit.toast.set') }),
         onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
-      }
+      },
     );
   }
 
@@ -601,7 +559,7 @@ function DownloadLimitSection({
           setValue('');
         },
         onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
-      }
+      },
     );
   }
 
@@ -631,25 +589,13 @@ function DownloadLimitSection({
           className="w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-mono text-sm text-ink"
         />
         <fieldset className="flex flex-col gap-1">
-          <legend className="font-body text-sm text-ink-2">
-            {t('share.downloadLimit.onExhaust')}
-          </legend>
+          <legend className="font-body text-sm text-ink-2">{t('share.downloadLimit.onExhaust')}</legend>
           <label className="flex items-center gap-2 font-body text-sm text-ink">
-            <input
-              type="radio"
-              name="onExhaust"
-              checked={mode === 'delete'}
-              onChange={() => setMode('delete')}
-            />
+            <input type="radio" name="onExhaust" checked={mode === 'delete'} onChange={() => setMode('delete')} />
             {t('share.downloadLimit.modeDelete')}
           </label>
           <label className="flex items-center gap-2 font-body text-sm text-ink">
-            <input
-              type="radio"
-              name="onExhaust"
-              checked={mode === 'stop'}
-              onChange={() => setMode('stop')}
-            />
+            <input type="radio" name="onExhaust" checked={mode === 'stop'} onChange={() => setMode('stop')} />
             {t('share.downloadLimit.modeStop')}
           </label>
           {mode === 'delete' && (

@@ -38,7 +38,7 @@ function renderPage() {
           </Routes>
         </MemoryRouter>
       </I18nextProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -67,15 +67,10 @@ class MockXHR {
   status = 0;
   responseText = '';
   listeners: Record<string, Array<() => void>> = {};
-  uploadListeners: Record<
-    string,
-    Array<(e: { lengthComputable: boolean; loaded: number; total: number }) => void>
-  > = {};
+  uploadListeners: Record<string, Array<(e: { lengthComputable: boolean; loaded: number; total: number }) => void>> =
+    {};
   upload = {
-    addEventListener: (
-      type: string,
-      cb: (e: { lengthComputable: boolean; loaded: number; total: number }) => void
-    ) => {
+    addEventListener: (type: string, cb: (e: { lengthComputable: boolean; loaded: number; total: number }) => void) => {
       (this.uploadListeners[type] ??= []).push(cb);
     },
   };
@@ -124,7 +119,10 @@ afterEach(() => {
 describe('CollectPage — public collect-intake page', () => {
   test('open: renders title, department select, file input; AR default then EN toggle flips dir + copy', async () => {
     setNavigatorLanguage('ar-SY');
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, openMetaBody)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, openMetaBody)),
+    );
 
     const { container } = renderPage();
 
@@ -153,7 +151,10 @@ describe('CollectPage — public collect-intake page', () => {
 
   test('closed meta → neutral closed copy (AR + EN)', async () => {
     setNavigatorLanguage('ar-SY');
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, { isOpen: false })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { isOpen: false })),
+    );
 
     renderPage();
     await screen.findByText('هذا الطلب مغلق حاليًا.');
@@ -168,7 +169,10 @@ describe('CollectPage — public collect-intake page', () => {
 
   test('notFound (404) → not-found copy', async () => {
     setNavigatorLanguage('en-US');
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(404, { error: 'not_found' })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(404, { error: 'not_found' })),
+    );
 
     renderPage();
     await screen.findByText("This link doesn't exist.");
@@ -222,7 +226,10 @@ describe('CollectPage — public collect-intake page', () => {
 
   test('submitting files issues a multipart POST via XHR and shows the confirmation', async () => {
     setNavigatorLanguage('ar-SY');
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, openMetaBody)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, openMetaBody)),
+    );
     installMockXHR();
 
     const { container } = renderPage();
@@ -257,7 +264,10 @@ describe('CollectPage — public collect-intake page', () => {
 
   test('shows a progress bar with aria-valuenow tracking upload progress while submitting', async () => {
     setNavigatorLanguage('en-US');
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, openMetaBody)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, openMetaBody)),
+    );
     installMockXHR();
 
     const { container } = renderPage();
@@ -286,7 +296,10 @@ describe('CollectPage — public collect-intake page', () => {
 
   test('a closed (404) submit result shows collect.closedNow — not the generic submitError', async () => {
     setNavigatorLanguage('ar-SY');
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, openMetaBody)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, openMetaBody)),
+    );
     installMockXHR();
 
     const { container } = renderPage();
@@ -309,7 +322,10 @@ describe('CollectPage — public collect-intake page', () => {
 
   test('a locked (401) submit result shows collect.lockedNow — not the generic submitError', async () => {
     setNavigatorLanguage('en-US');
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, openMetaBody)));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, openMetaBody)),
+    );
     installMockXHR();
 
     const { container } = renderPage();

@@ -63,11 +63,7 @@ export function createBlobStore({ storageDir }: { storageDir: string }): BlobSto
     return abs;
   }
 
-  async function writeStreamToTemp(
-    ownerId: string,
-    stream: Readable,
-    limitBytes: number
-  ): Promise<WriteResult> {
+  async function writeStreamToTemp(ownerId: string, stream: Readable, limitBytes: number): Promise<WriteResult> {
     assertSafeSegment(ownerId, 'ownerId');
     const ownerDir = path.join(storageDir, ownerId);
     await mkdir(ownerDir, { recursive: true });
@@ -160,11 +156,7 @@ export function blobPathFor(ownerId: string, nodeId: string): string {
 }
 
 /** Bare signature bound to a lazily-initialized default store (built from loadConfig() on first use). */
-export function writeStreamToTemp(
-  ownerId: string,
-  stream: Readable,
-  limitBytes: number
-): Promise<WriteResult> {
+export function writeStreamToTemp(ownerId: string, stream: Readable, limitBytes: number): Promise<WriteResult> {
   return getDefaultStore().writeStreamToTemp(ownerId, stream, limitBytes);
 }
 

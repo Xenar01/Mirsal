@@ -30,11 +30,11 @@ Let a share's creator cap how many times a **single file** can be downloaded (de
 
 Three additive columns on `shares`, **appended after `revoked_at`** (ALTER always appends; fresh and upgraded DBs must match column order):
 
-| Column | Type | Meaning |
-|--------|------|---------|
+| Column           | Type                                                                       | Meaning                                                                    |
+| ---------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | `download_limit` | `INTEGER` nullable, `CHECK(download_limit IS NULL OR download_limit >= 1)` | `NULL` = unlimited (unchanged). `≥1` = capped. Default when enabled = `1`. |
-| `download_count` | `INTEGER NOT NULL DEFAULT 0` | Downloads that have **completed** against the current budget. |
-| `on_exhaust` | `TEXT NOT NULL DEFAULT 'delete' CHECK(on_exhaust IN ('stop','delete'))` | Terminal action; only meaningful when a limit is set. |
+| `download_count` | `INTEGER NOT NULL DEFAULT 0`                                               | Downloads that have **completed** against the current budget.              |
+| `on_exhaust`     | `TEXT NOT NULL DEFAULT 'delete' CHECK(on_exhaust IN ('stop','delete'))`    | Terminal action; only meaningful when a limit is set.                      |
 
 Every existing share keeps `download_limit = NULL` → behaviorally unchanged (all enforcement gates on `download_limit IS NOT NULL`). The DB `CHECK` is defence-in-depth behind Zod validation.
 
@@ -62,31 +62,34 @@ Every existing share keeps `download_limit = NULL` → behaviorally unchanged (a
 
 ## 6. Backend enforcement — the counted download
 
-**Bot protection (decision 4):** the counted download is **`POST /api/public/:token/download`**. The recipient page triggers it as a form/`fetch` POST so the browser downloads natively (streamed, no in-memory buffering). For a **limited** share, `GET /download` returns **`405`** (non-counting, non-delivering) — so neither a passive prefetch/scanner GET nor a raw-link GET can trigger the burn *or* bypass the cap. **Unlimited** shares keep `GET /download` exactly as today. `/zip` is untouched (folders are out of scope).
+**Bot protection (decision 4):** the counted download is **`POST /api/public/:token/download`**. The recipient page triggers it as a form/`fetch` POST so the browser downloads natively (streamed, no in-memory buffering). For a **limited** share, `GET /download` returns **`405`** (non-counting, non-delivering) — so neither a passive prefetch/scanner GET nor a raw-link GET can trigger the burn _or_ bypass the cap. **Unlimited** shares keep `GET /download` exactly as today. `/zip` is untouched (folders are out of scope).
 
 The counter separates two things:
+
 - **`download_count` (DB, durable)** — **completed** downloads. Incremented only on completion, guarded so it can never exceed the limit.
 - **in-flight reservations (in-memory `Map<shareId, number>`, per process)** — currently-streaming downloads; bounds concurrency; ephemeral (empty each boot, so a crash can never strand one).
 
 **Single-process assumption:** Mirsal is one Node process in one container, so the in-memory map is authoritative. Multi-process would need a shared store — out of scope (§14).
 
 **Request flow (`POST /download`, limited file share):**
+
 1. Existing gates: `loadLiveShare` → `requireUnlocked` → `allow_download` → resolve node → must be a file with `storage_path`.
 2. **Open the blob** (`waitForOpen`). `ENOENT` → `404`, nothing reserved.
 3. **Reserve** (synchronous block — atomic under Node's single thread, **no `await` between read and write**): read `download_count`; `inflight = map.get(shareId) ?? 0`; if `download_count + inflight >= download_limit` → **destroy the opened `ReadStream`** and respond `410 gone` (same shape as other rejections — no "live-but-reserved" oracle); else `map.set(shareId, inflight + 1)`.
-4. **Immediately** (before anything fallible) wire the release: `reply.raw.once('close', handler)` **and** an `onResponse` hook as defence-in-depth (idempotent via a per-request `WeakSet`, exactly like `releaseZipSlot`). Only after this: set headers, `logShareAccess`, `reply.send(stream)`. *(Ordering is load-bearing: reserving before wiring the release — or letting `logShareAccess` throw in between — would strand a reservation and permanently `410`-brick the share.)*
+4. **Immediately** (before anything fallible) wire the release: `reply.raw.once('close', handler)` **and** an `onResponse` hook as defence-in-depth (idempotent via a per-request `WeakSet`, exactly like `releaseZipSlot`). Only after this: set headers, `logShareAccess`, `reply.send(stream)`. _(Ordering is load-bearing: reserving before wiring the release — or letting `logShareAccess` throw in between — would strand a reservation and permanently `410`-brick the share.)_
 5. **The close handler** — wrapped **entirely in `try/catch`** (a throw in a raw `'close'` listener is an uncaught exception that kills the single process), and run as **one synchronous, `await`-free block**:
-   - **Release** the reservation on *both* outcomes (decrement, clamp at 0, delete the key at 0).
+   - **Release** the reservation on _both_ outcomes (decrement, clamp at 0, delete the key at 0).
    - Branch on `reply.raw.writableFinished`:
      - **completed** (`true`): `UPDATE shares SET download_count = download_count + 1 WHERE id=@id AND download_limit IS NOT NULL AND download_count < download_limit RETURNING download_count, download_limit`. If a row changed and `download_count === download_limit`, run the terminal action (§7).
      - **aborted** (`false`): nothing else — `download_count` untouched, so the link stays live and the recipient can retry.
 
 **Why this is race-free and safe:**
-- `download_count` counts only real deliveries → the terminal fires exactly when the limit-th download *completes*, never prematurely because a concurrent download aborted.
+
+- `download_count` counts only real deliveries → the terminal fires exactly when the limit-th download _completes_, never prematurely because a concurrent download aborted.
 - The completion `UPDATE`'s `download_count < download_limit` guard is a hard backstop (SQLite serializes writers, re-evaluates the `WHERE`): total counted completions can never exceed the limit even under a post-boot burst or the multi-process edge — only raw in-flight bytes are unbounded there (§14).
-- Firing the terminal action mid-stream (of a *different*, already-gated download) is safe: `delete` only trashes the row + stamps a 24h `purge_after` (blob not unlinked for 24h; an open fd keeps streaming); `stop` only flips `is_active`.
+- Firing the terminal action mid-stream (of a _different_, already-gated download) is safe: `delete` only trashes the row + stamps a 24h `purge_after` (blob not unlinked for 24h; an open fd keeps streaming); `stop` only flips `is_active`.
 - The terminal action is **idempotent** and must tolerate an already-trashed/foreign node (§7) — an owner manually trashing the file mid-download must not crash the process.
-- **Accepted trade-off:** the reservation map is per-process, reset on restart; a restart *during* concurrent in-flight downloads of the same limited file could deliver already-streaming bytes the post-restart counter no longer bounds. Negligible for a single-process, low-traffic, typically-limit-1 workload; the durable guard still caps *counted* completions.
+- **Accepted trade-off:** the reservation map is per-process, reset on restart; a restart _during_ concurrent in-flight downloads of the same limited file could deliver already-streaming bytes the post-restart counter no longer bounds. Negligible for a single-process, low-traffic, typically-limit-1 workload; the durable guard still caps _counted_ completions.
 
 ## 7. Terminal actions
 
@@ -114,11 +117,12 @@ New `DownloadLimitSection` (mirrors `PasswordSection`/`ExpirySection`), rendered
 
 - State line: **"Unlimited"** or **"X of N downloads used"** (best-effort; refreshes on the owner's own mutations).
 - Number input (`min 1`), default `1`, with **Apply** / **Clear** (clear = unlimited). All buttons `disabled={patch.isPending}`.
-- Terminal-action choice (segmented control): **"When used up: [Delete file] · [Stop link]"**, default **Delete** — **shown only when a limit is set**. Inline warning when **Delete** is selected: *"The file moves to Trash after the last download (recoverable for 24h)."*
+- Terminal-action choice (segmented control): **"When used up: [Delete file] · [Stop link]"**, default **Delete** — **shown only when a limit is set**. Inline warning when **Delete** is selected: _"The file moves to Trash after the last download (recoverable for 24h)."_
 - Wired through `usePatchShare({ id, downloadLimit, onExhaust })`.
 - **Owner status honesty:** after a `delete` burn, `is_active` stays `1` but the file is gone, so `ownerStatus`/`toShareDto` must derive an **`exhausted`/`burned`** state (from `download_count >= download_limit`, or node-trashed) so `StatusChip` never shows "active" for a dead link.
 
 **Boundary wiring (must all be edited — TypeScript won't compile otherwise, and a missed camel↔snake map makes Apply a silent no-op):**
+
 - `server/src/shares/shares.ts`: `Share` interface + `toShareDto` (+ exhausted-status derivation).
 - `web/.../share/types.ts`: `ShareDto` mirror (+ 3 fields + status).
 - `web/.../share/api.ts`: `PatchShareVars` + `patchShare()` body mapping **camelCase→snake_case** (`downloadLimit`→`download_limit`, `onExhaust`→`on_exhaust`), matching the existing `isActive`→`is_active` convention.
@@ -135,6 +139,7 @@ New `DownloadLimitSection` (mirrors `PasswordSection`/`ExpirySection`), rendered
 ## 11. Audit logging
 
 Write to `audit_log` **inside the terminal-action transaction**, `actorId = null` (a system action; detail carries attribution):
+
 - `action = 'share_download_limit_deleted'`, target = token, detail = `{ owner_id, node_id, limit }`.
 - `action = 'share_download_limit_stopped'`, target = token, detail = `{ owner_id, limit }`.
 
@@ -158,7 +163,7 @@ Write to `audit_log` **inside the terminal-action transaction**, `actorId = null
 - **Owner manually trashes the file mid-download:** completion's terminal `delete` finds it already trashed → idempotent no-op, no crash (§7).
 - **Changing the limit:** setting a value resets `download_count = 0` (fresh budget, one atomic UPDATE); clearing → unlimited. **No retroactive burn** — use Stop/Revoke to end a live share now.
 - **Restore within 24h** of a burn-delete: `restoreNode` clears `purge_after` → file survives; `download_count` is at the limit so downloads stay blocked until the owner raises/clears the limit.
-- **Password + limit:** unlock never counts; only a completed `POST /download` counts; a burn-deleted password share collapses to `404 gone` *before* the unlock check → no pre-auth oracle.
+- **Password + limit:** unlock never counts; only a completed `POST /download` counts; a burn-deleted password share collapses to `404 gone` _before_ the unlock check → no pre-auth oracle.
 - **`Range`/206:** the route streams the whole file (no range support); a partial that aborts is an abort (released reservation). §15 asserts a `Range` request still yields the full body and only a full delivery counts.
 
 ## 14. Non-goals (v1)
@@ -168,6 +173,7 @@ Folder-share limits · `/zip` counting · per-recipient limits · `Range`/resuma
 ## 15. Testing strategy
 
 **Server (`server/test`):**
+
 - Migration: existing v1 DB gains the 3 columns; fresh DB has them; **convergence** (fresh vs upgraded `PRAGMA table_info(shares)` identical); idempotent re-run; `schema_version` records v2; the "tables present, no version row" case runs the ALTERs (not the fresh path).
 - Concurrency bound & abort tests use the **real-listen socket harness** (like the existing `/zip` abort test — `light-my-request`/`inject` can't park a stream mid-flight or produce `writableFinished === false`): two concurrent `POST /download` on `limit=1` → one `200`, one `410`, final `download_count = 1`; abort mid-stream → `download_count` unchanged, link live, a subsequent download succeeds.
 - **Crash-safety:** owner trashes the file while a limited download streams → completion's terminal `delete` is a no-op, process does not crash.
@@ -179,6 +185,7 @@ Folder-share limits · `/zip` counting · per-recipient limits · `Range`/resuma
 - Public meta exposes static `download_limit`, never a remaining count.
 
 **Web (`web/test`):**
+
 - `DownloadLimitSection` renders only for file shares; Apply/Clear; terminal toggle + Delete warning shown only when limited; disabled states.
 - Owner `StatusChip` shows an exhausted/burned state (not "active") after a `delete` burn.
 - `PublicFile` shows the static label ("one-time download" / "up to N"); download uses `POST`.

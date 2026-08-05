@@ -110,7 +110,7 @@ function renderModal(onClose = vi.fn()) {
           <CreateCollectionModal onClose={onClose} />
         </ToastProvider>
       </I18nextProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
   return onClose;
 }
@@ -131,7 +131,7 @@ function submitButton() {
 function postCall(fetchMock: ReturnType<typeof vi.fn>): [unknown, RequestInit | undefined] | undefined {
   return fetchMock.mock.calls.find(
     ([url, init]: [RequestInfo | URL, RequestInit?]) =>
-      String(url) === '/api/collections' && (init?.method ?? 'GET').toUpperCase() === 'POST'
+      String(url) === '/api/collections' && (init?.method ?? 'GET').toUpperCase() === 'POST',
   ) as [unknown, RequestInit | undefined] | undefined;
 }
 
@@ -149,17 +149,13 @@ describe('CreateCollectionModal — create flow (Collections Phase 3)', () => {
     renderModal();
 
     fireEvent.click(submitButton());
-    expect(
-      await screen.findByText(i18n.t('collections.create.titleRequired'))
-    ).toBeInTheDocument();
+    expect(await screen.findByText(i18n.t('collections.create.titleRequired'))).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText(i18n.t('collections.create.titleLabel')), {
       target: { value: 'مسح' },
     });
     fireEvent.click(submitButton());
-    expect(
-      await screen.findByText(i18n.t('collections.create.departmentsRequired'))
-    ).toBeInTheDocument();
+    expect(await screen.findByText(i18n.t('collections.create.departmentsRequired'))).toBeInTheDocument();
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -171,9 +167,7 @@ describe('CreateCollectionModal — create flow (Collections Phase 3)', () => {
     fillTitleAndDepartments('مسح', 'المالية\n المالية \n\nالموارد');
 
     // The live count reflects the trimmed/deduped list before submit.
-    expect(
-      screen.getByText(i18n.t('collections.create.departmentsCount', { count: 2 }))
-    ).toBeInTheDocument();
+    expect(screen.getByText(i18n.t('collections.create.departmentsCount', { count: 2 }))).toBeInTheDocument();
 
     await act(async () => {
       fireEvent.click(submitButton());
@@ -224,11 +218,7 @@ describe('CreateCollectionModal — create flow (Collections Phase 3)', () => {
       fireEvent.click(submitButton());
     });
 
-    expect(
-      await screen.findByText('https://project4.system.mow.gov.sy/c/tok7')
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: i18n.t('collections.copyLink') })
-    ).toBeInTheDocument();
+    expect(await screen.findByText('https://project4.system.mow.gov.sy/c/tok7')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: i18n.t('collections.copyLink') })).toBeInTheDocument();
   });
 });

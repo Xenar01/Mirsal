@@ -1,12 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Close } from './icons';
 
@@ -45,13 +37,7 @@ const ACCENT: Record<ToastKind, string> = {
   info: 'border-s-ink',
 };
 
-export function ToastProvider({
-  children,
-  duration = 4000,
-}: {
-  children: ReactNode;
-  duration?: number;
-}) {
+export function ToastProvider({ children, duration = 4000 }: { children: ReactNode; duration?: number }) {
   const { t } = useTranslation();
   const [items, setItems] = useState<ToastItem[]>([]);
   const nextId = useRef(0);
@@ -71,7 +57,7 @@ export function ToastProvider({
       }, duration);
       timers.current.push(handle);
     },
-    [duration]
+    [duration],
   );
 
   // Clear any pending auto-dismiss timers on unmount (no setState-after-unmount).
@@ -111,11 +97,7 @@ export function ToastProvider({
         <div aria-live="polite" className="flex w-full flex-col items-center gap-2">
           {polite.map(renderItem)}
         </div>
-        <div
-          aria-live="assertive"
-          role="alert"
-          className="flex w-full flex-col items-center gap-2"
-        >
+        <div aria-live="assertive" role="alert" className="flex w-full flex-col items-center gap-2">
           {assertive.map(renderItem)}
         </div>
       </div>

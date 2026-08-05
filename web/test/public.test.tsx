@@ -9,11 +9,7 @@ import { formatExpiry } from '../src/features/public/format';
 
 const TOKEN = 'tok-123';
 
-function jsonResponse(
-  status: number,
-  body?: unknown,
-  headers?: Record<string, string>
-): Response {
+function jsonResponse(status: number, body?: unknown, headers?: Record<string, string>): Response {
   return new Response(body === undefined ? null : JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json', ...(headers ?? {}) },
@@ -42,7 +38,7 @@ function renderPage() {
           </Routes>
         </MemoryRouter>
       </I18nextProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -75,7 +71,7 @@ describe('SealedDispatch — public share page', () => {
     setNavigatorLanguage('ar-SY');
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(200, liveFile))
+      vi.fn(async () => jsonResponse(200, liveFile)),
     );
 
     renderPage();
@@ -102,7 +98,7 @@ describe('SealedDispatch — public share page', () => {
     // --- stopped ---
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(410, { error: 'gone', reason: 'stopped', expires_at: null }))
+      vi.fn(async () => jsonResponse(410, { error: 'gone', reason: 'stopped', expires_at: null })),
     );
     const stopped = renderPage();
     await screen.findByText('The sender turned this link off.');
@@ -115,7 +111,7 @@ describe('SealedDispatch — public share page', () => {
     const expiresAt = Date.UTC(2026, 0, 5, 12, 0, 0);
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(410, { error: 'gone', reason: 'expired', expires_at: expiresAt }))
+      vi.fn(async () => jsonResponse(410, { error: 'gone', reason: 'expired', expires_at: expiresAt })),
     );
     renderPage();
     await screen.findByRole('status');
@@ -131,7 +127,7 @@ describe('SealedDispatch — public share page', () => {
     setNavigatorLanguage('en-US');
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(200, liveFile))
+      vi.fn(async () => jsonResponse(200, liveFile)),
     );
 
     const { container } = renderPage();
@@ -202,7 +198,7 @@ describe('SealedDispatch — public share page', () => {
     // limit 1, 0 used → 1 remaining.
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: 1, download_count: 0 }))
+      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: 1, download_count: 0 })),
     );
     const a = renderPage();
     expect(await screen.findByText('1 of 1 downloads remaining')).toBeInTheDocument();
@@ -212,7 +208,7 @@ describe('SealedDispatch — public share page', () => {
     // limit 3, 1 used → 2 remaining.
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: 3, download_count: 1 }))
+      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: 3, download_count: 1 })),
     );
     const b = renderPage();
     expect(await screen.findByText('2 of 3 downloads remaining')).toBeInTheDocument();
@@ -222,7 +218,7 @@ describe('SealedDispatch — public share page', () => {
     // unlimited → no counter at all.
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: null, download_count: 0 }))
+      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: null, download_count: 0 })),
     );
     renderPage();
     await screen.findByText('A file was sent to you via Mirsal');
@@ -290,7 +286,7 @@ describe('SealedDispatch — public share page', () => {
     setNavigatorLanguage('en-US');
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: 1 }))
+      vi.fn(async () => jsonResponse(200, { ...liveFile, download_limit: 1 })),
     );
 
     const { container } = renderPage();

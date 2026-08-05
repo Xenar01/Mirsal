@@ -105,7 +105,9 @@ export default async function collectRoutes(app: FastifyInstance, deps: CollectR
     let templateName: string | null = null;
     if (c.template_node_id !== null) {
       const t = db
-        .prepare("SELECT name FROM nodes WHERE id = @id AND owner_id = @ownerId AND kind = 'file' AND trashed_at IS NULL")
+        .prepare(
+          "SELECT name FROM nodes WHERE id = @id AND owner_id = @ownerId AND kind = 'file' AND trashed_at IS NULL",
+        )
         .get({ id: c.template_node_id, ownerId: c.owner_id }) as { name: string } | undefined;
       if (t) templateName = t.name;
     }
@@ -201,9 +203,22 @@ export default async function collectRoutes(app: FastifyInstance, deps: CollectR
       const node = db
         .prepare('SELECT owner_id, kind, name, mime_type, storage_path, trashed_at FROM nodes WHERE id = @id')
         .get({ id: c.template_node_id }) as
-        | { owner_id: number; kind: string; name: string; mime_type: string | null; storage_path: string | null; trashed_at: number | null }
+        | {
+            owner_id: number;
+            kind: string;
+            name: string;
+            mime_type: string | null;
+            storage_path: string | null;
+            trashed_at: number | null;
+          }
         | undefined;
-      if (!node || node.owner_id !== c.owner_id || node.kind !== 'file' || node.trashed_at !== null || !node.storage_path) {
+      if (
+        !node ||
+        node.owner_id !== c.owner_id ||
+        node.kind !== 'file' ||
+        node.trashed_at !== null ||
+        !node.storage_path
+      ) {
         reply.code(404).send({ error: 'not_found' });
         return;
       }
@@ -356,7 +371,16 @@ export default async function collectRoutes(app: FastifyInstance, deps: CollectR
       // --- Phase B: commit (transactional). On quota failure nothing persists. ---
       let result;
       try {
-        result = commitResponse(db, ownerId, { id: c.id, folder_node_id: c.folder_node_id }, dept, staged, note, req.ip, now());
+        result = commitResponse(
+          db,
+          ownerId,
+          { id: c.id, folder_node_id: c.folder_node_id },
+          dept,
+          staged,
+          note,
+          req.ip,
+          now(),
+        );
       } catch (e) {
         await cleanupTemps();
         if (e instanceof QuotaExceededError) {
@@ -387,9 +411,14 @@ export default async function collectRoutes(app: FastifyInstance, deps: CollectR
           actorId: null,
           action: 'collection_response_submitted',
           target: token,
-          detail: JSON.stringify({ collection_id: c.id, department_id: dept.id, department_name: dept.name, file_count: staged.length }),
+          detail: JSON.stringify({
+            collection_id: c.id,
+            department_id: dept.id,
+            department_name: dept.name,
+            file_count: staged.length,
+          }),
         },
-        now
+        now,
       );
 
       reply.code(200).send({ ok: true });

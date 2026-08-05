@@ -62,11 +62,10 @@ export async function createShare(
   ownerId: number,
   nodeId: number,
   options: CreateShareOptions,
-  now: number
+  now: number,
 ): Promise<Share> {
-  const node = db
-    .prepare('SELECT owner_id, trashed_at FROM nodes WHERE id = @nodeId')
-    .get({ nodeId }) as { owner_id: number; trashed_at: number | null } | undefined;
+  const node = db.prepare('SELECT owner_id, trashed_at FROM nodes WHERE id = @nodeId').get({ nodeId }) as
+    { owner_id: number; trashed_at: number | null } | undefined;
 
   if (!node || node.owner_id !== ownerId || node.trashed_at !== null) {
     throw new Error(`Invalid node for createShare: ${nodeId}`);
@@ -86,7 +85,7 @@ export async function createShare(
       `INSERT INTO shares(node_id, owner_id, token, password_hash, is_active, expires_at, allow_download, created_at, revoked_at)
        SELECT @nodeId, @ownerId, @token, @passwordHash, 1, @expiresAt, 1, @now, NULL
        FROM nodes
-       WHERE id = @nodeId AND owner_id = @ownerId AND trashed_at IS NULL`
+       WHERE id = @nodeId AND owner_id = @ownerId AND trashed_at IS NULL`,
     )
     .run({ nodeId, ownerId, token, passwordHash, expiresAt, now });
 
@@ -112,7 +111,7 @@ export async function setShareState(
   db: Database.Database,
   ownerId: number,
   shareId: number,
-  patch: SetShareStatePatch
+  patch: SetShareStatePatch,
 ): Promise<Share | undefined> {
   const sets: string[] = [];
   const params: Record<string, unknown> = { shareId, ownerId };
@@ -140,9 +139,7 @@ export async function setShareState(
   }
 
   if (sets.length > 0) {
-    db.prepare(`UPDATE shares SET ${sets.join(', ')} WHERE id = @shareId AND owner_id = @ownerId`).run(
-      params
-    );
+    db.prepare(`UPDATE shares SET ${sets.join(', ')} WHERE id = @shareId AND owner_id = @ownerId`).run(params);
   }
 
   return db.prepare('SELECT * FROM shares WHERE id = @shareId AND owner_id = @ownerId').get({
@@ -164,7 +161,7 @@ export function revokeShare(db: Database.Database, ownerId: number, shareId: num
  */
 export function ownerStatus(
   share: Pick<Share, 'is_active' | 'expires_at' | 'download_limit' | 'download_count'>,
-  now: number
+  now: number,
 ): 'active' | 'stopped' | 'expired' | 'exhausted' {
   if (!share.is_active) return 'stopped';
   if (share.download_limit != null && share.download_count >= share.download_limit) return 'exhausted';

@@ -121,7 +121,7 @@ async function renderAdmin(_cfg: StubConfig) {
           </ToastProvider>
         </AuthProvider>
       </I18nextProvider>
-    </QueryClientProvider>
+    </QueryClientProvider>,
   );
   // Flush the AuthProvider mount /me probe + the initial users query.
   await act(async () => {});
@@ -281,7 +281,10 @@ describe('Admin — reveal-once generated password (§3.1)', () => {
 
 describe('Admin — last-admin / self guards (§3.1)', () => {
   test('with exactly one active admin, its deactivate + delete controls stay focusable, expose the last-admin reason accessibly, and do nothing when activated', async () => {
-    const users = [mkUser({ id: 1, username: 'admin', role: 'admin', is_active: 1 }), mkUser({ id: 2, username: 'sara' })];
+    const users = [
+      mkUser({ id: 1, username: 'admin', role: 'admin', is_active: 1 }),
+      mkUser({ id: 2, username: 'sara' }),
+    ];
     const { calls } = stubFetch({ users });
     await renderAdmin({ users });
 
@@ -425,9 +428,7 @@ describe('Admin — mobile card lists (§M3 two-layout pattern)', () => {
   });
 
   test('the audit mobile card list renders the same entry alongside the desktop table', async () => {
-    const audit = [
-      { id: 7, actor_id: 1, action: 'user_create', target: '2', detail: null, created_at: NOW },
-    ];
+    const audit = [{ id: 7, actor_id: 1, action: 'user_create', target: '2', detail: null, created_at: NOW }];
     stubFetch({ audit });
     await renderAdmin({ audit });
 

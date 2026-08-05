@@ -47,7 +47,7 @@ export function zipFileName(rawName: string): string {
 export function collectSubtreeFiles(
   database: Database.Database,
   ownerId: number,
-  root: Node
+  root: Node,
 ): Array<{ storagePath: string; name: string }> {
   const out: Array<{ storagePath: string; name: string }> = [];
 
@@ -80,7 +80,7 @@ export function collectSubtreeFiles(
 export function appendFilesToArchive(
   archive: ZipArchive,
   files: Array<{ storagePath: string; name: string }>,
-  blobStore: BlobStore
+  blobStore: BlobStore,
 ): void {
   for (const f of files) {
     archive.append(blobStore.readBlob(f.storagePath), { name: f.name });

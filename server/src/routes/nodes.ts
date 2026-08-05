@@ -133,8 +133,7 @@ function rollupSizeBounded(db: Database.Database, nodeId: number, includeTrashed
 
 /** Folders roll up their size on read (their own `size_bytes` column is always 0). */
 function toDto(db: Database.Database, node: Node): NodeDto {
-  const sizeBytes =
-    node.kind === 'folder' ? rollupSizeBounded(db, node.id, node.trashed_at !== null) : node.size_bytes;
+  const sizeBytes = node.kind === 'folder' ? rollupSizeBounded(db, node.id, node.trashed_at !== null) : node.size_bytes;
   return {
     id: node.id,
     parent_id: node.parent_id,
@@ -199,20 +198,17 @@ function moveAndRename(
   nodeId: number,
   newParentId: number,
   newName: string,
-  now: number
+  now: number,
 ): Node {
   const node = db.prepare('SELECT owner_id, kind FROM nodes WHERE id = @nodeId').get({ nodeId }) as
-    | { owner_id: number; kind: Node['kind'] }
-    | undefined;
+    { owner_id: number; kind: Node['kind'] } | undefined;
   if (!node || node.owner_id !== ownerId || (node.kind !== 'folder' && node.kind !== 'file')) {
     throw new Error(`Invalid node for moveAndRename: ${nodeId}`);
   }
 
   const newParent = db
     .prepare('SELECT owner_id, kind, trashed_at FROM nodes WHERE id = @newParentId')
-    .get({ newParentId }) as
-    | { owner_id: number; kind: Node['kind']; trashed_at: number | null }
-    | undefined;
+    .get({ newParentId }) as { owner_id: number; kind: Node['kind']; trashed_at: number | null } | undefined;
   if (
     !newParent ||
     newParent.owner_id !== ownerId ||
@@ -227,7 +223,7 @@ function moveAndRename(
   }
 
   db.prepare(
-    'UPDATE nodes SET parent_id = @newParentId, name = @newName, updated_at = @now WHERE id = @nodeId AND owner_id = @ownerId'
+    'UPDATE nodes SET parent_id = @newParentId, name = @newName, updated_at = @now WHERE id = @nodeId AND owner_id = @ownerId',
   ).run({ nodeId, newParentId, newName, now, ownerId });
 
   return db.prepare('SELECT * FROM nodes WHERE id = @nodeId').get({ nodeId }) as Node;
@@ -325,7 +321,7 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
            AND (n.parent_id IS NULL OR NOT EXISTS (
              SELECT 1 FROM nodes p WHERE p.id = n.parent_id AND p.trashed_at IS NOT NULL
            ))
-         ORDER BY n.trashed_at DESC`
+         ORDER BY n.trashed_at DESC`,
       )
       .all({ uid }) as Node[];
     reply.code(200).send(rows.map((n) => toDto(db, n)));
@@ -404,7 +400,10 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
     // conservative upper bound reconciled to the real byte count below.
     const declaredRaw = req.headers['content-length'];
     const declared = declaredRaw !== undefined ? Number(declaredRaw) : NaN;
-    const reserveBytes = Math.min(Number.isFinite(declared) && declared > 0 ? declared : MAX_FILE_BYTES, MAX_FILE_BYTES);
+    const reserveBytes = Math.min(
+      Number.isFinite(declared) && declared > 0 ? declared : MAX_FILE_BYTES,
+      MAX_FILE_BYTES,
+    );
 
     const reserved = reserve(db, uid, reserveBytes, nowMs);
     if (!reserved) {
@@ -459,7 +458,7 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
         const info = db
           .prepare(
             `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, mime_type, storage_path, created_at, updated_at)
-             VALUES (@ownerId, @parentId, 'file', @name, @sizeBytes, @mimeType, NULL, @now, @now)`
+             VALUES (@ownerId, @parentId, 'file', @name, @sizeBytes, @mimeType, NULL, @now, @now)`,
           )
           .run({
             ownerId: uid,
@@ -618,7 +617,7 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
          WHERE n.owner_id = @uid AND n.trashed_at IS NOT NULL
            AND (n.parent_id IS NULL OR NOT EXISTS (
              SELECT 1 FROM nodes p WHERE p.id = n.parent_id AND p.trashed_at IS NOT NULL
-           ))`
+           ))`,
       )
       .all({ uid }) as { id: number }[];
 
@@ -676,7 +675,9 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
       return;
     }
 
-    db.prepare('UPDATE nodes SET auto_delete_at = @autoDeleteAt, updated_at = @now WHERE id = @id AND owner_id = @uid').run({
+    db.prepare(
+      'UPDATE nodes SET auto_delete_at = @autoDeleteAt, updated_at = @now WHERE id = @id AND owner_id = @uid',
+    ).run({
       autoDeleteAt,
       now: nowMs,
       id,

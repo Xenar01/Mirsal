@@ -5,17 +5,14 @@ import type { ReactNode } from 'react';
 import i18n from '../src/i18n';
 import Drawer from '../src/components/Drawer';
 
-function renderDrawer(
-  props: Partial<Parameters<typeof Drawer>[0]> = {},
-  children: ReactNode = <p>محتوى</p>
-) {
+function renderDrawer(props: Partial<Parameters<typeof Drawer>[0]> = {}, children: ReactNode = <p>محتوى</p>) {
   const onClose = props.onClose ?? vi.fn();
   const utils = render(
     <I18nextProvider i18n={i18n}>
       <Drawer open onClose={onClose} title="تفاصيل" {...props}>
         {children}
       </Drawer>
-    </I18nextProvider>
+    </I18nextProvider>,
   );
   return { onClose, ...utils };
 }
@@ -46,7 +43,7 @@ describe('Drawer', () => {
         <Drawer open={false} onClose={vi.fn()} title="تفاصيل">
           <p>محتوى</p>
         </Drawer>
-      </I18nextProvider>
+      </I18nextProvider>,
     );
     expect(screen.queryByRole('dialog')).toBeNull();
   });
@@ -57,7 +54,7 @@ describe('Drawer', () => {
       <>
         <button>الأول</button>
         <button>الأخير</button>
-      </>
+      </>,
     );
     const close = screen.getByRole('button', { name: i18n.t('common.close') });
     // The close control is the first focusable, so focus lands there on open.
@@ -85,7 +82,7 @@ describe('Drawer', () => {
         <Drawer open onClose={onClose} title="تفاصيل">
           <p>محتوى</p>
         </Drawer>
-      </I18nextProvider>
+      </I18nextProvider>,
     );
     // Focus moved into the drawer.
     expect(document.activeElement).not.toBe(opener);
@@ -95,7 +92,7 @@ describe('Drawer', () => {
         <Drawer open={false} onClose={onClose} title="تفاصيل">
           <p>محتوى</p>
         </Drawer>
-      </I18nextProvider>
+      </I18nextProvider>,
     );
     expect(document.activeElement).toBe(opener);
     opener.remove();

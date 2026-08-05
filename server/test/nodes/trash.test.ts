@@ -33,7 +33,7 @@ function seedUser(usedBytes = 0): number {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, used_bytes, created_at, updated_at)
-       VALUES (?, 'x', 'user', 1, 0, ?, ?, ?)`
+       VALUES (?, 'x', 'user', 1, 0, ?, ?, ?)`,
     )
     .run(`user-${Math.random()}`, usedBytes, t, t);
   return Number(info.lastInsertRowid);
@@ -52,7 +52,7 @@ function insertNode(row: {
   const info = db!
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, trashed_at, created_at, updated_at)
-       VALUES (@ownerId, @parentId, @kind, @name, @sizeBytes, @storagePath, @trashedAt, @t, @t)`
+       VALUES (@ownerId, @parentId, @kind, @name, @sizeBytes, @storagePath, @trashedAt, @t, @t)`,
     )
     .run({
       ownerId: row.ownerId,
@@ -75,9 +75,7 @@ function readNode(id: number): {
   name: string;
 } {
   return db!
-    .prepare(
-      'SELECT trashed_at, original_parent_id, purge_after, parent_id, name FROM nodes WHERE id = ?'
-    )
+    .prepare('SELECT trashed_at, original_parent_id, purge_after, parent_id, name FROM nodes WHERE id = ?')
     .get(id) as {
     trashed_at: number | null;
     original_parent_id: number | null;
@@ -330,9 +328,7 @@ test('permanentDelete returns freed bytes + storage paths for the full subtree, 
   expect([...result.storagePaths].sort()).toEqual(['u/1', 'u/2']);
 
   const remaining = db!
-    .prepare(
-      `SELECT COUNT(*) AS c FROM nodes WHERE id IN (${[f.id, a, sub.id, b].join(',')})`
-    )
+    .prepare(`SELECT COUNT(*) AS c FROM nodes WHERE id IN (${[f.id, a, sub.id, b].join(',')})`)
     .get() as { c: number };
   expect(remaining.c).toBe(0);
 
@@ -345,9 +341,7 @@ test('permanentDelete cascades to remove shares on descendant nodes too', () => 
   const { f, a } = buildTree(uid, now);
 
   db!
-    .prepare(
-      `INSERT INTO shares(node_id, owner_id, token, created_at) VALUES (@nodeId, @ownerId, @token, @now)`
-    )
+    .prepare(`INSERT INTO shares(node_id, owner_id, token, created_at) VALUES (@nodeId, @ownerId, @token, @now)`)
     .run({ nodeId: a, ownerId: uid, token: `tok-${Math.random()}`, now });
 
   permanentDelete(db!, uid, f.id);
@@ -369,9 +363,7 @@ test('permanentDelete works on an already-trashed subtree (includes trashed rows
   expect(result.freedBytes).toBe(30);
   expect([...result.storagePaths].sort()).toEqual(['u/1', 'u/2']);
   const remaining = db!
-    .prepare(
-      `SELECT COUNT(*) AS c FROM nodes WHERE id IN (${[f.id, a, sub.id, b].join(',')})`
-    )
+    .prepare(`SELECT COUNT(*) AS c FROM nodes WHERE id IN (${[f.id, a, sub.id, b].join(',')})`)
     .get() as { c: number };
   expect(remaining.c).toBe(0);
 });

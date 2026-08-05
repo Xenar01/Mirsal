@@ -33,7 +33,7 @@ function seedUser(): number {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, created_at, updated_at)
-       VALUES (?, 'x', 'user', 1, 0, ?, ?)`
+       VALUES (?, 'x', 'user', 1, 0, ?, ?)`,
     )
     .run(`user-${Math.random()}`, t, t);
   return Number(info.lastInsertRowid);
@@ -45,7 +45,7 @@ function seedFileNode(uid: number, now: number, overrides: { trashedAt?: number 
   const info = db!
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, trashed_at, created_at, updated_at)
-       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @trashedAt, @now, @now)`
+       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @trashedAt, @now, @now)`,
     )
     .run({
       ownerId: uid,
@@ -69,7 +69,7 @@ function seedShare(opts: {
   const info = db!
     .prepare(
       `INSERT INTO shares(node_id, owner_id, token, is_active, created_at, download_limit, download_count, on_exhaust)
-       VALUES (@nodeId, @ownerId, @token, 1, @now, @downloadLimit, @downloadLimit, @onExhaust)`
+       VALUES (@nodeId, @ownerId, @token, 1, @now, @downloadLimit, @downloadLimit, @onExhaust)`,
     )
     .run({
       nodeId: opts.nodeId,
@@ -101,9 +101,11 @@ function readShare(id: number): { is_active: number } {
 }
 
 function auditRows(action: string): { actor_id: number | null; target: string | null; detail: string | null }[] {
-  return db!
-    .prepare('SELECT actor_id, target, detail FROM audit_log WHERE action = ? ORDER BY id')
-    .all(action) as { actor_id: number | null; target: string | null; detail: string | null }[];
+  return db!.prepare('SELECT actor_id, target, detail FROM audit_log WHERE action = ? ORDER BY id').all(action) as {
+    actor_id: number | null;
+    target: string | null;
+    detail: string | null;
+  }[];
 }
 
 // --- stop ---------------------------------------------------------------

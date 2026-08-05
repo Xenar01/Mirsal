@@ -41,7 +41,7 @@ export function responseHeadroom(
   db: Database.Database,
   ownerId: number,
   collectionId: number,
-  departmentId: number
+  departmentId: number,
 ): number | null {
   const u = db.prepare('SELECT quota_bytes, used_bytes FROM users WHERE id = @ownerId').get({ ownerId }) as {
     quota_bytes: number | null;
@@ -53,7 +53,7 @@ export function responseHeadroom(
       `SELECT COALESCE(SUM(n.size_bytes), 0) AS b
        FROM collection_responses r
        JOIN nodes n ON n.parent_id = r.folder_node_id AND n.kind = 'file'
-       WHERE r.collection_id = @collectionId AND r.department_id = @departmentId`
+       WHERE r.collection_id = @collectionId AND r.department_id = @departmentId`,
     )
     .get({ collectionId, departmentId }) as { b: number };
   return Math.max(0, u.quota_bytes - u.used_bytes + prior.b);
@@ -84,7 +84,7 @@ export function commitResponse(
   staged: StagedFile[],
   note: string | null,
   submittedIp: string | null,
-  now: number
+  now: number,
 ): CommitResponseResult {
   const totalBytes = staged.reduce((sum, f) => sum + f.bytes, 0);
 
@@ -113,7 +113,7 @@ export function commitResponse(
       const info = db
         .prepare(
           `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
-           VALUES (@o, @p, 'folder', @n, 0, @now, @now)`
+           VALUES (@o, @p, 'folder', @n, 0, @now, @now)`,
         )
         .run({ o: ownerId, p: collection.folder_node_id, n: folderName, now });
       subfolderId = Number(info.lastInsertRowid);
@@ -129,7 +129,7 @@ export function commitResponse(
       const info = db
         .prepare(
           `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, mime_type, storage_path, created_at, updated_at)
-           VALUES (@o, @p, 'file', @n, @sz, @mt, NULL, @now, @now)`
+           VALUES (@o, @p, 'file', @n, @sz, @mt, NULL, @now, @now)`,
         )
         .run({ o: ownerId, p: subfolderId, n: name, sz: f.bytes, mt: f.mimeType, now });
       const nodeId = Number(info.lastInsertRowid);
@@ -144,7 +144,7 @@ export function commitResponse(
          ON CONFLICT(collection_id, department_id) DO UPDATE SET
            folder_node_id = excluded.folder_node_id, note = excluded.note,
            submitted_at = excluded.submitted_at, submitted_ip = excluded.submitted_ip
-         RETURNING id`
+         RETURNING id`,
       )
       .get({ c: collection.id, d: department.id, f: subfolderId, note, now, ip: submittedIp }) as { id: number };
 

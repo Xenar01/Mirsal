@@ -1,11 +1,7 @@
 import { describe, test, expect, vi, afterEach } from 'vitest';
 import { render, screen, act, waitFor, renderHook } from '@testing-library/react';
 import { I18nextProvider } from 'react-i18next';
-import {
-  QueryClient,
-  QueryClientProvider,
-  focusManager,
-} from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, focusManager } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import i18n from '../src/i18n';
 import { AuthProvider } from '../src/features/auth/auth-context';
@@ -62,7 +58,7 @@ describe('StorageMeter — refreshes when the browser tab regains focus', () => 
       vi.fn(async (url: RequestInfo | URL) => {
         if (String(url).split('?')[0].endsWith('/auth/me')) return jsonResponse(200, ME(used));
         throw new Error(`unexpected fetch: ${String(url)}`);
-      })
+      }),
     );
 
     const client = prodLikeClient();
@@ -73,13 +69,11 @@ describe('StorageMeter — refreshes when the browser tab regains focus', () => 
             <StorageMeter />
           </I18nextProvider>
         </AuthProvider>
-      </QueryClientProvider>
+      </QueryClientProvider>,
     );
 
     // Initial load: 250 / 1000 = 25%.
-    await waitFor(() =>
-      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '25')
-    );
+    await waitFor(() => expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '25'));
 
     // A file is uploaded from another tab → the server's used_bytes grows.
     // Switching back to this tab must refresh the meter (the reported bug: it
@@ -90,15 +84,16 @@ describe('StorageMeter — refreshes when the browser tab regains focus', () => 
       focusManager.setFocused(true);
     });
 
-    await waitFor(() =>
-      expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50')
-    );
+    await waitFor(() => expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50'));
   });
 });
 
 describe('dashboard mutations — keep the storage meter coherent', () => {
   test('deleting a node invalidates the /me query so the meter re-reads used_bytes', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, { freedBytes: 10 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => jsonResponse(200, { freedBytes: 10 })),
+    );
 
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const invalidateSpy = vi.spyOn(client, 'invalidateQueries');

@@ -26,8 +26,12 @@ beforeEach(() => {
   migrate(db);
 });
 afterEach(() => {
-  db?.close(); db = undefined;
-  if (dir) { fs.rmSync(dir, { recursive: true, force: true }); dir = undefined; }
+  db?.close();
+  db = undefined;
+  if (dir) {
+    fs.rmSync(dir, { recursive: true, force: true });
+    dir = undefined;
+  }
 });
 
 const keys = ['DB_PATH', 'STORAGE_DIR', 'SESSION_SECRET', 'CSRF_SECRET', 'PUBLIC_BASE_URL'] as const;
@@ -52,7 +56,7 @@ function seedUser(): number {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, created_at, updated_at)
-       VALUES (?, 'x', 'user', 1, 0, ?, ?)`
+       VALUES (?, 'x', 'user', 1, 0, ?, ?)`,
     )
     .run(`user-${Math.random()}`, t, t);
   return Number(info.lastInsertRowid);
@@ -62,7 +66,7 @@ function seedFileNode(uid: number, now: number, trashedAt: number | null = null)
   const info = db!
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, trashed_at, created_at, updated_at)
-       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @trashedAt, @now, @now)`
+       VALUES (@ownerId, @parentId, 'file', @name, 5, 'u/1', @trashedAt, @now, @now)`,
     )
     .run({ ownerId: uid, parentId: rootId, name: `f-${Math.random()}`, trashedAt, now });
   return Number(info.lastInsertRowid);
@@ -97,8 +101,11 @@ test('createCollection: token >= 43, is_active=1, folder under root, departments
   expect(c.deadline_at).toBeNull();
   expect(c.owner_id).toBe(uid);
 
-  const folder = db!.prepare('SELECT parent_id, kind, name FROM nodes WHERE id = ?').get(c.folder_node_id) as
-    { parent_id: number; kind: string; name: string };
+  const folder = db!.prepare('SELECT parent_id, kind, name FROM nodes WHERE id = ?').get(c.folder_node_id) as {
+    parent_id: number;
+    kind: string;
+    name: string;
+  };
   expect(folder.parent_id).toBe(rootId);
   expect(folder.kind).toBe('folder');
   expect(folder.name).toBe('طلب تجميع: تقرير الربع الأول');
@@ -133,28 +140,34 @@ test('createCollection accepts a valid template file; rejects foreign/trashed/fo
   expect(c.template_node_id).toBe(good);
 
   const foreign = seedFileNode(other, now);
-  await expect(createCollection(db!, uid, { title: 'T2', departments: ['A'], templateNodeId: foreign }, now))
-    .rejects.toThrow('bad_template');
+  await expect(
+    createCollection(db!, uid, { title: 'T2', departments: ['A'], templateNodeId: foreign }, now),
+  ).rejects.toThrow('bad_template');
 
   const trashed = seedFileNode(uid, now, now);
-  await expect(createCollection(db!, uid, { title: 'T3', departments: ['A'], templateNodeId: trashed }, now))
-    .rejects.toThrow('bad_template');
+  await expect(
+    createCollection(db!, uid, { title: 'T3', departments: ['A'], templateNodeId: trashed }, now),
+  ).rejects.toThrow('bad_template');
 
   const { rootId } = ensureUserRoots(db!, uid, now); // a folder is not a file
-  await expect(createCollection(db!, uid, { title: 'T4', departments: ['A'], templateNodeId: rootId }, now))
-    .rejects.toThrow('bad_template');
+  await expect(
+    createCollection(db!, uid, { title: 'T4', departments: ['A'], templateNodeId: rootId }, now),
+  ).rejects.toThrow('bad_template');
 });
 
 test('createCollection rejects an all-empty department list', async () => {
   const uid = seedUser();
-  await expect(createCollection(db!, uid, { title: 'T', departments: ['', '  '] }, Date.now()))
-    .rejects.toThrow('no_departments');
+  await expect(createCollection(db!, uid, { title: 'T', departments: ['', '  '] }, Date.now())).rejects.toThrow(
+    'no_departments',
+  );
 });
 
 test('createCollection dedupes duplicate department names', async () => {
   const uid = seedUser();
   const c = await createCollection(db!, uid, { title: 'T', departments: ['HR', 'HR', 'Finance'] }, Date.now());
-  const count = db!.prepare('SELECT COUNT(*) c FROM collection_departments WHERE collection_id = ?').get(c.id) as { c: number };
+  const count = db!.prepare('SELECT COUNT(*) c FROM collection_departments WHERE collection_id = ?').get(c.id) as {
+    c: number;
+  };
   expect(count.c).toBe(2);
 });
 
@@ -179,17 +192,33 @@ test('getCollection is owner-scoped', async () => {
 });
 
 /** Seeds a department response: a subfolder under the collection folder holding `fileBytes` file. */
-function seedResponse(collectionId: number, departmentId: number, collectionFolderId: number, uid: number, now: number, fileBytes = 10): number {
+function seedResponse(
+  collectionId: number,
+  departmentId: number,
+  collectionFolderId: number,
+  uid: number,
+  now: number,
+  fileBytes = 10,
+): number {
   const subInfo = db!
-    .prepare(`INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
-              VALUES (@uid, @parent, 'folder', @name, 0, @now, @now)`)
+    .prepare(
+      `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, created_at, updated_at)
+              VALUES (@uid, @parent, 'folder', @name, 0, @now, @now)`,
+    )
     .run({ uid, parent: collectionFolderId, name: `dept-${departmentId}`, now });
   const subId = Number(subInfo.lastInsertRowid);
-  db!.prepare(`INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
-               VALUES (@uid, @parent, 'file', @name, @bytes, @sp, @now, @now)`)
+  db!
+    .prepare(
+      `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, storage_path, created_at, updated_at)
+               VALUES (@uid, @parent, 'file', @name, @bytes, @sp, @now, @now)`,
+    )
     .run({ uid, parent: subId, name: `r-${Math.random()}`, bytes: fileBytes, sp: `${uid}/${Math.random()}`, now });
-  db!.prepare(`INSERT INTO collection_responses(collection_id, department_id, folder_node_id, note, submitted_at)
-               VALUES (?, ?, ?, NULL, ?)`).run(collectionId, departmentId, subId, now);
+  db!
+    .prepare(
+      `INSERT INTO collection_responses(collection_id, department_id, folder_node_id, note, submitted_at)
+               VALUES (?, ?, ?, NULL, ?)`,
+    )
+    .run(collectionId, departmentId, subId, now);
   return subId;
 }
 
@@ -197,7 +226,11 @@ test('listCollections returns owner rows newest-first with department + responde
   const uid = seedUser();
   const now = Date.now();
   const c = await createCollection(db!, uid, { title: 'T', departments: ['A', 'B', 'C'] }, now);
-  const deptA = (db!.prepare('SELECT id FROM collection_departments WHERE collection_id=? ORDER BY position').get(c.id) as { id: number }).id;
+  const deptA = (
+    db!.prepare('SELECT id FROM collection_departments WHERE collection_id=? ORDER BY position').get(c.id) as {
+      id: number;
+    }
+  ).id;
   seedResponse(c.id, deptA, c.folder_node_id, uid, now);
 
   const rows = listCollections(db!, uid);
@@ -243,14 +276,17 @@ test('setCollectionState updates title/isActive/deadline, clears password with n
   // Foreign owner cannot touch it.
   const u3 = await setCollectionState(db!, other, c.id, { isActive: true }, 4000);
   expect(u3).toBeUndefined();
-  expect((db!.prepare('SELECT is_active FROM collections WHERE id=?').get(c.id) as { is_active: number }).is_active).toBe(0);
+  expect(
+    (db!.prepare('SELECT is_active FROM collections WHERE id=?').get(c.id) as { is_active: number }).is_active,
+  ).toBe(0);
 });
 
 test('deleteCollection removes the collection, its folder subtree, departments/responses, and returns blob paths', async () => {
   const uid = seedUser();
   const now = Date.now();
   const c = await createCollection(db!, uid, { title: 'T', departments: ['A'] }, now);
-  const deptA = (db!.prepare('SELECT id FROM collection_departments WHERE collection_id=?').get(c.id) as { id: number }).id;
+  const deptA = (db!.prepare('SELECT id FROM collection_departments WHERE collection_id=?').get(c.id) as { id: number })
+    .id;
   seedResponse(c.id, deptA, c.folder_node_id, uid, now, 42);
 
   const res = deleteCollection(db!, uid, c.id);
@@ -258,8 +294,12 @@ test('deleteCollection removes the collection, its folder subtree, departments/r
   expect(res.storagePaths.length).toBe(1);
 
   expect(db!.prepare('SELECT COUNT(*) c FROM collections WHERE id=?').get(c.id)).toMatchObject({ c: 0 });
-  expect(db!.prepare('SELECT COUNT(*) c FROM collection_departments WHERE collection_id=?').get(c.id)).toMatchObject({ c: 0 });
-  expect(db!.prepare('SELECT COUNT(*) c FROM collection_responses WHERE collection_id=?').get(c.id)).toMatchObject({ c: 0 });
+  expect(db!.prepare('SELECT COUNT(*) c FROM collection_departments WHERE collection_id=?').get(c.id)).toMatchObject({
+    c: 0,
+  });
+  expect(db!.prepare('SELECT COUNT(*) c FROM collection_responses WHERE collection_id=?').get(c.id)).toMatchObject({
+    c: 0,
+  });
   expect(db!.prepare('SELECT COUNT(*) c FROM nodes WHERE id=?').get(c.folder_node_id)).toMatchObject({ c: 0 });
 });
 
@@ -268,7 +308,7 @@ test('deleteCollection on a foreign/missing collection returns deleted=false', (
   expect(deleteCollection(db!, uid, 999999)).toEqual({ deleted: false, storagePaths: [] });
 });
 
-test('deleteCollection does not allow a non-owner to delete another user\'s real collection', async () => {
+test("deleteCollection does not allow a non-owner to delete another user's real collection", async () => {
   const uid = seedUser();
   const other = seedUser();
   const now = Date.now();

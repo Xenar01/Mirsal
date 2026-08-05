@@ -31,7 +31,7 @@ function seedUser(
   overrides: Partial<{
     quotaBytes: number | null;
     usedBytes: number;
-  }> = {}
+  }> = {},
 ): number {
   const t = Date.now();
   const { quotaBytes = null, usedBytes = 0 } = overrides;
@@ -39,7 +39,7 @@ function seedUser(
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, quota_bytes, used_bytes, created_at, updated_at)
-       VALUES (?, 'x', 'user', 1, 0, ?, ?, ?, ?)`
+       VALUES (?, 'x', 'user', 1, 0, ?, ?, ?, ?)`,
     )
     .run(`user-${Math.random()}`, quotaBytes, usedBytes, t, t);
 

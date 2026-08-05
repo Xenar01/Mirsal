@@ -63,9 +63,7 @@ export default function TrashView() {
         )}
       </div>
 
-      {deleteTarget && (
-        <ConfirmDeleteModal node={deleteTarget} onClose={() => setDeleteTarget(null)} />
-      )}
+      {deleteTarget && <ConfirmDeleteModal node={deleteTarget} onClose={() => setDeleteTarget(null)} />}
       {emptyOpen && <ConfirmEmptyModal onClose={() => setEmptyOpen(false)} />}
     </DashboardShell>
   );
@@ -171,10 +169,7 @@ function TrashRow({
 
   if (variant === 'card') {
     return (
-      <div
-        data-testid={`trash-card-${node.id}`}
-        className="rounded-[10px] border border-line bg-surface p-3"
-      >
+      <div data-testid={`trash-card-${node.id}`} className="rounded-[10px] border border-line bg-surface p-3">
         <div className="flex items-center gap-2">
           <span data-testid={testId} className="inline-flex shrink-0 text-ink-2">
             {icon}

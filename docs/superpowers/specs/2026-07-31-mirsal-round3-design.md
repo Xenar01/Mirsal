@@ -41,6 +41,7 @@ and always renders the fixed note `storage.noQuota` ("بلا حصة محددة")
 is invisible to the user.
 
 **Server change.**
+
 - `server/src/routes/auth.ts`: extend `PublicUser` + `toPublicUser` to include
   `quotaBytes: number | null` and `usedBytes: number`. Read those two columns in the `/login`
   SELECT and the `/me` SELECT (both currently omit them). `used_bytes` is the authoritative,
@@ -48,6 +49,7 @@ is invisible to the user.
   not recompute.
 
 **Web change.**
+
 - `web/src/features/auth/auth-context.tsx`: add `quotaBytes: number | null` + `usedBytes: number`
   to the `PublicUser` type.
 - `web/src/features/dashboard/StorageMeter.tsx`: when `user.quotaBytes !== null`, render a labelled
@@ -75,6 +77,7 @@ already know the correct password).
 **Server change (`server/src/routes/auth.ts`).** Restructure the verify branch so the real
 password hash is used whenever `row` exists (active **or** inactive), and the dummy hash only when
 there is no row — preserving constant work (exactly one argon2 verify per attempt):
+
 ```
 const hasUser = !!row;
 const verified = await verifyPassword(hasUser ? row.password_hash : dummyHash, password);
@@ -88,6 +91,7 @@ if (!hasUser || !verified || row.is_active !== 1) {  // wrong pw / unknown / (in
 }
 // active + verified → success (unchanged)
 ```
+
 Note the ordering guarantees an inactive account with a **wrong** password falls through to the
 generic 401, not the 403.
 
@@ -107,6 +111,7 @@ sees **only** the folder name + "Download all as ZIP"; contents are hidden — e
 not just in the UI.
 
 **Server change (`server/src/routes/public.ts`).** When the share's node is a folder:
+
 - `GET /api/public/:token/list` → constant-shape `403 {error:'forbidden'}` (never enumerate).
 - `GET`/`POST /api/public/:token/download` (single-file) → `403 {error:'forbidden'}` regardless of
   any `?node=` param (so a recipient can't fetch individual children by guessing ids).
@@ -142,6 +147,7 @@ still-valid cookie as "already unlocked" for the purpose of showing content on l
 **Server change (`server/src/routes/public.ts`).** Make the unlock cookie a **session cookie** with
 a short lifetime so it only bridges the current page's requests (meta refetch + download form POST)
 and cannot silently authorize a later visit:
+
 - Drop the persistent `maxAge` on `reply.setCookie(UNLOCK_COOKIE, …)` so the browser treats it as a
   session cookie (cleared when the browser session ends).
 - Reduce `UNLOCK_COOKIE_MAX_AGE_S` (server-side lifetime enforced in `isUnlocked`) from 1800 to a
@@ -173,6 +179,7 @@ required** (migration). Take it before `docker compose up -d`, as with the downl
 ## 2.1 — (#4) Per-user display name (Arabic or English)
 
 **Server (`server/src/routes/admin.ts`).**
+
 - `AdminUserDto` + `USER_DTO_COLUMNS`: add `display_name: string | null`.
 - `createUserSchema`: add `display_name: z.string().trim().max(120).nullable().optional()`
   (a free-text label — trusted display string, never a path segment; length-bounded, no control
@@ -181,6 +188,7 @@ required** (migration). Take it before `docker compose up -d`, as with the downl
   add `display_name = @displayName` to the UPDATE set. Keep the "at least one field" refine.
 
 **Web (`web/src/features/admin/`).**
+
 - `types.ts` `AdminUserDto`: add `display_name: string | null`.
 - `api.ts`/`queries.ts`: thread `display_name` through `createUser` and `patchUser` var types.
 - `UsersTable.tsx`: add a "الاسم" column (thead + `UserRow` cell) showing `display_name` beside the
@@ -196,6 +204,7 @@ clears it. Web: the column renders the name (and a placeholder when null); creat
 Targets for user-management actions are raw user ids too.
 
 **Server (`server/src/routes/admin.ts`, audit handler).** After fetching the page of rows:
+
 - Collect the distinct ids needed: every non-null `actor_id`, plus every `target` that is a numeric
   user id for a **user-target action** (`user_create`, `user_update`, `user_delete`,
   `user_password_reset`, `user_nodes_view`, and the new `user_clear_space`). One
@@ -235,13 +244,14 @@ Their shares cascade-delete with the nodes (expected — the shared files are go
 
 **Server (`server/src/routes/admin.ts`).** New audited route
 `POST /api/admin/users/:id/clear` behind `requireAdmin`:
+
 1. 404 if the target user doesn't exist.
 2. Collect the user's file blob `storage_path`s (`SELECT storage_path FROM nodes WHERE owner_id=? AND
-   kind='file' AND storage_path IS NOT NULL`) for post-txn unlink.
+kind='file' AND storage_path IS NOT NULL`) for post-txn unlink.
 3. In one `db.transaction`: `DELETE FROM nodes WHERE owner_id=? AND kind IN ('folder','file')`
    (FK `ON DELETE CASCADE` covers subtrees + the `shares` rows on those nodes); set
    `used_bytes=0, updated_at=now` on the user; `writeAudit('user_clear_space', target: id,
-   detail: '<n> files, <bytes> freed')`.
+detail: '<n> files, <bytes> freed')`.
 4. After commit: best-effort unlink the collected blob paths via `blobStore` (non-fatal; any
    stragglers are reaped by the existing orphan sweep, same as the user-delete path). Then
    `ensureUserRoots` to guarantee an empty root/trash exists.
@@ -286,6 +296,7 @@ empty trash. Web: the button confirms then calls the mutation; hidden when empty
 
 **Web only (`web/src/features/dashboard/DriveView.tsx`, `Register`).** Client-side sort of the
 current listing:
+
 - Sort state `{ key: 'name'|'size'|'date', dir: 'asc'|'desc' }` (component state; default
   `name/asc`). Clicking a sortable column header (Name/Size/Date) toggles direction / switches key.
 - **Folders first**, then files; within each group sort by the chosen key. Name uses
@@ -298,6 +309,7 @@ current listing:
 ## 3.3 — (#8) Multi-select rows → bulk delete (to Trash)
 
 **Web (`web/src/features/dashboard/DriveView.tsx`).**
+
 - A checkbox column in `Register` + a header "select all (current folder)" checkbox. Selection is a
   `Set<number>` of node ids in component state, cleared on folder navigation.
 - When ≥1 selected, show a bulk action bar: "نقل إلى المهملات (N)" + "إلغاء". Confirm once, then
@@ -319,7 +331,7 @@ each selected id and clears the selection; navigating folders clears selection.
 
 - Every server change is TDD (failing test → impl → green); every web change likewise via the
   existing vitest + Testing Library setup. Full suite must stay green (`npm test` + `npm run
-  typecheck`, both workspaces) at each commit.
+typecheck`, both workspaces) at each commit.
 - Per-phase: adversarial review of the diff before merge; merge `--no-ff` to main; rebuild +
   `docker compose up -d`; live-verify the nginx→container HTTPS chain via
   `curl --resolve project4.system.mow.gov.sy:443:127.0.0.1 …` (box can't hit its own public IP);
@@ -330,6 +342,7 @@ each selected id and clears the selection; navigating folders clears selection.
 - **Stop after each phase** for the user to review and clear the conversation before the next.
 
 ## Out of scope / explicitly deferred
+
 - No off-box backups (files remain transient, per the standing decision).
 - Download limits stay single-file only (folder shares are uncounted/unlimited).
 - Bulk delete is "move to Trash", not permanent delete (permanent stays a deliberate per-item or

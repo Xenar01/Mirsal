@@ -13,7 +13,7 @@ export function reserve(db: Database.Database, userId: number, bytes: number, no
     .prepare(
       `UPDATE users
        SET used_bytes = used_bytes + @bytes, updated_at = @now
-       WHERE id = @userId AND (quota_bytes IS NULL OR used_bytes + @bytes <= quota_bytes)`
+       WHERE id = @userId AND (quota_bytes IS NULL OR used_bytes + @bytes <= quota_bytes)`,
     )
     .run({ userId, bytes, now });
 
@@ -30,15 +30,12 @@ export function reserve(db: Database.Database, userId: number, bytes: number, no
  * corrupting the quota ledger for that user going forward).
  * Matches the plan's 4-arg signature exactly — does not touch updated_at.
  */
-export function commitActual(
-  db: Database.Database,
-  userId: number,
-  reserved: number,
-  actual: number
-): void {
-  db.prepare(
-    'UPDATE users SET used_bytes = MAX(0, used_bytes + (@actual - @reserved)) WHERE id = @userId'
-  ).run({ userId, reserved, actual });
+export function commitActual(db: Database.Database, userId: number, reserved: number, actual: number): void {
+  db.prepare('UPDATE users SET used_bytes = MAX(0, used_bytes + (@actual - @reserved)) WHERE id = @userId').run({
+    userId,
+    reserved,
+    actual,
+  });
 }
 
 /**

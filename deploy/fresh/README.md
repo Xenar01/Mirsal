@@ -5,7 +5,7 @@ public-IP VPS** where **nginx is the TLS edge** — i.e. a normal cloud box
 (Hetzner, DigitalOcean, Linode, Vultr, a plain VPS…), **not** behind a
 corporate/IT gateway.
 
-> If you are deploying *behind* a gateway that terminates TLS for you (like the
+> If you are deploying _behind_ a gateway that terminates TLS for you (like the
 > original `project4` box), use `deploy/install.md` instead — that variant
 > deliberately has **no** http→https redirect and trusts a specific gateway IP.
 > This guide is the opposite: nginx here owns TLS and redirects http→https.
@@ -18,13 +18,13 @@ no external services.
 
 ## 0. What you need before you start
 
-| Requirement | Notes |
-|---|---|
-| A VPS | Ubuntu 22.04 or 24.04 LTS, ≥ 1 vCPU / 1 GB RAM / 10 GB disk. 2 GB RAM makes the image build comfortable. |
-| A domain (or subdomain) | e.g. `files.example.com`. You control its DNS. |
-| SSH root (or sudo) access to the VPS | |
-| An email address | For Let's Encrypt expiry notices. |
-| Repo access | This repo is **private**. You'll need a GitHub PAT or an SSH deploy key on the box to `git clone`. |
+| Requirement                          | Notes                                                                                                    |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| A VPS                                | Ubuntu 22.04 or 24.04 LTS, ≥ 1 vCPU / 1 GB RAM / 10 GB disk. 2 GB RAM makes the image build comfortable. |
+| A domain (or subdomain)              | e.g. `files.example.com`. You control its DNS.                                                           |
+| SSH root (or sudo) access to the VPS |                                                                                                          |
+| An email address                     | For Let's Encrypt expiry notices.                                                                        |
+| Repo access                          | This repo is **private**. You'll need a GitHub PAT or an SSH deploy key on the box to `git clone`.       |
 
 **Point DNS first.** Create an **`A` record** (and `AAAA` if you have IPv6) for
 your domain → the VPS's public IP. Wait until it resolves before requesting a
@@ -93,6 +93,7 @@ docker --version && docker compose version && nginx -v && certbot --version
 ```
 
 **2.2 make-env** — writes `.env` (mode `600`) with:
+
 - `SESSION_SECRET` / `CSRF_SECRET` = fresh `openssl rand -hex 32` each (never reused).
 - `PUBLIC_BASE_URL=https://<your-domain>` (used to build absolute share links — **must** be correct or share links point at the wrong host).
 - `HOST=0.0.0.0` (container binds all interfaces; the compose publish `127.0.0.1:8084:8084` is what keeps it off the public internet).
@@ -145,13 +146,13 @@ downtime). See `docs/RUNBOOK.md` for restore.
 
 ## 5. Day-2 operations
 
-| Task | Command (from repo root) |
-|---|---|
-| Update to latest code | `git pull && docker compose build && docker compose up -d` |
-| Tail logs | `docker compose logs -f mirsal` |
-| Restart | `docker compose restart mirsal` |
-| Manual backup now | `sudo bash deploy/backup-mirsal.sh` |
-| Reset admin password | see `docs/RUNBOOK.md` (or the recipe in the repo's admin-access notes) |
+| Task                      | Command (from repo root)                                                 |
+| ------------------------- | ------------------------------------------------------------------------ |
+| Update to latest code     | `git pull && docker compose build && docker compose up -d`               |
+| Tail logs                 | `docker compose logs -f mirsal`                                          |
+| Restart                   | `docker compose restart mirsal`                                          |
+| Manual backup now         | `sudo bash deploy/backup-mirsal.sh`                                      |
+| Reset admin password      | see `docs/RUNBOOK.md` (or the recipe in the repo's admin-access notes)   |
 | Rollback the public route | `sudo rm /etc/nginx/sites-enabled/mirsal && sudo systemctl reload nginx` |
 
 Full ops/restore/troubleshooting: **`docs/RUNBOOK.md`**.

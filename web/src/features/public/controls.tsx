@@ -31,13 +31,7 @@ export function PrimaryLink({ href, children }: { href: string; children: ReactN
  * `--brass-ink` label and `data-variant="primary"` marker, so the recipient sees
  * (and assertions treat) it as the one unambiguous primary action.
  */
-export function PrimaryButton({
-  children,
-  type = 'submit',
-}: {
-  children: ReactNode;
-  type?: 'submit' | 'button';
-}) {
+export function PrimaryButton({ children, type = 'submit' }: { children: ReactNode; type?: 'submit' | 'button' }) {
   return (
     <button
       type={type}

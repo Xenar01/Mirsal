@@ -17,7 +17,7 @@ function renderWithToasts(ui: React.ReactNode) {
   return render(
     <I18nextProvider i18n={i18n}>
       <ToastProvider>{ui}</ToastProvider>
-    </I18nextProvider>
+    </I18nextProvider>,
   );
 }
 

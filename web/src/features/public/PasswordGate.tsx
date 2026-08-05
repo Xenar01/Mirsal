@@ -15,13 +15,7 @@ import { unlockShare } from './api';
  * (the unlock cookie now unlocks it). Rate-limit (429) and header-absent cases
  * degrade to their own authored copy.
  */
-export default function PasswordGate({
-  token,
-  onUnlocked,
-}: {
-  token: string;
-  onUnlocked: () => void;
-}) {
+export default function PasswordGate({ token, onUnlocked }: { token: string; onUnlocked: () => void }) {
   const { t } = useTranslation();
   const inputId = useId();
   const [password, setPassword] = useState('');
@@ -44,7 +38,7 @@ export default function PasswordGate({
         setError(
           result.remaining !== null
             ? t('public.wrongPassword', { count: result.remaining })
-            : t('public.wrongPasswordNoCount')
+            : t('public.wrongPasswordNoCount'),
         );
         return;
       case 'rateLimited':

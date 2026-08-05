@@ -44,11 +44,7 @@ export default function CreateCollectionModal({ onClose }: { onClose: () => void
 
   return (
     <Modal open onClose={onClose} title={t('collections.create.title')}>
-      {result ? (
-        <LinkStep result={result} onDone={onClose} />
-      ) : (
-        <ConfigureStep onCreated={setResult} />
-      )}
+      {result ? <LinkStep result={result} onDone={onClose} /> : <ConfigureStep onCreated={setResult} />}
     </Modal>
   );
 }

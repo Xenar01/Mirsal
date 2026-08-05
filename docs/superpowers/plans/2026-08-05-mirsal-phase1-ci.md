@@ -36,11 +36,13 @@
 ### Task 1: ESLint flat config + zero-error baseline
 
 **Files:**
+
 - Create: `eslint.config.js`
 - Modify: `package.json` (root) — devDeps + `lint`/`lint:fix` scripts
 - Modify: source files under `server/`, `web/` only as needed to clear ESLint errors
 
 **Interfaces:**
+
 - Produces: root scripts `npm run lint` (exits 0 = zero errors) and `npm run lint:fix`; a committed `eslint.config.js` that later tasks (Prettier, CI) build on.
 
 - [ ] **Step 1: Install ESLint toolchain as root dev dependencies**
@@ -49,6 +51,7 @@
 cd /var/www/projects/mirsal
 npm install -D -w . eslint@^9 typescript-eslint@^8 @eslint/js@^9 eslint-plugin-react-hooks@^5 globals@^15
 ```
+
 (`-w .` installs at the workspace root, not inside `server`/`web`.)
 
 - [ ] **Step 2: Create `eslint.config.js` (flat config)**
@@ -64,12 +67,7 @@ import globals from 'globals';
 
 export default tseslint.config(
   {
-    ignores: [
-      '**/dist/**',
-      '**/node_modules/**',
-      '**/coverage/**',
-      'web/dev-dist/**',
-    ],
+    ignores: ['**/dist/**', '**/node_modules/**', '**/coverage/**', 'web/dev-dist/**'],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -91,13 +89,14 @@ export default tseslint.config(
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
     },
-  }
+  },
 );
 ```
 
 - [ ] **Step 3: Add `lint` + `lint:fix` scripts to root `package.json`**
 
 In root `package.json` `"scripts"`, add:
+
 ```json
 "lint": "eslint .",
 "lint:fix": "eslint . --fix"
@@ -116,9 +115,10 @@ Then re-run `npm run lint` and read the REMAINING errors.
 - [ ] **Step 6: Resolve remaining ERRORS to zero (decision procedure)**
 
 For each remaining **error**, apply exactly one of:
+
 1. **Genuine dead/incorrect code** (unused var, unreachable, shadow) → remove/fix minimally. No behavior change.
 2. **Intentional pattern the rule dislikes** (e.g. a deliberate `any`, an empty catch) → prefer a targeted fix; if the rule is pervasive and low-value on existing code, set it to `'warn'` or `'off'` in `eslint.config.js` with a `// Phase 1: <reason>` comment. NEVER rewrite runtime logic to satisfy a stylistic rule.
-Re-run `npm run lint` until it exits **0 errors** (warnings allowed).
+   Re-run `npm run lint` until it exits **0 errors** (warnings allowed).
 
 - [ ] **Step 7: Prove nothing broke**
 
@@ -139,11 +139,13 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ### Task 2: Prettier + isolated bulk reformat
 
 **Files:**
+
 - Create: `.prettierrc`, `.prettierignore`, `.git-blame-ignore-revs`
 - Modify: `eslint.config.js` (append `eslint-config-prettier`), `package.json` (root — `format`/`format:check` scripts + devDeps)
 - Modify: all formatted source files (one mechanical commit)
 
 **Interfaces:**
+
 - Consumes: `eslint.config.js` from Task 1.
 - Produces: root scripts `npm run format` and `npm run format:check`; a formatting-clean tree; a `.git-blame-ignore-revs` listing the reformat commit SHA.
 
@@ -181,6 +183,7 @@ package-lock.json
 - [ ] **Step 4: Wire `eslint-config-prettier` in as the LAST config entry**
 
 In `eslint.config.js`, add the import and append it last so it disables any stylistic ESLint rules that conflict with Prettier:
+
 ```js
 import prettier from 'eslint-config-prettier';
 // ...at the very end of the tseslint.config(...) argument list:
@@ -229,6 +232,7 @@ git commit -m "chore(ci): add Prettier config + blame-ignore the reformat commit
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
+
 (Note: `.prettierrc`/`.prettierignore`/config/deps are added here if not already staged in Step 9; run `git status` first and stage whatever is untracked.)
 
 ---
@@ -236,10 +240,12 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ### Task 3: CI workflow + gitleaks + Dependabot + root scripts + .nvmrc
 
 **Files:**
+
 - Create: `.github/workflows/ci.yml`, `.github/dependabot.yml`, `.gitleaks.toml`, `.nvmrc`
 - Modify: `package.json` (root — add `typecheck` + `build` scripts)
 
 **Interfaces:**
+
 - Consumes: `npm run lint`, `format:check` (Tasks 1–2).
 - Produces: root scripts `npm run typecheck` and `npm run build`; a CI workflow gating PRs and `main`.
 
@@ -290,21 +296,21 @@ regexes = [
 ```yaml
 version: 2
 updates:
-  - package-ecosystem: "npm"
-    directory: "/"
+  - package-ecosystem: 'npm'
+    directory: '/'
     schedule:
-      interval: "weekly"
+      interval: 'weekly'
     groups:
       minor-and-patch:
-        update-types: ["minor", "patch"]
-  - package-ecosystem: "github-actions"
-    directory: "/"
+        update-types: ['minor', 'patch']
+  - package-ecosystem: 'github-actions'
+    directory: '/'
     schedule:
-      interval: "weekly"
-  - package-ecosystem: "docker"
-    directory: "/"
+      interval: 'weekly'
+  - package-ecosystem: 'docker'
+    directory: '/'
     schedule:
-      interval: "weekly"
+      interval: 'weekly'
 ```
 
 - [ ] **Step 6: Create `.github/workflows/ci.yml`**
@@ -365,10 +371,12 @@ Expected: all green.
 - [ ] **Step 8: Locally dry-run the docker + secrets jobs**
 
 Run:
+
 ```bash
 docker compose build
 docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest detect --no-git --source /repo --config /repo/.gitleaks.toml --redact -v
 ```
+
 Expected: image builds; gitleaks exits 0 (no leaks). If gitleaks flags a real secret in the current tree, STOP and report it (do not commit a secret); if it flags a test fixture, widen the `.gitleaks.toml` allowlist and re-run.
 
 - [ ] **Step 9: Commit**
@@ -387,6 +395,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 **Files:** none (verification + integration).
 
 **Interfaces:**
+
 - Consumes: everything from Tasks 1–3 on `chore/phase1-ci`.
 - Produces: a green CI run on a PR; a phase-pause checkpoint for user review before merge.
 
@@ -427,6 +436,7 @@ Do NOT merge. Report to the user: PR URL, the green CI run, the reformat-commit 
 ## Self-Review
 
 **1. Spec coverage:**
+
 - §1 ESLint flat config + zero-error baseline → Task 1. ✅
 - §2 Prettier isolated reformat + blame-ignore + eslint-config-prettier → Task 2. ✅
 - §3 root scripts (lint/format/typecheck/build) → Tasks 1 (lint), 2 (format), 3 (typecheck/build). ✅

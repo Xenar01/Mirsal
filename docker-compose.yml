@@ -10,7 +10,7 @@ services:
     restart: unless-stopped
     # host 127.0.0.1:8084 -> container 8084 (app binds 0.0.0.0 inside via HOST env)
     ports:
-      - "127.0.0.1:8084:8084"
+      - '127.0.0.1:8084:8084'
     env_file:
       - .env
     volumes:
@@ -19,8 +19,8 @@ services:
     logging:
       driver: json-file
       options:
-        max-size: "10m"
-        max-file: "3"
+        max-size: '10m'
+        max-file: '3'
 
 # Pin the network subnet so the reverse-proxy hop (the gateway 172.31.99.1) is
 # deterministic — TRUST_PROXY in .env then trusts exactly loopback + that gateway

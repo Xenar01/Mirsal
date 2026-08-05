@@ -46,14 +46,10 @@ export default function SharedView() {
           <p className="font-body text-sm text-ink-2">{t('shared.empty')}</p>
         )}
 
-        {!isPending && !isError && shares.length > 0 && (
-          <ShareList shares={shares} onRevoke={setRevokeTarget} />
-        )}
+        {!isPending && !isError && shares.length > 0 && <ShareList shares={shares} onRevoke={setRevokeTarget} />}
       </div>
 
-      {revokeTarget && (
-        <RevokeConfirm share={revokeTarget} onClose={() => setRevokeTarget(null)} />
-      )}
+      {revokeTarget && <RevokeConfirm share={revokeTarget} onClose={() => setRevokeTarget(null)} />}
     </DashboardShell>
   );
 }
@@ -67,13 +63,7 @@ export default function SharedView() {
  * both rendered by the shared `ShareRow` below so there is exactly one place
  * each row's markup/logic is written.
  */
-function ShareList({
-  shares,
-  onRevoke,
-}: {
-  shares: ShareDto[];
-  onRevoke: (share: ShareDto) => void;
-}) {
+function ShareList({ shares, onRevoke }: { shares: ShareDto[]; onRevoke: (share: ShareDto) => void }) {
   const { t } = useTranslation();
   return (
     <>
@@ -91,12 +81,7 @@ function ShareList({
           </thead>
           <tbody>
             {shares.map((share) => (
-              <ShareRow
-                key={share.id}
-                variant="row"
-                share={share}
-                onRevoke={() => onRevoke(share)}
-              />
+              <ShareRow key={share.id} variant="row" share={share} onRevoke={() => onRevoke(share)} />
             ))}
           </tbody>
         </table>
@@ -104,12 +89,7 @@ function ShareList({
 
       <div className="flex flex-col gap-3 md:hidden">
         {shares.map((share) => (
-          <ShareRow
-            key={share.id}
-            variant="card"
-            share={share}
-            onRevoke={() => onRevoke(share)}
-          />
+          <ShareRow key={share.id} variant="card" share={share} onRevoke={() => onRevoke(share)} />
         ))}
       </div>
     </>
@@ -141,12 +121,7 @@ function ShareActionButtons({
         <Copy size={16} />
         {t('share.copy')}
       </button>
-      <button
-        type="button"
-        onClick={onToggle}
-        disabled={isToggling}
-        className="text-teal disabled:opacity-50"
-      >
+      <button type="button" onClick={onToggle} disabled={isToggling} className="text-teal disabled:opacity-50">
         {share.is_active ? t('share.stop') : t('share.start')}
       </button>
       <button type="button" onClick={onRevoke} className="text-clay">
@@ -195,7 +170,7 @@ function ShareRow({
           }
         },
         onError: () => toast({ kind: 'error', message: t('share.toast.error') }),
-      }
+      },
     );
   }
 
@@ -210,10 +185,7 @@ function ShareRow({
 
   if (variant === 'card') {
     return (
-      <div
-        data-testid={`shared-card-${share.id}`}
-        className="rounded-[10px] border border-line bg-surface p-3"
-      >
+      <div data-testid={`shared-card-${share.id}`} className="rounded-[10px] border border-line bg-surface p-3">
         <div className="flex items-center gap-2">
           <bdi dir="ltr" className="min-w-0 flex-1 break-all font-mono text-ink">
             {share.token}

@@ -91,11 +91,7 @@ let running = false;
  * `loadConfig()`/the module's batch constant — pass it explicitly in tests
  * for an isolated temp STORAGE_DIR or a small orphan-batch cap.
  */
-export async function runTick(
-  db: Database.Database,
-  now: number,
-  cfg?: SchedulerCfg
-): Promise<TickResult> {
+export async function runTick(db: Database.Database, now: number, cfg?: SchedulerCfg): Promise<TickResult> {
   if (running) {
     return { trashed: 0, purged: 0 };
   }

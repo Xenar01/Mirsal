@@ -42,7 +42,7 @@ function seedUser(): number {
   const info = db!
     .prepare(
       `INSERT INTO users(username, password_hash, role, is_active, must_change_password, created_at, updated_at)
-       VALUES (?, 'x', 'user', 1, 0, ?, ?)`
+       VALUES (?, 'x', 'user', 1, 0, ?, ?)`,
     )
     .run(`user-${Math.random()}`, t, t);
   return Number(info.lastInsertRowid);
@@ -60,7 +60,7 @@ function insertNode(row: {
   const info = db!
     .prepare(
       `INSERT INTO nodes(owner_id, parent_id, kind, name, size_bytes, trashed_at, created_at, updated_at)
-       VALUES (@ownerId, @parentId, @kind, @name, @sizeBytes, @trashedAt, @t, @t)`
+       VALUES (@ownerId, @parentId, @kind, @name, @sizeBytes, @trashedAt, @t, @t)`,
     )
     .run({
       ownerId: row.ownerId,
