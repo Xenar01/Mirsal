@@ -24,12 +24,12 @@
 
 **Server**
 - Create `server/src/util/zip.ts` — shared ZIP helpers: `MAX_ZIP_ENTRIES`, `MAX_ZIP_WALK_NODES`, `ZIP_COMPRESSION_LEVEL`, `collectSubtreeFiles(db, ownerId, root)`, `zipFileName(rawName)`, `appendFilesToArchive(archive, files, blobStore)`.
-- Create `server/src/util/zip.test.ts` — unit tests for the walk bounds + filename sanitizer.
+- Create `server/test/util/zip.test.ts` — unit tests for the walk bounds + filename sanitizer.
 - Modify `server/src/routes/public.ts` — delete the inlined copies of the above; import them from `util/zip.ts`. Behaviour unchanged; existing public-zip tests must stay green.
 - Modify `server/src/routes/nodes.ts` — add authenticated `GET /api/nodes/:id/zip` (folder-only, owner-scoped, concurrency-bounded, audited).
-- Modify `server/src/routes/nodes.test.ts` (or the file that holds node-route tests) — tests for the new route.
+- Modify `server/test/routes/nodes.test.ts` (or the file that holds node-route tests) — tests for the new route.
 - Modify `server/src/routes/collections.ts` — add `folder_node_id` to `CollectionDetailDto` + `buildDetailDto`.
-- Modify `server/src/routes/collections.test.ts` — assert the detail DTO carries `folder_node_id`.
+- Modify `server/test/routes/collections.test.ts` — assert the detail DTO carries `folder_node_id`.
 
 **Web**
 - Modify `web/src/features/dashboard/api.ts` — add `zipUrl(id)`.
@@ -50,7 +50,7 @@
 
 **Files:**
 - Create: `server/src/util/zip.ts`
-- Create: `server/src/util/zip.test.ts`
+- Create: `server/test/util/zip.test.ts`
 - Modify: `server/src/routes/public.ts` (remove inlined `collectSubtreeFiles`, `zipFileName`, `MAX_ZIP_ENTRIES`, `MAX_ZIP_WALK_NODES`, `ZIP_COMPRESSION_LEVEL`; import from `util/zip.ts`)
 
 **Interfaces:**
@@ -63,7 +63,7 @@
   - `function appendFilesToArchive(archive: ZipArchive, files: Array<{ storagePath: string; name: string }>, blobStore: BlobStore): void` — `for (const f of files) archive.append(blobStore.readBlob(f.storagePath), { name: f.name })`.
 - Consumes: `listChildren` from `../nodes/tree.js`, `Node` type, `ZipArchive` from `archiver`, `BlobStore` from `../storage/blobs.js`.
 
-- [ ] **Step 1: Write the failing unit test** — `server/src/util/zip.test.ts`
+- [ ] **Step 1: Write the failing unit test** — `server/test/util/zip.test.ts`
 
 ```ts
 import { describe, it, expect } from 'vitest';
@@ -104,7 +104,7 @@ describe('collectSubtreeFiles', () => {
 
 - [ ] **Step 2: Run it to confirm it fails**
 
-Run: `cd server && npx vitest run src/util/zip.test.ts`
+Run: `cd server && npx vitest run test/util/zip.test.ts`
 Expected: FAIL — `Cannot find module './zip.js'`.
 
 - [ ] **Step 3: Create `server/src/util/zip.ts`** — cut the five symbols verbatim out of `public.ts` (lines ~99–111 constants, ~123–127 `zipFileName`, ~729–771 `collectSubtreeFiles`) into the new module and add `appendFilesToArchive`. Preserve the doc-comments (they explain the DoS bounds).
@@ -143,7 +143,7 @@ Expected: PASS — including every existing `public.ts` zip test, unchanged.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add server/src/util/zip.ts server/src/util/zip.test.ts server/src/routes/public.ts
+git add server/src/util/zip.ts server/test/util/zip.test.ts server/src/routes/public.ts
 git commit -m "refactor(zip): extract shared ZIP helpers from public route into util/zip"
 ```
 
@@ -153,7 +153,7 @@ git commit -m "refactor(zip): extract shared ZIP helpers from public route into 
 
 **Files:**
 - Modify: `server/src/routes/nodes.ts` (add the route near the existing `/api/nodes/:id/download`, line ~674)
-- Modify: `server/src/routes/nodes.test.ts` (the suite covering node routes — match the repo's actual test file)
+- Modify: `server/test/routes/nodes.test.ts` (the suite covering node routes — match the repo's actual test file)
 
 **Interfaces:**
 - Consumes: `getOwnedNode(db, uid, id)`, `parseIdParam(req)`, `buildContentDisposition`, and from `util/zip.ts`: `collectSubtreeFiles`, `zipFileName`, `appendFilesToArchive`, `ZIP_COMPRESSION_LEVEL`.
@@ -192,7 +192,7 @@ it('returns 404 for a non-integer id', async () => {
 
 - [ ] **Step 2: Run to confirm failure**
 
-Run: `cd server && npx vitest run src/routes/nodes.test.ts -t zip`
+Run: `cd server && npx vitest run test/routes/nodes.test.ts -t zip`
 Expected: FAIL — 404 (route not registered) on the happy path.
 
 - [ ] **Step 3: Implement the route** in `nodes.ts` (add imports from `util/zip.js` + `ZipArchive` from `archiver`). Mirror the download route's guard shape and the public-zip concurrency-slot discipline (release on raw `'close'`, idempotent via a `WeakSet`).
@@ -241,7 +241,7 @@ app.get('/api/nodes/:id/zip', { preHandler: guards.requireAuth }, async (req, re
 
 - [ ] **Step 4: Run tests to green**
 
-Run: `cd server && npx vitest run src/routes/nodes.test.ts -t zip`
+Run: `cd server && npx vitest run test/routes/nodes.test.ts -t zip`
 Expected: PASS (all four).
 
 - [ ] **Step 5: Full suite + typecheck**
@@ -252,7 +252,7 @@ Expected: PASS.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add server/src/routes/nodes.ts server/src/routes/nodes.test.ts
+git add server/src/routes/nodes.ts server/test/routes/nodes.test.ts
 git commit -m "feat(nodes): authenticated owner-scoped GET /api/nodes/:id/zip (folder subtree)"
 ```
 
@@ -262,7 +262,7 @@ git commit -m "feat(nodes): authenticated owner-scoped GET /api/nodes/:id/zip (f
 
 **Files:**
 - Modify: `server/src/routes/collections.ts` (`CollectionDetailDto` + `buildDetailDto`, lines ~38–47, ~73+)
-- Modify: `server/src/routes/collections.test.ts`
+- Modify: `server/test/routes/collections.test.ts`
 
 **Interfaces:**
 - Produces: `CollectionDetailDto.folder_node_id: number` (the collection's own root folder node — the whole-collection ZIP target). `Collection.folder_node_id` already exists (`collections/collections.ts:18`), so this is a passthrough.
@@ -276,7 +276,7 @@ expect(body.folder_node_id).toBe(created.folder_node_id); // matches the folder 
 
 - [ ] **Step 2: Run — confirm fail**
 
-Run: `cd server && npx vitest run src/routes/collections.test.ts -t detail`
+Run: `cd server && npx vitest run test/routes/collections.test.ts -t detail`
 Expected: FAIL — `folder_node_id` undefined on the DTO.
 
 - [ ] **Step 3: Add the field** — in `collections.ts`:
@@ -285,13 +285,13 @@ Expected: FAIL — `folder_node_id` undefined on the DTO.
 
 - [ ] **Step 4: Run to green + suite**
 
-Run: `cd server && npx vitest run src/routes/collections.test.ts && npm run typecheck`
+Run: `cd server && npx vitest run test/routes/collections.test.ts && npm run typecheck`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add server/src/routes/collections.ts server/src/routes/collections.test.ts
+git add server/src/routes/collections.ts server/test/routes/collections.test.ts
 git commit -m "feat(collections): expose collection root folder_node_id in detail DTO"
 ```
 
@@ -304,7 +304,7 @@ git commit -m "feat(collections): expose collection root folder_node_id in detai
 - Modify: `web/src/features/collections/types.ts` (add `folder_node_id`)
 - Modify: `web/src/features/collections/CollectionDetail.tsx` (whole-collection button + per-dept link)
 - Modify: `web/src/i18n/ar.json` (`collections.detail.downloadDeptZip`, `collections.detail.downloadAllZip`)
-- Modify/Add: `web/src/features/collections/CollectionDetail.test.tsx`
+- Modify/Add: `web/test/collections-detail.test.tsx`
 
 **Interfaces:**
 - Consumes: `zipUrl(id: number): string` → `/api/nodes/${id}/zip`; `detail.folder_node_id` (Task 3); `dept.folder_node_id` (already present on responded rows).
@@ -330,7 +330,7 @@ it('renders a per-department ZIP link for a responded department', () => {
 
 - [ ] **Step 2: Run — confirm fail**
 
-Run: `cd web && npx vitest run src/features/collections/CollectionDetail.test.tsx`
+Run: `cd web && npx vitest run test/collections-detail.test.tsx`
 Expected: FAIL — links not found.
 
 - [ ] **Step 3: Implement**
@@ -343,7 +343,7 @@ Expected: FAIL — links not found.
 
 - [ ] **Step 4: Run to green**
 
-Run: `cd web && npx vitest run src/features/collections/CollectionDetail.test.tsx`
+Run: `cd web && npx vitest run test/collections-detail.test.tsx`
 Expected: PASS.
 
 - [ ] **Step 5: Web gates**
@@ -356,7 +356,7 @@ Expected: PASS (build regenerates the PWA SW cleanly).
 ```bash
 git add web/src/features/dashboard/api.ts web/src/features/collections/types.ts \
         web/src/features/collections/CollectionDetail.tsx web/src/i18n/ar.json \
-        web/src/features/collections/CollectionDetail.test.tsx
+        web/test/collections-detail.test.tsx
 git commit -m "feat(collections): per-department + whole-collection ZIP download links"
 ```
 
@@ -368,7 +368,7 @@ git commit -m "feat(collections): per-department + whole-collection ZIP download
 - Modify: `web/src/features/collect/api.ts` (`submitResponse` → XHR + `onProgress`)
 - Modify: `web/src/features/collect/CollectForm.tsx` (progress state + bar; route `closed`/`locked` to proper screen — carry #5)
 - Modify: `web/src/i18n/ar.json` + `web/src/i18n/en.json` (`collect.uploading`)
-- Modify/Add: `web/src/features/collect/CollectForm.test.tsx`, `web/src/features/collect/api.test.ts`
+- Modify/Add: `web/test/collect.test.tsx`, `web/test/collect-api.test.ts`
 
 **Interfaces:**
 - Consumes: existing multipart contract — field name `files`, `departmentId`, optional `note` — unchanged on the wire.
@@ -393,7 +393,7 @@ Also a `CollectForm.test.tsx` case: while submitting, a progress bar (`role="pro
 
 - [ ] **Step 2: Run — confirm fail**
 
-Run: `cd web && npx vitest run src/features/collect/api.test.ts src/features/collect/CollectForm.test.tsx`
+Run: `cd web && npx vitest run test/collect-api.test.ts test/collect.test.tsx`
 Expected: FAIL — `onProgress` not supported / no progressbar.
 
 - [ ] **Step 3: Implement**
@@ -415,7 +415,7 @@ Expected: FAIL — `onProgress` not supported / no progressbar.
 
 - [ ] **Step 4: Run to green**
 
-Run: `cd web && npx vitest run src/features/collect/`
+Run: `cd web && npx vitest run test/collect.test.tsx test/collect-api.test.ts`
 Expected: PASS.
 
 - [ ] **Step 5: Web gates**
@@ -428,7 +428,7 @@ Expected: PASS.
 ```bash
 git add web/src/features/collect/api.ts web/src/features/collect/CollectForm.tsx \
         web/src/i18n/ar.json web/src/i18n/en.json \
-        web/src/features/collect/api.test.ts web/src/features/collect/CollectForm.test.tsx
+        web/test/collect-api.test.ts web/test/collect.test.tsx
 git commit -m "feat(collect): upload-progress bar + route closed/locked submit to proper screen"
 ```
 
