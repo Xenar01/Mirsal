@@ -1,5 +1,5 @@
 import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, within } from '@testing-library/react';
+import { render, screen, fireEvent, within, act } from '@testing-library/react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { I18nextProvider } from 'react-i18next';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -50,6 +50,62 @@ function setNavigatorLanguage(lang: string): void {
 const ISOLATE_CHARS = new RegExp('[' + String.fromCharCode(0x2066, 0x2067, 0x2068, 0x2069) + ']', 'g');
 function stripIsolates(text: string): string {
   return text.replace(ISOLATE_CHARS, '');
+}
+
+/**
+ * A controllable fake `XMLHttpRequest` standing in for the `/submit` request
+ * (Task 5 — `submitResponse` now uses XHR, not `fetch`, so it can report
+ * upload progress). Driven manually via `emitProgress`/`emitLoad` so a test
+ * can observe the intermediate progress state before the request resolves.
+ * Mirrors `test/collect-api.test.ts`'s `FakeXHR`.
+ */
+class MockXHR {
+  static instances: MockXHR[] = [];
+  open = vi.fn();
+  send = vi.fn();
+  withCredentials = false;
+  status = 0;
+  responseText = '';
+  listeners: Record<string, Array<() => void>> = {};
+  uploadListeners: Record<
+    string,
+    Array<(e: { lengthComputable: boolean; loaded: number; total: number }) => void>
+  > = {};
+  upload = {
+    addEventListener: (
+      type: string,
+      cb: (e: { lengthComputable: boolean; loaded: number; total: number }) => void
+    ) => {
+      (this.uploadListeners[type] ??= []).push(cb);
+    },
+  };
+
+  constructor() {
+    MockXHR.instances.push(this);
+  }
+
+  addEventListener(type: string, cb: () => void) {
+    (this.listeners[type] ??= []).push(cb);
+  }
+
+  emitProgress(loaded: number, total: number) {
+    this.uploadListeners['progress']?.forEach((cb) => cb({ lengthComputable: true, loaded, total }));
+  }
+
+  emitLoad(status: number, body?: unknown) {
+    this.status = status;
+    this.responseText = body === undefined ? '' : JSON.stringify(body);
+    this.listeners['load']?.forEach((cb) => cb());
+  }
+}
+
+function installMockXHR(): void {
+  MockXHR.instances = [];
+  vi.stubGlobal('XMLHttpRequest', MockXHR as unknown as typeof XMLHttpRequest);
+}
+
+function lastXhr(): MockXHR {
+  return MockXHR.instances[MockXHR.instances.length - 1];
 }
 
 beforeEach(() => {
@@ -164,14 +220,10 @@ describe('CollectPage — public collect-intake page', () => {
     expect((firstMeta[1] as RequestInit).credentials).toBe('omit');
   });
 
-  test('submitting files issues a multipart POST and shows the confirmation', async () => {
+  test('submitting files issues a multipart POST via XHR and shows the confirmation', async () => {
     setNavigatorLanguage('ar-SY');
-    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
-      const u = String(url);
-      if (u.includes('/submit')) return jsonResponse(200, { ok: true });
-      return jsonResponse(200, openMetaBody);
-    });
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, openMetaBody)));
+    installMockXHR();
 
     const { container } = renderPage();
     await screen.findByText('مسح الاحتياجات');
@@ -183,14 +235,17 @@ describe('CollectPage — public collect-intake page', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'إرسال الرد' }));
 
+    await act(async () => {
+      lastXhr().emitLoad(200, { ok: true });
+    });
+
     expect(await screen.findByText('تم استلام ردّك. شكرًا لك.')).toBeInTheDocument();
 
-    const submitCall = fetchMock.mock.calls.find((c) => String(c[0]).includes('/submit'))!;
-    expect(submitCall).toBeTruthy();
-    const [url, init] = submitCall as [RequestInfo | URL, RequestInit];
-    expect(String(url)).toBe(`/api/collect/${TOKEN}/submit`);
-    expect(init.method).toBe('POST');
-    const form = init.body as FormData;
+    expect(MockXHR.instances).toHaveLength(1);
+    const xhr = MockXHR.instances[0];
+    expect(xhr.open).toHaveBeenCalledWith('POST', `/api/collect/${TOKEN}/submit`);
+    expect(xhr.withCredentials).toBe(true);
+    const form = xhr.send.mock.calls[0][0] as FormData;
     expect(form).toBeInstanceOf(FormData);
     expect(form.get('departmentId')).toBe('2');
     expect(form.getAll('files')).toEqual([file]);
@@ -198,6 +253,81 @@ describe('CollectPage — public collect-intake page', () => {
     // "Send another" resets back to a fresh, empty form.
     fireEvent.click(screen.getByRole('button', { name: 'إرسال رد آخر' }));
     expect(await screen.findByLabelText('القسم')).toHaveValue('');
+  });
+
+  test('shows a progress bar with aria-valuenow tracking upload progress while submitting', async () => {
+    setNavigatorLanguage('en-US');
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, openMetaBody)));
+    installMockXHR();
+
+    const { container } = renderPage();
+    await screen.findByText('مسح الاحتياجات');
+
+    fireEvent.change(screen.getByLabelText('Department'), { target: { value: '2' } });
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['hello'], 'report.pdf', { type: 'application/pdf' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send response' }));
+
+    const progressbar = await screen.findByRole('progressbar');
+    expect(progressbar).toHaveAttribute('aria-valuenow', '0');
+
+    await act(async () => {
+      lastXhr().emitProgress(50, 100);
+    });
+    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '50');
+
+    await act(async () => {
+      lastXhr().emitLoad(200, { ok: true });
+    });
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+
+  test('a closed (404) submit result shows collect.closedNow — not the generic submitError', async () => {
+    setNavigatorLanguage('ar-SY');
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, openMetaBody)));
+    installMockXHR();
+
+    const { container } = renderPage();
+    await screen.findByText('مسح الاحتياجات');
+
+    fireEvent.change(screen.getByLabelText('القسم'), { target: { value: '2' } });
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['hello'], 'report.pdf', { type: 'application/pdf' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'إرسال الرد' }));
+
+    await act(async () => {
+      lastXhr().emitLoad(404, { error: 'not_found' });
+    });
+
+    expect(await screen.findByText(i18n.t('collect.closedNow'))).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('collect.submitError'))).not.toBeInTheDocument();
+  });
+
+  test('a locked (401) submit result shows collect.lockedNow — not the generic submitError', async () => {
+    setNavigatorLanguage('en-US');
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(200, openMetaBody)));
+    installMockXHR();
+
+    const { container } = renderPage();
+    await screen.findByText('مسح الاحتياجات');
+
+    fireEvent.change(screen.getByLabelText('Department'), { target: { value: '2' } });
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['hello'], 'report.pdf', { type: 'application/pdf' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Send response' }));
+
+    await act(async () => {
+      lastXhr().emitLoad(401, { needsPassword: true });
+    });
+
+    expect(await screen.findByText(i18n.t('collect.lockedNow'))).toBeInTheDocument();
+    expect(screen.queryByText(i18n.t('collect.submitError'))).not.toBeInTheDocument();
   });
 
   test('client guards: >10 files and a >100MB file are rejected before any request', async () => {

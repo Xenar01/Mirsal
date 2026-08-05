@@ -11,7 +11,11 @@
  * than throwing, so the uploader page can render the distinct states (open /
  * password / closed / not-found / error) declaratively. The unlock POST is a
  * raw `fetch` (not the shared api client) specifically so it can read the
- * `x-ratelimit-remaining` response header — mirrors `unlockShare`.
+ * `x-ratelimit-remaining` response header — mirrors `unlockShare`. The
+ * response *submit* uses `XMLHttpRequest` instead of `fetch` (mirrors
+ * `dashboard/api.ts`'s `uploadFile`) purely to surface upload progress —
+ * `fetch` has no such event — but keeps the exact same no-CSRF,
+ * cookie-scoped posture as everything else here.
  */
 
 const COLLECT_BASE = '/api/collect';
@@ -136,33 +140,67 @@ export type SubmitResult =
   | { kind: 'locked' }
   | { kind: 'error' };
 
-export async function submitResponse(
-  token: string,
-  input: { departmentId: number; files: File[]; note?: string }
-): Promise<SubmitResult> {
-  const form = new FormData();
-  form.set('departmentId', String(input.departmentId));
-  if (input.note) form.set('note', input.note);
-  for (const file of input.files) form.append('files', file);
-
-  const res = await fetch(`${tokenPath(token)}/submit`, {
-    method: 'POST',
-    credentials: 'include',
-    // NO content-type header — the browser sets the multipart boundary
-    // itself; NO CSRF (this is the unauthenticated intake surface).
-    body: form,
-  });
-  if (res.status === 200) return { kind: 'ok' };
-  if (res.status === 404) return { kind: 'closed' };
-  if (res.status === 401) return { kind: 'locked' };
-  if (res.status === 400 || res.status === 413) {
-    const body = (await res.json().catch(() => ({}))) as { error?: string };
+/** Maps a completed request's status + raw body text to the discriminated {@link SubmitResult} — the ONE source of truth for the wire→UI mapping, shared by the `load` handler below. */
+function mapSubmitResult(status: number, responseText: string): SubmitResult {
+  if (status === 200) return { kind: 'ok' };
+  if (status === 404) return { kind: 'closed' };
+  if (status === 401) return { kind: 'locked' };
+  if (status === 400 || status === 413) {
+    let body: { error?: string } = {};
+    try {
+      body = JSON.parse(responseText) as { error?: string };
+    } catch {
+      /* malformed/empty body — falls through to the generic error below */
+    }
     if (body.error === 'too_many_files') return { kind: 'tooManyFiles' };
     if (body.error === 'file_too_large') return { kind: 'tooLarge' };
     if (body.error === 'quota_exceeded') return { kind: 'quota' };
     return { kind: 'error' };
   }
   return { kind: 'error' };
+}
+
+/**
+ * Submits a response via `XMLHttpRequest` (not the shared `fetch`-based
+ * pattern) so the caller can observe upload progress — `fetch` exposes no
+ * upload-progress event, mirrors `dashboard/api.ts`'s `uploadFile`. Unlike
+ * that uploader, this NEVER sets a CSRF header: this is the public,
+ * unauthenticated intake surface (see the file-top doc comment), so only the
+ * path-scoped `mirsal_unlock` cookie rides along via `withCredentials`. The
+ * promise always RESOLVES (never rejects) — a network error/abort maps to
+ * `{ kind: 'error' }` just like an unrecognized HTTP status, so the caller
+ * can treat every outcome uniformly.
+ */
+export function submitResponse(
+  token: string,
+  input: { departmentId: number; files: File[]; note?: string },
+  opts?: { onProgress?: (fraction: number) => void }
+): Promise<SubmitResult> {
+  const form = new FormData();
+  form.set('departmentId', String(input.departmentId));
+  if (input.note) form.set('note', input.note);
+  for (const file of input.files) form.append('files', file);
+
+  return new Promise<SubmitResult>((resolve) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${tokenPath(token)}/submit`);
+    // Equivalent to the prior fetch's credentials:'include' — the
+    // path-scoped unlock cookie rides along; NO content-type header (the
+    // browser sets the multipart boundary itself) and NO CSRF header.
+    xhr.withCredentials = true;
+
+    if (xhr.upload) {
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) opts?.onProgress?.(event.loaded / event.total);
+      });
+    }
+
+    xhr.addEventListener('load', () => resolve(mapSubmitResult(xhr.status, xhr.responseText)));
+    xhr.addEventListener('error', () => resolve({ kind: 'error' }));
+    xhr.addEventListener('abort', () => resolve({ kind: 'error' }));
+
+    xhr.send(form);
+  });
 }
 
 /** Same-origin URL for the collection's template download (a plain link/anchor triggers it; the unlock cookie rides along). */

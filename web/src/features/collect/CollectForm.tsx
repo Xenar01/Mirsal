@@ -31,6 +31,7 @@ export default function CollectForm({ token, meta }: { token: string; meta: Coll
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
+  const [progress, setProgress] = useState(0);
 
   function pickFiles(event: ChangeEvent<HTMLInputElement>) {
     const selected = event.target.files ? Array.from(event.target.files) : [];
@@ -59,6 +60,7 @@ export default function CollectForm({ token, meta }: { token: string; meta: Coll
     setFiles([]);
     setNote('');
     setError(null);
+    setProgress(0);
     setSubmitted(false);
   }
 
@@ -75,12 +77,17 @@ export default function CollectForm({ token, meta }: { token: string; meta: Coll
     }
 
     setError(null);
+    setProgress(0);
     setSubmitting(true);
-    const result = await submitResponse(token, {
-      departmentId: Number(departmentId),
-      files,
-      note: note.trim() || undefined,
-    });
+    const result = await submitResponse(
+      token,
+      {
+        departmentId: Number(departmentId),
+        files,
+        note: note.trim() || undefined,
+      },
+      { onProgress: setProgress }
+    );
     setSubmitting(false);
 
     switch (result.kind) {
@@ -101,7 +108,16 @@ export default function CollectForm({ token, meta }: { token: string; meta: Coll
         setError(t('collect.tooLarge', { name: '' }));
         return;
       case 'closed':
+        // The collection closed (deadline/manual) between page-load and
+        // submit — a distinct message from the generic error so the
+        // department knows retrying won't help.
+        setError(t('collect.closedNow'));
+        return;
       case 'locked':
+        // The unlock cookie expired/was never sent — tell the department to
+        // re-enter the password rather than showing a generic failure.
+        setError(t('collect.lockedNow'));
+        return;
       case 'error':
       default:
         setError(t('collect.submitError'));
@@ -201,6 +217,26 @@ export default function CollectForm({ token, meta }: { token: string; meta: Coll
         <p role="alert" className="font-body text-sm text-clay">
           {error}
         </p>
+      )}
+
+      {submitting && (
+        <div
+          className="w-full max-w-sm"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(progress * 100)}
+        >
+          <div className="h-2 rounded bg-line">
+            <div
+              className="h-2 rounded bg-teal transition-[width]"
+              style={{ width: `${Math.round(progress * 100)}%` }}
+            />
+          </div>
+          <p className="mt-1 font-body text-xs text-ink-2">
+            {t('collect.uploading', { pct: Math.round(progress * 100) })}
+          </p>
+        </div>
       )}
 
       <Button variant="primary" type="submit" disabled={submitting}>
