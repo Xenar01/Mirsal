@@ -13,11 +13,12 @@ import type { Config } from '../config.js';
 import { writeAudit } from '../audit.js';
 import { isShareLive } from '../shares/gate.js';
 import { ForbiddenError, listPublic, resolveInSubtree } from '../shares/resolver.js';
-import { listChildren, type Node } from '../nodes/tree.js';
+import type { Node } from '../nodes/tree.js';
 import type { Share } from '../shares/shares.js';
 import { buildContentDisposition } from '../util/content-disposition.js';
 import { createReservations } from '../shares/download-reservations.js';
 import { applyExhaustion } from '../shares/exhaustion.js';
+import { appendFilesToArchive, collectSubtreeFiles, zipFileName, ZIP_COMPRESSION_LEVEL } from '../util/zip.js';
 
 export interface PublicRouteDeps {
   db: Database.Database;
@@ -88,28 +89,6 @@ const ZIP_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
  */
 const MAX_CONCURRENT_ZIPS = 4;
 
-/**
- * zlib level for the `/zip` archiver. Level 9 (max compression) spends
- * substantially more CPU than the marginal size reduction is worth on an
- * unauthenticated, un-rate-limited-by-size endpoint — across a subtree near
- * `MAX_ZIP_ENTRIES` files that cost is an easy CPU-exhaustion DoS. zlib's own
- * default trade-off (6) keeps the archive genuinely compressed at a fraction
- * of the CPU cost.
- */
-const ZIP_COMPRESSION_LEVEL = 6;
-
-/** Hard cap on files included in a `/zip` (loop/DoS-safety on a public endpoint). */
-const MAX_ZIP_ENTRIES = 10_000;
-/**
- * Hard cap on total nodes (files AND folders) visited while walking the
- * subtree for `/zip`. `MAX_ZIP_ENTRIES` alone only bounds the files
- * *collected* — a folder-heavy, file-sparse shared subtree (many nested
- * empty/near-empty folders) would still make the walk itself (and its
- * `listChildren` calls) unbounded, since the file cap is never reached. This
- * cap bounds the walk regardless of how many of the visited nodes are files.
- */
-const MAX_ZIP_WALK_NODES = 20_000;
-
 const unlockSchema = z.object({ password: z.string().min(1) });
 
 /** Waits for `stream`'s `open`, or rejects with its `error` (e.g. ENOENT). Mirrors routes/nodes.ts. */
@@ -118,13 +97,6 @@ function waitForOpen(stream: ReadStream): Promise<void> {
     stream.once('open', () => resolve());
     stream.once('error', (err) => reject(err));
   });
-}
-
-/** Sanitizes a shared node's name into a `<name>.zip` download filename (CR/LF and separators stripped). */
-function zipFileName(rawName: string): string {
-  // eslint-disable-next-line no-control-regex
-  const base = rawName.replace(/[\r\n\x00-\x1F\x7F/\\]/g, '_').trim();
-  return `${base.length > 0 ? base : 'download'}.zip`;
 }
 
 /**
@@ -707,9 +679,7 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
         reply.raw.destroy(err);
       });
 
-      for (const f of files) {
-        archive.append(blobStore.readBlob(f.storagePath), { name: f.name });
-      }
+      appendFilesToArchive(archive, files, blobStore);
 
       reply.header('Content-Type', 'application/zip');
       reply.header('Content-Disposition', buildContentDisposition(zipFileName(rootNode.name)));
@@ -725,48 +695,4 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
       return sent;
     });
   });
-
-  /**
-   * Collects every live file under `root` as `{storagePath, name}` where
-   * `name` is the path relative to the shared node (the shared folder itself
-   * is not a prefix; its children sit at the zip root). Iterative + bounded
-   * on BOTH axes to stay loop/DoS-safe on this unauthenticated route:
-   *  - `MAX_ZIP_ENTRIES` caps the files collected.
-   *  - `MAX_ZIP_WALK_NODES` caps the total nodes (files+folders) visited,
-   *    which in turn caps the number of `listChildren` (DB) calls — this is
-   *    the one that protects a folder-heavy, file-sparse subtree, where the
-   *    file cap above would never trip.
-   * Uses `listChildren`, which already excludes trashed rows.
-   */
-  function collectSubtreeFiles(
-    database: Database.Database,
-    ownerId: number,
-    root: Node
-  ): Array<{ storagePath: string; name: string }> {
-    const out: Array<{ storagePath: string; name: string }> = [];
-
-    if (root.kind === 'file') {
-      if (root.storage_path) out.push({ storagePath: root.storage_path, name: root.name });
-      return out;
-    }
-
-    let visited = 0;
-    const stack: Array<{ folderId: number; prefix: string }> = [{ folderId: root.id, prefix: '' }];
-    while (stack.length > 0 && out.length < MAX_ZIP_ENTRIES && visited < MAX_ZIP_WALK_NODES) {
-      const { folderId, prefix } = stack.pop()!;
-      for (const child of listChildren(database, ownerId, folderId)) {
-        visited++;
-        if (child.kind === 'file') {
-          if (child.storage_path) {
-            out.push({ storagePath: child.storage_path, name: prefix + child.name });
-          }
-        } else if (child.kind === 'folder') {
-          stack.push({ folderId: child.id, prefix: `${prefix}${child.name}/` });
-        }
-        if (out.length >= MAX_ZIP_ENTRIES || visited >= MAX_ZIP_WALK_NODES) break;
-      }
-    }
-
-    return out;
-  }
 }
