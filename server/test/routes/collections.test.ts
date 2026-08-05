@@ -166,7 +166,7 @@ test('POST with a password -> has_password true, secret never echoed', async () 
 
 test('POST with a foreign/non-file template -> 400 bad_template', async () => {
   const built = await makeApp();
-  const uid = await seedUser('alice', 'pw');
+  await seedUser('alice', 'pw');
   await seedUser('bob', 'pw');
   const bobId = (db!.prepare('SELECT id FROM users WHERE username=?').get('bob') as { id: number }).id;
   const { session, csrf } = await login(built, 'alice', 'pw');

@@ -34,7 +34,10 @@ beforeAll(() => {
   process.env.PUBLIC_BASE_URL = 'https://mirsal.example.com';
 });
 afterAll(() => {
-  for (const k of keys) originals[k] === undefined ? delete process.env[k] : (process.env[k] = originals[k]!);
+  for (const k of keys) {
+    if (originals[k] === undefined) delete process.env[k];
+    else process.env[k] = originals[k]!;
+  }
 });
 
 function seedUser(): number {

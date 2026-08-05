@@ -161,7 +161,7 @@ test('auto-trash: if the purge_after stamp fails, trashNode\'s own change is rol
   const id = insertNode({ ownerId: uid, parentId: null, name: 'due', autoDeleteAt: now - 1 });
 
   const originalPrepare = db!.prepare.bind(db!);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   (db as any).prepare = (sql: string) => {
     if (sql.includes('SET purge_after = @purgeAfter WHERE id = @id')) {
       throw new Error('boom-purge-after');
@@ -171,7 +171,7 @@ test('auto-trash: if the purge_after stamp fails, trashNode\'s own change is rol
 
   const result = await runTick(db!, now, cfg());
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   (db as any).prepare = originalPrepare;
 
   expect(result).toEqual({ trashed: 0, purged: 0 });
@@ -380,7 +380,7 @@ test('a tick that throws does not kill the interval — the next tick still runs
 
   const originalPrepare = db!.prepare.bind(db!);
   let calls = 0;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   (db as any).prepare = (...args: Parameters<typeof originalPrepare>) => {
     calls++;
     if (calls === 1) throw new Error('boom');
@@ -393,7 +393,7 @@ test('a tick that throws does not kill the interval — the next tick still runs
   await vi.advanceTimersByTimeAsync(1000); // first tick: db.prepare throws inside dueTrash
   expect(readNode(id).trashed_at).toBeNull(); // tick failed before mutating anything
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   (db as any).prepare = originalPrepare;
 
   await vi.advanceTimersByTimeAsync(1000); // second tick: interval survived, runs normally

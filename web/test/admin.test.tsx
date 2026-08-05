@@ -108,7 +108,7 @@ function stubFetch(cfg: StubConfig): { fetchMock: ReturnType<typeof vi.fn>; call
   return { fetchMock, calls };
 }
 
-async function renderAdmin(cfg: StubConfig) {
+async function renderAdmin(_cfg: StubConfig) {
   const client = makeQueryClient();
   const utils = render(
     <QueryClientProvider client={client}>

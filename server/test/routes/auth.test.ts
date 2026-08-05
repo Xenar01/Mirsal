@@ -417,12 +417,12 @@ test('password change: the update+revoke+recreate+audit sequence is atomic — a
   // aren't in the same db.transaction() as this INSERT, they'd survive the
   // failure; wrapped correctly, they must be rolled back too.
   const originalPrepare = db!.prepare.bind(db!);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   (db as any).prepare = (sql: string, ...rest: unknown[]) => {
     if (sql.includes('INSERT INTO sessions')) {
       throw new Error('simulated failure mid password-change transaction');
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     return (originalPrepare as any)(sql, ...rest);
   };
 
@@ -434,7 +434,7 @@ test('password change: the update+revoke+recreate+audit sequence is atomic — a
     payload: { current: 'pw', new: 'a-new-password-123' },
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+   
   (db as any).prepare = originalPrepare;
 
   expect(res.statusCode).toBe(500); // unhandled throw -> Fastify's default error handler

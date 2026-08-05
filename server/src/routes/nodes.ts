@@ -9,7 +9,6 @@ import type { Guards } from '../auth/guards.js';
 import { MAX_FILE_BYTES } from '../config.js';
 import { writeAudit } from '../audit.js';
 import {
-  CollisionError,
   CycleError,
   createFolder,
   ensureUserRoots,

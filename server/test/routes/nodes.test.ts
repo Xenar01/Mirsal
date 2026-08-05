@@ -407,7 +407,7 @@ test('upload where the naming step throws after reserve+writeTemp -> quota relea
 test('cross-user isolation: foreign node reads as 404 on list/download/patch/delete, never 403', async () => {
   const built = await makeApp();
   const uidA = await seedUser('alice', 'pw');
-  const uidB = await seedUser('bob', 'pw');
+  await seedUser('bob', 'pw');
   const a = await login(built, 'alice', 'pw');
   const b = await login(built, 'bob', 'pw');
   const rootA = rootIdFor(uidA);

@@ -39,11 +39,6 @@ interface AdminUserDto {
   display_name: string | null;
 }
 
-interface UserRow extends AdminUserDto {
-  // no extra fields projected — the SELECT below lists exactly the DTO columns
-  [key: string]: unknown;
-}
-
 /** Row shape for the last-admin / self guards: only what the guards read. */
 interface GuardUserRow {
   id: number;

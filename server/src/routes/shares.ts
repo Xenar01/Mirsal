@@ -1,4 +1,4 @@
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
 import { z } from 'zod';
 import type { Clock } from '../clock.js';
