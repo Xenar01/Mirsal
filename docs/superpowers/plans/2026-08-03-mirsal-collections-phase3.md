@@ -78,7 +78,7 @@
 
 **Server shapes to mirror (from `server/src/routes/collections.ts`):** `CollectionSummaryDto`, `CollectionDetailDto`, `RosterDeptDto` — copy field-for-field. Note the tri-state PATCH body uses snake_case server keys (`title`, `password`, `deadline_at`, `is_active`) and create uses `title`, `departments`, `template_node_id`, `password`, `deadline_at`.
 
-- [ ] **Step 1: Write `types.ts`** (mirror server exactly):
+- [x] **Step 1: Write `types.ts`** (mirror server exactly):
 
 ```ts
 /**
@@ -131,7 +131,7 @@ export interface CollectionDetailDto {
 }
 ```
 
-- [ ] **Step 2: Write the failing api test** (`web/test/collections-api.test.ts`) — copy the `stubFetch` helper pattern from `test/share.test.tsx` (records `"<METHOD> <path>"`, 404s unmapped):
+- [x] **Step 2: Write the failing api test** (`web/test/collections-api.test.ts`) — copy the `stubFetch` helper pattern from `test/share.test.tsx` (records `"<METHOD> <path>"`, 404s unmapped):
 
 ```ts
 import { describe, test, expect, vi, afterEach } from 'vitest';
@@ -189,9 +189,9 @@ describe('collections api', () => {
 });
 ```
 
-- [ ] **Step 3: Run the test, verify it fails** — `cd web && npx vitest run test/collections-api.test.ts` → FAIL (module `../src/features/collections/api` not found).
+- [x] **Step 3: Run the test, verify it fails** — `cd web && npx vitest run test/collections-api.test.ts` → FAIL (module `../src/features/collections/api` not found).
 
-- [ ] **Step 4: Write `api.ts`**:
+- [x] **Step 4: Write `api.ts`**:
 
 ```ts
 /**
@@ -253,7 +253,7 @@ export function removeDepartment(id: number, deptId: number): Promise<{ ok: true
 }
 ```
 
-- [ ] **Step 5: Write `queries.ts`**:
+- [x] **Step 5: Write `queries.ts`**:
 
 ```ts
 /**
@@ -312,9 +312,9 @@ export function useRemoveDepartment() {
 }
 ```
 
-- [ ] **Step 6: Run the test + typecheck, verify green** — `cd web && npx vitest run test/collections-api.test.ts && npm run typecheck` → PASS.
+- [x] **Step 6: Run the test + typecheck, verify green** — `cd web && npx vitest run test/collections-api.test.ts && npm run typecheck` → PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /var/www/projects/mirsal
@@ -337,7 +337,7 @@ git commit -m "feat(collections): owner data layer (types + api + queries)"
 
 **Rationale for doing i18n now:** later component tasks assert on the authored Arabic/English strings; the keys must exist first.
 
-- [ ] **Step 1: Write the failing parity test** (`web/test/collections-i18n.test.ts`):
+- [x] **Step 1: Write the failing parity test** (`web/test/collections-i18n.test.ts`):
 
 ```ts
 import { describe, test, expect } from 'vitest';
@@ -372,16 +372,16 @@ describe('collections i18n', () => {
 });
 ```
 
-- [ ] **Step 2: Run it, verify it fails** — `cd web && npx vitest run test/collections-i18n.test.ts` → FAIL (keys absent).
+- [x] **Step 2: Run it, verify it fails** — `cd web && npx vitest run test/collections-i18n.test.ts` → FAIL (keys absent).
 
-- [ ] **Step 3: Add `dashboard.nav.collections` to `ar.json`** — inside the existing `dashboard.nav` object, after `"admin"`:
+- [x] **Step 3: Add `dashboard.nav.collections` to `ar.json`** — inside the existing `dashboard.nav` object, after `"admin"`:
 
 ```json
       "admin": "لوحة الإدارة",
       "collections": "التجميع"
 ```
 
-- [ ] **Step 4: Add the `collections.*` owner block to `ar.json`** (top-level, e.g. after the `share` block). Authored MSA copy:
+- [x] **Step 4: Add the `collections.*` owner block to `ar.json`** (top-level, e.g. after the `share` block). Authored MSA copy:
 
 ```json
   "collections": {
@@ -474,7 +474,7 @@ describe('collections i18n', () => {
   }
 ```
 
-- [ ] **Step 5: Add the `collect.*` public block to BOTH `ar.json` and `en.json`.** Arabic (into `ar.json`, top-level, after `public`):
+- [x] **Step 5: Add the `collect.*` public block to BOTH `ar.json` and `en.json`.** Arabic (into `ar.json`, top-level, after `public`):
 
 ```json
   "collect": {
@@ -552,9 +552,9 @@ English (into `en.json`, same keys):
   }
 ```
 
-- [ ] **Step 6: Run the test, verify green** — `cd web && npx vitest run test/collections-i18n.test.ts` → PASS. Also `npx vitest run test/pwa.test.ts` if it validates JSON, and confirm the whole app still builds: `npm run typecheck`.
+- [x] **Step 6: Run the test, verify green** — `cd web && npx vitest run test/collections-i18n.test.ts` → PASS. Also `npx vitest run test/pwa.test.ts` if it validates JSON, and confirm the whole app still builds: `npm run typecheck`.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 cd /var/www/projects/mirsal
@@ -578,7 +578,7 @@ git commit -m "feat(collections): i18n — owner AR keys + bilingual collect.* k
 
 > To avoid a forward-reference that won't compile: in this task, create `CreateCollectionModal.tsx` as a MINIMAL stub (`export default function CreateCollectionModal({ onClose }: { onClose: () => void }) { return <Modal open onClose={onClose} title="…"><span/></Modal>; }`) and flesh it out in Task 4. Likewise create minimal stubs for `CollectionDetail.tsx` and `collect/CollectPage.tsx` so the router imports resolve. Each stub is replaced (not appended) by its owning task.
 
-- [ ] **Step 1: Add the nav pill to `AppNav.tsx`** — extend `NAV_ITEMS`:
+- [x] **Step 1: Add the nav pill to `AppNav.tsx`** — extend `NAV_ITEMS`:
 
 ```ts
 const NAV_ITEMS: ReadonlyArray<{ to: string; end?: boolean; key: string }> = [
@@ -589,10 +589,10 @@ const NAV_ITEMS: ReadonlyArray<{ to: string; end?: boolean; key: string }> = [
 ];
 ```
 
-- [ ] **Step 2: Create minimal stubs** so routes/imports resolve:
+- [x] **Step 2: Create minimal stubs** so routes/imports resolve:
   - `web/src/features/collections/CreateCollectionModal.tsx`, `web/src/features/collections/CollectionDetail.tsx`, `web/src/features/collect/CollectPage.tsx` — each a trivial component (a single element) exported default. (Replaced in Tasks 4/5/7.)
 
-- [ ] **Step 3: Add routes to `router.tsx`** — import the three components and add:
+- [x] **Step 3: Add routes to `router.tsx`** — import the three components and add:
 
 ```tsx
 <Route path="/collections" element={<RequireAuth><CollectionsView /></RequireAuth>} />
@@ -602,7 +602,7 @@ const NAV_ITEMS: ReadonlyArray<{ to: string; end?: boolean; key: string }> = [
 
 (`/c/:token` sits beside `/s/:token` as a public, no-auth route.)
 
-- [ ] **Step 4: Write the failing view test** (`web/test/collections-view.test.tsx`) — mirror `test/share.test.tsx` providers (QueryClient + I18nextProvider + ToastProvider + AuthProvider + MemoryRouter). Render `<CollectionsView />` at `/collections`:
+- [x] **Step 4: Write the failing view test** (`web/test/collections-view.test.tsx`) — mirror `test/share.test.tsx` providers (QueryClient + I18nextProvider + ToastProvider + AuthProvider + MemoryRouter). Render `<CollectionsView />` at `/collections`:
 
 ```ts
 // helper: render CollectionsView inside the full provider stack at /collections
@@ -620,13 +620,13 @@ test('clicking "new" opens the create modal', async () => {
 });
 ```
 
-- [ ] **Step 5: Run it, verify it fails** — `cd web && npx vitest run test/collections-view.test.tsx` → FAIL (CollectionsView missing).
+- [x] **Step 5: Run it, verify it fails** — `cd web && npx vitest run test/collections-view.test.tsx` → FAIL (CollectionsView missing).
 
-- [ ] **Step 6: Write `CollectionsView.tsx`** — DashboardShell-framed, following `SharedView` structure (desktop table `hidden md:block` + mobile cards `md:hidden`), a header with title/subtitle, a "new collection" button (top-end) toggling `CreateCollectionModal`, loading/error/empty states, and per-row: title (link to `/collections/:id`), `t('collections.count', { responded, total })`, `<StatusChip status={mapStatus(status)} />`, and a copy-link button (`navigator.clipboard.writeText(url)` + toast). Map collection status → chip: `open→'active'`, `closed→'stopped'`, `expired→'expired'`. Use `Link` from react-router-dom for the title.
+- [x] **Step 6: Write `CollectionsView.tsx`** — DashboardShell-framed, following `SharedView` structure (desktop table `hidden md:block` + mobile cards `md:hidden`), a header with title/subtitle, a "new collection" button (top-end) toggling `CreateCollectionModal`, loading/error/empty states, and per-row: title (link to `/collections/:id`), `t('collections.count', { responded, total })`, `<StatusChip status={mapStatus(status)} />`, and a copy-link button (`navigator.clipboard.writeText(url)` + toast). Map collection status → chip: `open→'active'`, `closed→'stopped'`, `expired→'expired'`. Use `Link` from react-router-dom for the title.
 
-- [ ] **Step 7: Run test + typecheck, verify green** — `cd web && npx vitest run test/collections-view.test.tsx && npm run typecheck` → PASS.
+- [x] **Step 7: Run test + typecheck, verify green** — `cd web && npx vitest run test/collections-view.test.tsx && npm run typecheck` → PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 cd /var/www/projects/mirsal
@@ -648,7 +648,7 @@ git commit -m "feat(collections): owner list view + nav pill + routes (detail/co
 
 **Flow:** two visual steps in one modal (mirror ShareModal's Configure→Published). Step 1 form: title (required); departments `<textarea>` (split on `\n`, trim, drop empties, dedupe for the live count — send the raw trimmed array, server re-normalizes); optional template file `<input type="file">` (single; client-side ≤100 MB guard using `MAX_FILE_BYTES`); optional password; optional deadline `<input type="datetime-local">` → `damascusInputToUtcMs` (reject past/invalid inline). On submit: if a template file is chosen, `await uploadFile({ file, parentId: null })` first, capture `node.id`; then `createCollection({ title, departments, templateNodeId, password, deadlineAt })`. On success show Step 2: the returned `url` in a mono `<bdi dir="ltr">` + copy button + a "done" button (calls `onClose`). Toast on create + copy.
 
-- [ ] **Step 1: Write the failing create test** (`web/test/collections-create.test.tsx`):
+- [x] **Step 1: Write the failing create test** (`web/test/collections-create.test.tsx`):
 
 ```ts
 test('requires a title and at least one department before POSTing', async () => {
@@ -671,9 +671,9 @@ test('shows the copyable /c link on success', async () => {
 
 > **XHR note:** `uploadFile` uses `XMLHttpRequest`, not `fetch`. The template-upload test must stub `XMLHttpRequest` (a minimal fake with `open`/`setRequestHeader`/`send`/`upload`/`addEventListener('load')` firing a 201 with `responseText` JSON), mirroring how `test/dashboard.test.tsx` exercises uploads. If `test/dashboard.test.tsx` has an XHR mock helper, reuse its shape.
 
-- [ ] **Step 2: Run it, verify it fails** — `cd web && npx vitest run test/collections-create.test.tsx` → FAIL.
+- [x] **Step 2: Run it, verify it fails** — `cd web && npx vitest run test/collections-create.test.tsx` → FAIL.
 
-- [ ] **Step 3: Implement `CreateCollectionModal.tsx`** per the flow above. Departments parse helper:
+- [x] **Step 3: Implement `CreateCollectionModal.tsx`** per the flow above. Departments parse helper:
 
 ```ts
 function parseDepartments(raw: string): string[] {
@@ -722,9 +722,9 @@ async function submit(e?: FormEvent) {
 }
 ```
 
-- [ ] **Step 4: Run test + typecheck, verify green** — `cd web && npx vitest run test/collections-create.test.tsx && npm run typecheck` → PASS.
+- [x] **Step 4: Run test + typecheck, verify green** — `cd web && npx vitest run test/collections-create.test.tsx && npm run typecheck` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /var/www/projects/mirsal
@@ -750,7 +750,7 @@ git commit -m "feat(collections): create-collection modal (title/departments/tem
 
 **Controls:** open/close toggle (`usePatchCollection({ id, isActive })`), add-department (inline input → `useAddDepartment`; `409 duplicate` → `duplicateDepartment` toast), delete-collection (confirm `Modal` → `useDeleteCollection` → navigate to `/collections`). (Editing password/deadline/title reuse the same `usePatchCollection` tri-state; include a minimal password-set + deadline-edit + title-edit affordance behind an "edit" toggle, mirroring ShareModal's sections. Keep each small.)
 
-- [ ] **Step 1: Write the failing detail test** (`web/test/collections-detail.test.tsx`), rendering `<CollectionDetail/>` at `/collections/7` with a stubbed `GET /api/collections/7`:
+- [x] **Step 1: Write the failing detail test** (`web/test/collections-detail.test.tsx`), rendering `<CollectionDetail/>` at `/collections/7` with a stubbed `GET /api/collections/7`:
 
 ```ts
 const detail = {
@@ -776,9 +776,9 @@ test('remove a missing department DELETEs it', async () => { /* click remove on 
 test('delete collection confirms then navigates back to /collections', async () => { /* … */ });
 ```
 
-- [ ] **Step 2: Run it, verify it fails** — `cd web && npx vitest run test/collections-detail.test.tsx` → FAIL.
+- [x] **Step 2: Run it, verify it fails** — `cd web && npx vitest run test/collections-detail.test.tsx` → FAIL.
 
-- [ ] **Step 3: Implement `CollectionDetail.tsx`** per the layout above. A small `DepartmentFiles` sub-component owns the lazy `listNodes` query:
+- [x] **Step 3: Implement `CollectionDetail.tsx`** per the layout above. A small `DepartmentFiles` sub-component owns the lazy `listNodes` query:
 
 ```tsx
 function DepartmentFiles({ folderNodeId }: { folderNodeId: number }) {
@@ -804,9 +804,9 @@ function DepartmentFiles({ folderNodeId }: { folderNodeId: number }) {
 }
 ```
 
-- [ ] **Step 4: Run test + typecheck, verify green** — `cd web && npx vitest run test/collections-detail.test.tsx && npm run typecheck` → PASS.
+- [x] **Step 4: Run test + typecheck, verify green** — `cd web && npx vitest run test/collections-detail.test.tsx && npm run typecheck` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /var/www/projects/mirsal
@@ -840,7 +840,7 @@ git commit -m "feat(collections): roster/detail view — responded/missing, per-
 
 **Submit mapping (POST /submit, multipart):** build `FormData` with `departmentId`, optional `note`, and each `File` appended as `files`. `fetch(..., { method:'POST', credentials:'include', body: form })` (browser sets the multipart boundary; NO CSRF). 200 → ok; 400 `too_many_files` → tooManyFiles; 413 `file_too_large` → tooLarge; 413 `quota_exceeded` → quota; 404 → closed; 401 → locked; else error. (Read `body.error` to distinguish the two 400/413 codes.)
 
-- [ ] **Step 1: Write the failing api test** (`web/test/collect-api.test.ts`) — stub `fetch`, assert each mapping:
+- [x] **Step 1: Write the failing api test** (`web/test/collect-api.test.ts`) — stub `fetch`, assert each mapping:
 
 ```ts
 test('meta: 404 → notFound; isOpen:false → closed; needsPassword → password; departments → open', async () => { /* four fetch stubs */ });
@@ -855,11 +855,11 @@ test('submit: builds multipart with departmentId + files + note and maps status 
 });
 ```
 
-- [ ] **Step 2: Run it, verify it fails** — `cd web && npx vitest run test/collect-api.test.ts` → FAIL.
+- [x] **Step 2: Run it, verify it fails** — `cd web && npx vitest run test/collect-api.test.ts` → FAIL.
 
-- [ ] **Step 3: Write `api.ts`** (mirror `features/public/api.ts` structure/comments; `tokenPath` uses `encodeURIComponent`). Include the discriminated meta parse, `unlockCollection` (raw fetch to read the rate-limit header), `submitResponse` (FormData), `templateUrl`.
+- [x] **Step 3: Write `api.ts`** (mirror `features/public/api.ts` structure/comments; `tokenPath` uses `encodeURIComponent`). Include the discriminated meta parse, `unlockCollection` (raw fetch to read the rate-limit header), `submitResponse` (FormData), `templateUrl`.
 
-- [ ] **Step 4: Write `queries.ts`**:
+- [x] **Step 4: Write `queries.ts`**:
 
 ```ts
 import { useQuery } from '@tanstack/react-query';
@@ -877,9 +877,9 @@ export function useCollectMeta(token: string, reveal: boolean) {
 }
 ```
 
-- [ ] **Step 5: Run test + typecheck, verify green** — `cd web && npx vitest run test/collect-api.test.ts && npm run typecheck` → PASS.
+- [x] **Step 5: Run test + typecheck, verify green** — `cd web && npx vitest run test/collect-api.test.ts && npm run typecheck` → PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /var/www/projects/mirsal
@@ -915,7 +915,7 @@ git commit -m "feat(collect): public data layer — meta/unlock/submit/template 
 
 > Add a local const `COLLECTION_MAX_FILES_PER_RESPONSE = 10` in `collect/api.ts` (exported) so the form and its hint/guards share one source (the server value from `server/src/config.ts`).
 
-- [ ] **Step 1: Write the failing page test** (`web/test/collect.test.tsx`) — mirror `test/public.test.tsx` (QueryClient + I18nextProvider + MemoryRouter at `/c/:token`, `jsonResponse` helper, `setNavigatorLanguage`, isolate-strip). Cases:
+- [x] **Step 1: Write the failing page test** (`web/test/collect.test.tsx`) — mirror `test/public.test.tsx` (QueryClient + I18nextProvider + MemoryRouter at `/c/:token`, `jsonResponse` helper, `setNavigatorLanguage`, isolate-strip). Cases:
 
 ```ts
 test('open: renders title, department select, file input; AR default then EN toggle flips dir + copy', async () => { /* stub GET meta open */ });
@@ -929,13 +929,13 @@ test('submitting files issues a multipart POST and shows the confirmation', asyn
 test('client guards: >10 files and a >100MB file are rejected before any request', async () => {});
 ```
 
-- [ ] **Step 2: Run it, verify it fails** — `cd web && npx vitest run test/collect.test.tsx` → FAIL.
+- [x] **Step 2: Run it, verify it fails** — `cd web && npx vitest run test/collect.test.tsx` → FAIL.
 
-- [ ] **Step 3: Implement `CollectPasswordGate.tsx`, `CollectForm.tsx`, and `CollectPage.tsx`** per the specs above.
+- [x] **Step 3: Implement `CollectPasswordGate.tsx`, `CollectForm.tsx`, and `CollectPage.tsx`** per the specs above.
 
-- [ ] **Step 4: Run test + typecheck, verify green** — `cd web && npx vitest run test/collect.test.tsx && npm run typecheck` → PASS.
+- [x] **Step 4: Run test + typecheck, verify green** — `cd web && npx vitest run test/collect.test.tsx && npm run typecheck` → PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /var/www/projects/mirsal
@@ -949,11 +949,11 @@ git commit -m "feat(collect): bilingual public uploader page (/c/:token) — gat
 
 **Files:** none (verification only).
 
-- [ ] **Step 1: Run the ENTIRE web suite** — `cd web && npm test` → all green (existing + 6 new files). Fix any regression before proceeding.
-- [ ] **Step 2: Typecheck the whole web workspace** — `cd web && npm run typecheck` → clean.
-- [ ] **Step 3: Production build sanity** — `cd web && npm run build` → succeeds (catches an import/route mistake tests miss).
-- [ ] **Step 4: Confirm server is untouched** — `cd /var/www/projects/mirsal && git diff --name-only main -- server/ | grep .` returns nothing (frontend-only invariant). The full server suite is unchanged from Phase 2 (419/419); no need to re-run, but `cd server && npm test` if in doubt.
-- [ ] **Step 5: Update the plan checkboxes + write the phase-3 memory note**, then STOP (feedback_phase_pause) — do NOT merge to main or deploy; report status and await the user's "go" for merge + Phase 4.
+- [x] **Step 1: Run the ENTIRE web suite** — `cd web && npm test` → all green (existing + 6 new files). Fix any regression before proceeding.
+- [x] **Step 2: Typecheck the whole web workspace** — `cd web && npm run typecheck` → clean.
+- [x] **Step 3: Production build sanity** — `cd web && npm run build` → succeeds (catches an import/route mistake tests miss).
+- [x] **Step 4: Confirm server is untouched** — `cd /var/www/projects/mirsal && git diff --name-only main -- server/ | grep .` returns nothing (frontend-only invariant). The full server suite is unchanged from Phase 2 (419/419); no need to re-run, but `cd server && npm test` if in doubt.
+- [x] **Step 5: Update the plan checkboxes + write the phase-3 memory note**, then STOP (feedback_phase_pause) — do NOT merge to main or deploy; report status and await the user's "go" for merge + Phase 4.
 
 ```bash
 cd /var/www/projects/mirsal
