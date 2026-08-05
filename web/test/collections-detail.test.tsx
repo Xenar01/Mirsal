@@ -93,6 +93,7 @@ function mkDetail(over: Partial<CollectionDetailDto> = {}): CollectionDetailDto 
     responded_count: 1,
     url: 'https://project4.system.mow.gov.sy/c/tok7',
     template: { node_id: 9, name: 'template.xlsx' },
+    folder_node_id: 40,
     departments: [
       { id: 1, name: 'المالية', responded: true, file_count: 2, submitted_at: NOW, note: 'مرفق', folder_node_id: 50 },
       { id: 2, name: 'الموارد', responded: false, file_count: 0, submitted_at: null, note: null, folder_node_id: null },
@@ -184,7 +185,10 @@ describe('CollectionDetail — roster + lifecycle (Collections Phase 3 / Task 5)
     const showBtn = await screen.findByRole('button', { name: i18n.t('collections.detail.showFiles') });
     fireEvent.click(showBtn);
 
-    const link = await screen.findByRole('link', { name: new RegExp(i18n.t('collections.detail.download')) });
+    // Exact match: the looser substring match this used before Task 4 now also
+    // matches the whole-collection/per-department ZIP links ("تنزيل الكل كملف
+    // مضغوط" / "تنزيل كملف مضغوط" both contain "تنزيل").
+    const link = await screen.findByRole('link', { name: i18n.t('collections.detail.download') });
     expect(link).toHaveAttribute('href', '/api/nodes/60/download');
 
     // Assert the department's OWN folder (50) was requested — the stub's bare
@@ -193,6 +197,33 @@ describe('CollectionDetail — roster + lifecycle (Collections Phase 3 / Task 5)
     const nodesCall = fetchMock.mock.calls.find(([u]) => String(u).includes('/api/nodes?'));
     expect(nodesCall).toBeDefined();
     expect(String(nodesCall![0])).toContain('parent=50');
+  });
+
+  test('renders a whole-collection ZIP link pointing at the collection root folder', async () => {
+    stubFetch({ '/api/collections/7': mkDetail(), '/api/auth/me': USER });
+    renderDetail();
+
+    const link = await screen.findByRole('link', { name: /تنزيل الكل/ });
+    expect(link).toHaveAttribute('href', '/api/nodes/40/zip');
+  });
+
+  test('omits the whole-collection ZIP link when no department has responded', async () => {
+    stubFetch({
+      '/api/collections/7': mkDetail({ responded_count: 0, departments: [] }),
+      '/api/auth/me': USER,
+    });
+    renderDetail();
+
+    await screen.findByText('مسح ربعي');
+    expect(screen.queryByRole('link', { name: /تنزيل الكل/ })).not.toBeInTheDocument();
+  });
+
+  test('renders a per-department ZIP link for a responded department', async () => {
+    stubFetch({ '/api/collections/7': mkDetail(), '/api/auth/me': USER });
+    renderDetail();
+
+    const link = await screen.findByRole('link', { name: /تنزيل كملف مضغوط/ });
+    expect(link).toHaveAttribute('href', '/api/nodes/50/zip');
   });
 
   test('close toggles is_active via PATCH', async () => {

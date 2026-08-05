@@ -44,5 +44,7 @@ export interface CollectionDetailDto {
   responded_count: number;
   departments: RosterDeptDto[];
   template: { node_id: number; name: string } | null;
+  /** The collection's own Drive folder (root of the whole-collection ZIP export). */
+  folder_node_id: number;
   url: string;
 }

@@ -571,6 +571,8 @@
       "showFiles": "عرض الملفات",
       "hideFiles": "إخفاء الملفات",
       "download": "تنزيل",
+      "downloadAllZip": "تنزيل الكل كملف مضغوط",
+      "downloadDeptZip": "تنزيل كملف مضغوط",
       "filesLoading": "جارٍ التحميل…",
       "filesError": "تعذّر تحميل الملفات.",
       "link": "رابط الطلب",
