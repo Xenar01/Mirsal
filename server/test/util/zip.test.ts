@@ -3,10 +3,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
-import { openDb } from '../db/connection.js';
-import { migrate } from '../db/migrate.js';
-import { createFolder, ensureUserRoots, type Node } from '../nodes/tree.js';
-import { collectSubtreeFiles, MAX_ZIP_ENTRIES, zipFileName } from './zip.js';
+import { openDb } from '../../src/db/connection.js';
+import { migrate } from '../../src/db/migrate.js';
+import { createFolder, ensureUserRoots, type Node } from '../../src/nodes/tree.js';
+import { collectSubtreeFiles, MAX_ZIP_ENTRIES, zipFileName } from '../../src/util/zip.js';
 
 describe('zipFileName', () => {
   it('sanitizes name, strips separators/CRLF, appends .zip', () => {
