@@ -148,7 +148,18 @@ export function commitResponse(
       )
       .get({ c: collection.id, d: department.id, f: subfolderId, note, now, ip: submittedIp }) as { id: number };
 
-    return { removedStoragePaths, committed, responseId: up.id };
+    // Rowid reuse guard (Defect A): `nodes.id` is a plain INTEGER PRIMARY KEY
+    // (no AUTOINCREMENT), so a replacement file can be handed the just-freed id
+    // of a deleted old file — giving it the SAME storage_path
+    // (`${ownerId}/${nodeId}`). The caller unlinks `removedStoragePaths` AFTER
+    // moving the new blobs into place, so any path a committed new file now
+    // occupies must be dropped from the unlink list, or that cleanup deletes the
+    // blob it just wrote (silent data loss). Paths that were genuinely freed
+    // (not reused) still get unlinked.
+    const committedPaths = new Set(committed.map((cf) => `${ownerId}/${cf.nodeId}`));
+    const safeRemovedStoragePaths = removedStoragePaths.filter((p) => !committedPaths.has(p));
+
+    return { removedStoragePaths: safeRemovedStoragePaths, committed, responseId: up.id };
   });
 
   return run();

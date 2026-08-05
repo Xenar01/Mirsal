@@ -402,7 +402,7 @@ test('submit over quota -> 413 quota_exceeded, nothing stored', async () => {
   expect((db!.prepare('SELECT used_bytes u FROM users WHERE id=?').get(owner) as { u: number }).u).toBe(0);
 });
 
-test('submit latest-replaces: re-submit swaps the set and reclaims the old blob', async () => {
+test('submit latest-replaces: re-submit swaps the set, reclaims quota, and keeps the new blob on disk', async () => {
   const built = await makeApp();
   const owner = await seedUser('alice');
   const { session, csrf } = await login(built, 'alice');
@@ -417,11 +417,47 @@ test('submit latest-replaces: re-submit swaps the set and reclaims the old blob'
   expect(fs.existsSync(oldBlob)).toBe(true);
 
   await submit(built, c.token, [{ name: 'departmentId', value: String(hr.id) }, { name: 'files', filename: 'new.txt', data: Buffer.from('NEW') }]);
-  const files = db!.prepare("SELECT name FROM nodes WHERE parent_id=? AND kind='file'").all(sub) as { name: string }[];
+  const files = db!.prepare("SELECT name, storage_path FROM nodes WHERE parent_id=? AND kind='file'").all(sub) as { name: string; storage_path: string }[];
   expect(files.map((f) => f.name)).toEqual(['new.txt']);
-  expect(fs.existsSync(oldBlob)).toBe(false); // old blob unlinked
+  // Defect A regression: rowid reuse can give new.txt the SAME storage_path the
+  // freed old.txt row held, so the old-set cleanup must not delete the blob that
+  // commitTemp just wrote — the replacement's blob must survive with its bytes.
+  const newBlob = path.join(dir!, 'storage', files[0].storage_path);
+  expect(fs.existsSync(newBlob)).toBe(true);
+  expect(fs.readFileSync(newBlob, 'utf8')).toBe('NEW');
   expect((db!.prepare('SELECT used_bytes u FROM users WHERE id=?').get(owner) as { u: number }).u).toBe(3);
   expect((db!.prepare('SELECT COUNT(*) n FROM collection_responses WHERE department_id=?').get(hr.id) as { n: number }).n).toBe(1);
+});
+
+test('submit latest-replaces with rowid reuse keeps every surviving file blob (Defect A regression)', async () => {
+  const built = await makeApp();
+  await seedUser('alice');
+  const { session, csrf } = await login(built, 'alice');
+  const c = await makeCollection(built, session, csrf, { title: 'T', departments: ['HR', 'Finance'] });
+  const [d1, d2] = deptIds(c.id);
+
+  // d1 gets 1 file; d2 gets 3 — d2's files become the table's current max-id rows.
+  await submit(built, c.token, [{ name: 'departmentId', value: String(d1.id) }, { name: 'files', filename: 'a.txt', data: Buffer.from('A') }]);
+  await submit(built, c.token, [
+    { name: 'departmentId', value: String(d2.id) },
+    { name: 'files', filename: 'b1.txt', data: Buffer.from('B1') },
+    { name: 'files', filename: 'b2.txt', data: Buffer.from('B2') },
+    { name: 'files', filename: 'b3.txt', data: Buffer.from('B3') },
+  ]);
+  // d2 resubmits with 2 different files (ordinary latest-replaces). The freed
+  // rowids get reused, colliding new storage_paths with the just-freed ones.
+  const replace = await submit(built, c.token, [
+    { name: 'departmentId', value: String(d2.id) },
+    { name: 'files', filename: 'c1.txt', data: Buffer.from('C1') },
+    { name: 'files', filename: 'c2.txt', data: Buffer.from('C2') },
+  ]);
+  expect(replace.statusCode).toBe(200);
+
+  // Every file the DB still lists must have its blob on disk (no reverse-orphan).
+  const current = db!.prepare("SELECT name, storage_path FROM nodes WHERE kind='file' AND storage_path IS NOT NULL").all() as { name: string; storage_path: string }[];
+  const missing = current.filter((f) => !fs.existsSync(path.join(dir!, 'storage', f.storage_path)));
+  expect(missing).toEqual([]);
+  expect(current.map((f) => f.name).sort()).toEqual(['a.txt', 'c1.txt', 'c2.txt']);
 });
 
 test('submit rejects: wrong department -> 404; closed -> 404; non-multipart -> 415; password locked -> 401', async () => {

@@ -660,6 +660,18 @@ export default async function publicRoutes(app: FastifyInstance, deps: PublicRou
 
       const files = collectSubtreeFiles(db, share.owner_id, rootNode);
 
+      // Reverse-orphan pre-flight (Defect B): archiver never surfaces a lazy
+      // source stream's ENOENT as its own 'error', so appending a missing blob
+      // hangs the response AND strands a MAX_CONCURRENT_ZIPS slot. Probe each
+      // blob first and fail cleanly like /download's ENOENT->404 BEFORE taking a
+      // slot or streaming (mirrors routes/nodes.ts /zip).
+      for (const f of files) {
+        if (!(await blobStore.blobExists(f.storagePath))) {
+          reply.code(404).send({ error: 'not_found' });
+          return;
+        }
+      }
+
       // Slot taken from here on. The authoritative release is the raw
       // response's `'close'` event, which fires on BOTH a normal finish AND a
       // mid-stream client abort (unlike `onResponse`, which does not fire on

@@ -753,6 +753,19 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
 
     const files = collectSubtreeFiles(db, uid, node);
 
+    // Reverse-orphan pre-flight (Defect B): archiver never surfaces a lazy
+    // source stream's ENOENT as its own 'error', so appending a missing blob
+    // hangs the response forever AND strands a concurrency slot. Probe each
+    // blob first and fail cleanly like /download's ENOENT->404 BEFORE taking a
+    // slot or streaming. Post-Defect-A fix this is a rare safety net; the walk
+    // is already bounded by MAX_ZIP_ENTRIES/MAX_ZIP_WALK_NODES.
+    for (const f of files) {
+      if (!(await blobStore.blobExists(f.storagePath))) {
+        reply.code(404).send({ error: 'not_found' });
+        return;
+      }
+    }
+
     // Slot taken from here on — see the `releaseNodeZipSlot` comment above for
     // why the raw response's `'close'` event is the authoritative release.
     activeNodeZipCount++;

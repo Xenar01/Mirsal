@@ -1085,6 +1085,38 @@ test('GET /api/nodes/:id/zip with a non-integer id -> 404', async () => {
   expect(res.statusCode).toBe(404);
 });
 
+test('GET /api/nodes/:id/zip when a subtree blob is missing on disk -> 404, never hangs', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  const folderRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { parent_id: rootId, name: 'ZipMe' },
+  });
+  const folder = folderRes.json();
+
+  const upload = await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'ghost.txt', data: Buffer.from('will vanish') });
+  const nodeId = upload.body.id as number;
+  // Reverse-orphan: the row exists but its blob is gone (the exact end state
+  // Defect A could produce). /zip must fail cleanly like /download's ENOENT->404,
+  // not hang on the archiver's never-surfaced source-stream ENOENT — a hang here
+  // also strands a MAX_CONCURRENT_NODE_ZIPS slot forever (Defect B).
+  fs.unlinkSync(path.join(storageDir!, String(uid), String(nodeId)));
+
+  const res = await built.inject({
+    method: 'GET',
+    url: `/api/nodes/${folder.id}/zip`,
+    cookies: { mirsal_session: session },
+  });
+  expect(res.statusCode).toBe(404);
+  expect(res.json()).toEqual({ error: 'not_found' });
+}, 10_000);
+
 test('POST /api/nodes/trash/empty is owner-scoped — never touches another user\'s trash', async () => {
   const built = await makeApp();
   const aliceId = await seedUser('alice', 'pw');
