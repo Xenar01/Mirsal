@@ -36,7 +36,6 @@
     "departmentPlaceholder": "Choose your department",
     "departmentRequired": "Choose a department.",
     "filesLabel": "Response files",
-    "filesPick": "Choose files",
     "filesHint": "Up to {{max}} files, each no larger than 100 MB.",
     "filesRequired": "Attach at least one file.",
     "tooManyFiles": "At most {{max}} files.",
@@ -57,8 +56,6 @@
     "unlock": "Unlock",
     "wrongPassword": "Incorrect password. {{count}} attempts left.",
     "wrongPasswordNoCount": "Incorrect password.",
-    "tooManyAttempts": "Too many attempts. Please wait and try again.",
-    "toEnglish": "English",
-    "toArabic": "العربية"
+    "tooManyAttempts": "Too many attempts. Please wait and try again."
   }
 }

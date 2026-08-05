@@ -526,14 +526,8 @@
       "status": "الحالة",
       "actions": "إجراءات"
     },
-    "status": {
-      "open": "مفتوح",
-      "closed": "مغلق",
-      "expired": "منتهٍ"
-    },
     "count": "{{responded}}/{{total}} قسمًا",
     "copyLink": "نسخ الرابط",
-    "open": "فتح",
     "create": {
       "title": "طلب تجميع جديد",
       "titleLabel": "عنوان الطلب",
@@ -634,7 +628,6 @@
     "departmentPlaceholder": "اختر قسمك",
     "departmentRequired": "اختر القسم.",
     "filesLabel": "ملفات الرد",
-    "filesPick": "اختيار الملفات",
     "filesHint": "حتى {{max}} ملفات، ولا يزيد كل ملف عن ١٠٠ ميغابايت.",
     "filesRequired": "أرفق ملفًا واحدًا على الأقل.",
     "tooManyFiles": "الحد الأقصى {{max}} ملفات.",
@@ -655,8 +648,6 @@
     "unlock": "فتح",
     "wrongPassword": "كلمة مرور غير صحيحة. المحاولات المتبقية: {{count}}.",
     "wrongPasswordNoCount": "كلمة مرور غير صحيحة.",
-    "tooManyAttempts": "محاولات كثيرة. انتظر قليلًا ثم حاول مجددًا.",
-    "toEnglish": "English",
-    "toArabic": "العربية"
+    "tooManyAttempts": "محاولات كثيرة. انتظر قليلًا ثم حاول مجددًا."
   }
 }
