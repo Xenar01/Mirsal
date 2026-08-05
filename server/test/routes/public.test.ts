@@ -322,6 +322,27 @@ test('folder share: /zip streams a zip of the subtree with real entries', async 
   expect(count).toBeGreaterThanOrEqual(2);
 });
 
+test('folder share: /zip when a subtree blob is missing on disk -> 404, never hangs', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  const folder = await makeFolder(built, session, csrf, rootId, 'Bundle');
+  const inside = await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'ghost.txt', data: Buffer.from('will vanish') });
+  const share = await createShare(built, session, csrf, { node_id: folder.id });
+
+  // Reverse-orphan: the row is present but its blob is gone. /zip must fail
+  // cleanly, not hang on the archiver's never-surfaced source-stream ENOENT
+  // (which strands a MAX_CONCURRENT_ZIPS slot) — mirrors the /api/nodes/:id/zip
+  // pre-flight fix (Defect B).
+  fs.unlinkSync(path.join(storageDir!, String(uid), String(inside.id)));
+
+  const zipRes = await built.inject({ method: 'GET', url: `/api/public/${share.token}/zip` });
+  expect(zipRes.statusCode).toBe(404);
+  expect(zipRes.json()).toEqual({ error: 'not_found' });
+}, 10_000);
+
 // ---------------------------------------------------------------------------
 // Password share
 // ---------------------------------------------------------------------------

@@ -119,24 +119,93 @@ describe('collect api — unlockCollection', () => {
   });
 });
 
-describe('collect api — submitResponse', () => {
-  test('builds multipart with departmentId + files + note and lets the browser set content-type', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse(200, { ok: true }));
-    vi.stubGlobal('fetch', fetchMock);
+/**
+ * A controllable fake `XMLHttpRequest` for `submitResponse` (Task 5 — upload
+ * progress). Unlike the auto-responding `MockXHR` in
+ * `collections-create.test.tsx`, this one is driven manually via
+ * `emitProgress`/`emitLoad`/`emitError`/`emitAbort` so a test can assert the
+ * intermediate progress callback before resolving the request.
+ */
+class FakeXHR {
+  static instances: FakeXHR[] = [];
+  open = vi.fn();
+  send = vi.fn();
+  withCredentials = false;
+  status = 0;
+  responseText = '';
+  listeners: Record<string, Array<() => void>> = {};
+  uploadListeners: Record<
+    string,
+    Array<(e: { lengthComputable: boolean; loaded: number; total: number }) => void>
+  > = {};
+  upload = {
+    addEventListener: (
+      type: string,
+      cb: (e: { lengthComputable: boolean; loaded: number; total: number }) => void
+    ) => {
+      (this.uploadListeners[type] ??= []).push(cb);
+    },
+  };
+
+  constructor() {
+    FakeXHR.instances.push(this);
+  }
+
+  addEventListener(type: string, cb: () => void) {
+    (this.listeners[type] ??= []).push(cb);
+  }
+
+  /** Fires a progress event; `lengthComputable:false` mirrors an XHR upload whose total size can't be determined. */
+  emitProgress(loaded: number, total: number, lengthComputable = true) {
+    this.uploadListeners['progress']?.forEach((cb) => cb({ lengthComputable, loaded, total }));
+  }
+
+  emitLoad(status: number, body?: unknown) {
+    this.status = status;
+    this.responseText = body === undefined ? '' : JSON.stringify(body);
+    this.listeners['load']?.forEach((cb) => cb());
+  }
+
+  /** Fires `load` with a raw (possibly non-JSON) response body — for the malformed-body case. */
+  emitLoadRaw(status: number, rawText: string) {
+    this.status = status;
+    this.responseText = rawText;
+    this.listeners['load']?.forEach((cb) => cb());
+  }
+
+  emitError() {
+    this.listeners['error']?.forEach((cb) => cb());
+  }
+
+  emitAbort() {
+    this.listeners['abort']?.forEach((cb) => cb());
+  }
+}
+
+function installMockXHR(): void {
+  FakeXHR.instances = [];
+  vi.stubGlobal('XMLHttpRequest', FakeXHR as unknown as typeof XMLHttpRequest);
+}
+
+function lastXhr(): FakeXHR {
+  return FakeXHR.instances[FakeXHR.instances.length - 1];
+}
+
+describe('collect api — submitResponse (XHR, with upload progress)', () => {
+  test('builds multipart with departmentId + files + note, POSTs via XHR with credentials, no CSRF', async () => {
+    installMockXHR();
     const file = new File(['hello'], 'a.txt', { type: 'text/plain' });
 
-    const result = await submitResponse(TOKEN, { departmentId: 5, files: [file], note: 'ملاحظة' });
-    expect(result).toEqual({ kind: 'ok' });
+    const p = submitResponse(TOKEN, { departmentId: 5, files: [file], note: 'ملاحظة' });
+    const xhr = lastXhr();
+    xhr.emitLoad(200, { ok: true });
+    expect(await p).toEqual({ kind: 'ok' });
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, init] = fetchMock.mock.calls[0] as [RequestInfo | URL, RequestInit];
-    expect(String(url)).toBe(`/api/collect/${TOKEN}/submit`);
-    expect(init.method).toBe('POST');
-    expect(init.credentials).toBe('include');
-    // No manual content-type — the browser must set the multipart boundary.
-    expect(init.headers).toBeUndefined();
+    expect(FakeXHR.instances).toHaveLength(1);
+    expect(xhr.open).toHaveBeenCalledWith('POST', `/api/collect/${TOKEN}/submit`);
+    expect(xhr.withCredentials).toBe(true);
 
-    const form = init.body as FormData;
+    const form = xhr.send.mock.calls[0][0] as FormData;
     expect(form).toBeInstanceOf(FormData);
     expect(form.get('departmentId')).toBe('5');
     expect(form.get('note')).toBe('ملاحظة');
@@ -144,43 +213,105 @@ describe('collect api — submitResponse', () => {
   });
 
   test('omits the note field entirely when not provided', async () => {
-    const fetchMock = vi.fn(async () => jsonResponse(200, { ok: true }));
-    vi.stubGlobal('fetch', fetchMock);
+    installMockXHR();
     const file = new File(['hello'], 'a.txt');
-    await submitResponse(TOKEN, { departmentId: 1, files: [file] });
-    const form = (fetchMock.mock.calls[0][1] as RequestInit).body as FormData;
+    const p = submitResponse(TOKEN, { departmentId: 1, files: [file] });
+    const xhr = lastXhr();
+    xhr.emitLoad(200, { ok: true });
+    await p;
+    const form = xhr.send.mock.calls[0][0] as FormData;
     expect(form.has('note')).toBe(false);
   });
 
+  test('reports upload progress as a 0..1 fraction and resolves ok on 200', async () => {
+    installMockXHR();
+    const seen: number[] = [];
+    const p = submitResponse(
+      TOKEN,
+      { departmentId: 1, files: [new File(['x'], 'a.txt')] },
+      { onProgress: (f) => seen.push(f) }
+    );
+    const xhr = lastXhr();
+    xhr.emitProgress(50, 100);
+    xhr.emitLoad(200, { ok: true });
+    await expect(p).resolves.toEqual({ kind: 'ok' });
+    expect(seen).toContain(0.5);
+  });
+
+  test('a non-lengthComputable progress event is ignored (no NaN/undefined callback)', async () => {
+    installMockXHR();
+    const seen: number[] = [];
+    const p = submitResponse(TOKEN, { departmentId: 1, files: [] }, { onProgress: (f) => seen.push(f) });
+    const xhr = lastXhr();
+    xhr.emitProgress(50, 100, false);
+    xhr.emitLoad(200, { ok: true });
+    await p;
+    expect(seen).toEqual([]);
+  });
+
   test('400 too_many_files → tooManyFiles', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(400, { error: 'too_many_files' })));
-    expect(await submitResponse(TOKEN, { departmentId: 1, files: [] })).toEqual({ kind: 'tooManyFiles' });
+    installMockXHR();
+    const p = submitResponse(TOKEN, { departmentId: 1, files: [] });
+    lastXhr().emitLoad(400, { error: 'too_many_files' });
+    expect(await p).toEqual({ kind: 'tooManyFiles' });
   });
 
   test('413 file_too_large → tooLarge', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(413, { error: 'file_too_large' })));
-    expect(await submitResponse(TOKEN, { departmentId: 1, files: [] })).toEqual({ kind: 'tooLarge' });
+    installMockXHR();
+    const p = submitResponse(TOKEN, { departmentId: 1, files: [] });
+    lastXhr().emitLoad(413, { error: 'file_too_large' });
+    expect(await p).toEqual({ kind: 'tooLarge' });
   });
 
   test('413 quota_exceeded → quota', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(413, { error: 'quota_exceeded' })));
-    expect(await submitResponse(TOKEN, { departmentId: 1, files: [] })).toEqual({ kind: 'quota' });
+    installMockXHR();
+    const p = submitResponse(TOKEN, { departmentId: 1, files: [] });
+    lastXhr().emitLoad(413, { error: 'quota_exceeded' });
+    expect(await p).toEqual({ kind: 'quota' });
   });
 
   test('404 → closed; 401 → locked', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(404, { error: 'not_found' })));
-    expect(await submitResponse(TOKEN, { departmentId: 1, files: [] })).toEqual({ kind: 'closed' });
+    installMockXHR();
+    const p1 = submitResponse(TOKEN, { departmentId: 1, files: [] });
+    lastXhr().emitLoad(404, { error: 'not_found' });
+    expect(await p1).toEqual({ kind: 'closed' });
 
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(401, { needsPassword: true })));
-    expect(await submitResponse(TOKEN, { departmentId: 1, files: [] })).toEqual({ kind: 'locked' });
+    installMockXHR();
+    const p2 = submitResponse(TOKEN, { departmentId: 1, files: [] });
+    lastXhr().emitLoad(401, { needsPassword: true });
+    expect(await p2).toEqual({ kind: 'locked' });
   });
 
-  test('an unrecognized 400/413 body or any other status maps to error', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(400, { error: 'no_files' })));
-    expect(await submitResponse(TOKEN, { departmentId: 1, files: [] })).toEqual({ kind: 'error' });
+  test('an unrecognized 400/413 body, a malformed body, or any other status maps to error', async () => {
+    installMockXHR();
+    const p1 = submitResponse(TOKEN, { departmentId: 1, files: [] });
+    lastXhr().emitLoad(400, { error: 'no_files' });
+    expect(await p1).toEqual({ kind: 'error' });
 
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse(500, {})));
-    expect(await submitResponse(TOKEN, { departmentId: 1, files: [] })).toEqual({ kind: 'error' });
+    installMockXHR();
+    const p2 = submitResponse(TOKEN, { departmentId: 1, files: [] });
+    lastXhr().emitLoad(500);
+    expect(await p2).toEqual({ kind: 'error' });
+
+    installMockXHR();
+    const p3 = submitResponse(TOKEN, { departmentId: 1, files: [] });
+    // Malformed JSON on a mapped error status still maps by status alone.
+    lastXhr().emitLoadRaw(413, 'not json{{{');
+    expect(await p3).toEqual({ kind: 'error' });
+  });
+
+  test('a network error event resolves { kind: "error" } — the promise never rejects', async () => {
+    installMockXHR();
+    const p = submitResponse(TOKEN, { departmentId: 1, files: [] });
+    lastXhr().emitError();
+    await expect(p).resolves.toEqual({ kind: 'error' });
+  });
+
+  test('an abort event resolves { kind: "error" } — the promise never rejects', async () => {
+    installMockXHR();
+    const p = submitResponse(TOKEN, { departmentId: 1, files: [] });
+    lastXhr().emitAbort();
+    await expect(p).resolves.toEqual({ kind: 'error' });
   });
 });
 

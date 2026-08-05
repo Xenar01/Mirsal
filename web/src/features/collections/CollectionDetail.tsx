@@ -8,7 +8,7 @@ import Button from '../../components/Button';
 import StatusChip, { type ShareStatus } from '../../components/StatusChip';
 import { useToast } from '../../components/Toast';
 import { Copy, DownloadArrow } from '../../components/icons';
-import { listNodes, downloadUrl } from '../dashboard/api';
+import { listNodes, downloadUrl, zipUrl } from '../dashboard/api';
 import { formatDate, formatBytes } from '../dashboard/format';
 import { damascusInputToUtcMs, utcMsToDamascusInput } from '../dashboard/share/datetime';
 import { ApiError } from '../../lib/api';
@@ -141,6 +141,15 @@ function Detail({
             total: collection.department_count,
           })}
         </p>
+        {collection.responded_count > 0 && (
+          <a
+            href={zipUrl(collection.folder_node_id)}
+            className="inline-flex w-fit items-center gap-1 text-teal"
+          >
+            <DownloadArrow size={16} />
+            {t('collections.detail.downloadAllZip')}
+          </a>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <span className="font-body text-sm text-ink-2">{t('collections.detail.link')}</span>
           <bdi
@@ -238,14 +247,25 @@ function RespondedRow({ dept }: { dept: RosterDeptDto }) {
           {dept.note}
         </p>
       )}
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        aria-expanded={expanded}
-        className="inline-flex min-h-10 items-center self-start font-body text-sm text-teal"
-      >
-        {expanded ? t('collections.detail.hideFiles') : t('collections.detail.showFiles')}
-      </button>
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          aria-expanded={expanded}
+          className="inline-flex min-h-10 items-center self-start font-body text-sm text-teal"
+        >
+          {expanded ? t('collections.detail.hideFiles') : t('collections.detail.showFiles')}
+        </button>
+        {dept.folder_node_id != null && (
+          <a
+            href={zipUrl(dept.folder_node_id)}
+            className="inline-flex items-center gap-1 text-teal"
+          >
+            <DownloadArrow size={16} />
+            {t('collections.detail.downloadDeptZip')}
+          </a>
+        )}
+      </div>
       {expanded && dept.folder_node_id != null && (
         <DepartmentFiles folderNodeId={dept.folder_node_id} />
       )}

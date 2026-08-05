@@ -110,6 +110,27 @@ Operational notes:
   It resets on restart (a crash can never strand a reservation); the durable
   `download_count < download_limit` guard still caps *counted* completions.
 
+## Collections (طلب تجميع)
+
+Distribute one file and collect a response set back from each of ~N departments via a
+single public link `/c/<token>`.
+
+- **Owner UI:** Collections nav → create (title, optional template, department list, optional
+  password, optional deadline) → detail/roster (responded X/N; per-department files;
+  **download a department's set as ZIP** or **the whole collection as ZIP**; open/close;
+  add/remove department; edit title/password/deadline).
+- **Storage:** responses land in the owner's Drive under a "طلب تجميع: <title>" folder with a
+  per-department subfolder; they count against the owner's quota. **Latest-replaces** —
+  a re-submit permanently deletes the department's previous set (not Trash).
+- **ZIP downloads** reuse the authenticated `GET /api/nodes/:id/zip` (folder subtree,
+  owner-scoped, concurrency-bounded); per-department = the department's response folder,
+  whole-collection = the collection's root folder.
+- **Bounds:** ≤100 MB/file, ≤10 files/response, one slot/department, owner-quota hard stop.
+  Public routes are rate-limited (nginx `real_ip` gives the true client IP).
+- **Deadline** closes the form at request-time (no scheduler). Owner open/close is manual.
+- **Schema:** tables `collections`, `collection_departments`, `collection_responses`
+  (migration v3→v4; live DB at v4). No Phase-4 schema change.
+
 ## Troubleshooting
 
 - **`address already in use` on `up`** — something else holds `127.0.0.1:8084`.

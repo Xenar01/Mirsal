@@ -526,14 +526,8 @@
       "status": "الحالة",
       "actions": "إجراءات"
     },
-    "status": {
-      "open": "مفتوح",
-      "closed": "مغلق",
-      "expired": "منتهٍ"
-    },
     "count": "{{responded}}/{{total}} قسمًا",
     "copyLink": "نسخ الرابط",
-    "open": "فتح",
     "create": {
       "title": "طلب تجميع جديد",
       "titleLabel": "عنوان الطلب",
@@ -571,6 +565,8 @@
       "showFiles": "عرض الملفات",
       "hideFiles": "إخفاء الملفات",
       "download": "تنزيل",
+      "downloadAllZip": "تنزيل الكل كملف مضغوط",
+      "downloadDeptZip": "تنزيل كملف مضغوط",
       "filesLoading": "جارٍ التحميل…",
       "filesError": "تعذّر تحميل الملفات.",
       "link": "رابط الطلب",
@@ -632,7 +628,6 @@
     "departmentPlaceholder": "اختر قسمك",
     "departmentRequired": "اختر القسم.",
     "filesLabel": "ملفات الرد",
-    "filesPick": "اختيار الملفات",
     "filesHint": "حتى {{max}} ملفات، ولا يزيد كل ملف عن ١٠٠ ميغابايت.",
     "filesRequired": "أرفق ملفًا واحدًا على الأقل.",
     "tooManyFiles": "الحد الأقصى {{max}} ملفات.",
@@ -640,18 +635,19 @@
     "noteLabel": "ملاحظة (اختياري)",
     "submit": "إرسال الرد",
     "submitting": "جارٍ الإرسال…",
+    "uploading": "جارٍ الرفع… {{pct}}٪",
     "success": "تم استلام ردّك. شكرًا لك.",
     "successAgain": "يمكنك الإرسال مجددًا لاستبدال ردّك السابق.",
     "sendAnother": "إرسال رد آخر",
     "quotaExceeded": "لا تتوفر مساحة كافية لدى المُستلِم. تواصل معه.",
     "submitError": "تعذّر إرسال الرد. حاول مجددًا.",
+    "closedNow": "عذرًا، أُغلق هذا الطلب.",
+    "lockedNow": "انتهت الجلسة، يرجى إدخال كلمة المرور من جديد.",
     "passwordGate": "هذا الطلب محمي بكلمة مرور.",
     "passwordLabel": "كلمة المرور",
     "unlock": "فتح",
     "wrongPassword": "كلمة مرور غير صحيحة. المحاولات المتبقية: {{count}}.",
     "wrongPasswordNoCount": "كلمة مرور غير صحيحة.",
-    "tooManyAttempts": "محاولات كثيرة. انتظر قليلًا ثم حاول مجددًا.",
-    "toEnglish": "English",
-    "toArabic": "العربية"
+    "tooManyAttempts": "محاولات كثيرة. انتظر قليلًا ثم حاول مجددًا."
   }
 }

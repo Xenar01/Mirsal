@@ -992,6 +992,131 @@ test('POST /api/nodes/trash/empty is a no-op 200 on an already-empty trash', asy
   expect(res.json().freedBytes).toBe(0);
 });
 
+// ---------------------------------------------------------------------------
+// ZIP (authenticated, owner-scoped folder subtree) — Collections Phase 4
+// ---------------------------------------------------------------------------
+
+test('GET /api/nodes/:id/zip zips an owned folder subtree', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  const folderRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { parent_id: rootId, name: 'ZipMe' },
+  });
+  const folder = folderRes.json();
+
+  await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'a.txt', data: Buffer.from('hello') });
+  await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'b.txt', data: Buffer.from('world') });
+
+  const res = await built.inject({
+    method: 'GET',
+    url: `/api/nodes/${folder.id}/zip`,
+    cookies: { mirsal_session: session },
+  });
+
+  expect(res.statusCode).toBe(200);
+  expect(res.headers['content-type']).toBe('application/zip');
+  expect(res.headers['content-disposition']).toMatch(/\.zip/);
+});
+
+test('GET /api/nodes/:id/zip on a folder owned by someone else -> 404 (no oracle)', async () => {
+  const built = await makeApp();
+  const uidA = await seedUser('alice', 'pw');
+  await seedUser('bob', 'pw');
+  const a = await login(built, 'alice', 'pw');
+  const b = await login(built, 'bob', 'pw');
+  const rootA = rootIdFor(uidA);
+
+  const folderRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: a.session },
+    headers: { 'x-csrf-token': a.csrf },
+    payload: { parent_id: rootA, name: 'AlicesFolder' },
+  });
+  const folder = folderRes.json();
+
+  const res = await built.inject({
+    method: 'GET',
+    url: `/api/nodes/${folder.id}/zip`,
+    cookies: { mirsal_session: b.session },
+  });
+  expect(res.statusCode).toBe(404);
+});
+
+test('GET /api/nodes/:id/zip on a file (not a folder) -> 400 not_a_folder', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  const upload = await uploadFile(built, session, csrf, {
+    parentId: rootId,
+    filename: 'plain.txt',
+    data: Buffer.from('just a file'),
+  });
+  const fileId = upload.body.id as number;
+
+  const res = await built.inject({
+    method: 'GET',
+    url: `/api/nodes/${fileId}/zip`,
+    cookies: { mirsal_session: session },
+  });
+  expect(res.statusCode).toBe(400);
+  expect(res.json()).toEqual({ error: 'not_a_folder' });
+});
+
+test('GET /api/nodes/:id/zip with a non-integer id -> 404', async () => {
+  const built = await makeApp();
+  await seedUser('alice', 'pw');
+  const { session } = await login(built, 'alice', 'pw');
+
+  const res = await built.inject({
+    method: 'GET',
+    url: '/api/nodes/abc/zip',
+    cookies: { mirsal_session: session },
+  });
+  expect(res.statusCode).toBe(404);
+});
+
+test('GET /api/nodes/:id/zip when a subtree blob is missing on disk -> 404, never hangs', async () => {
+  const built = await makeApp();
+  const uid = await seedUser('alice', 'pw');
+  const { session, csrf } = await login(built, 'alice', 'pw');
+  const rootId = rootIdFor(uid);
+
+  const folderRes = await built.inject({
+    method: 'POST',
+    url: '/api/nodes/folder',
+    cookies: { mirsal_session: session },
+    headers: { 'x-csrf-token': csrf },
+    payload: { parent_id: rootId, name: 'ZipMe' },
+  });
+  const folder = folderRes.json();
+
+  const upload = await uploadFile(built, session, csrf, { parentId: folder.id, filename: 'ghost.txt', data: Buffer.from('will vanish') });
+  const nodeId = upload.body.id as number;
+  // Reverse-orphan: the row exists but its blob is gone (the exact end state
+  // Defect A could produce). /zip must fail cleanly like /download's ENOENT->404,
+  // not hang on the archiver's never-surfaced source-stream ENOENT — a hang here
+  // also strands a MAX_CONCURRENT_NODE_ZIPS slot forever (Defect B).
+  fs.unlinkSync(path.join(storageDir!, String(uid), String(nodeId)));
+
+  const res = await built.inject({
+    method: 'GET',
+    url: `/api/nodes/${folder.id}/zip`,
+    cookies: { mirsal_session: session },
+  });
+  expect(res.statusCode).toBe(404);
+  expect(res.json()).toEqual({ error: 'not_found' });
+}, 10_000);
+
 test('POST /api/nodes/trash/empty is owner-scoped — never touches another user\'s trash', async () => {
   const built = await makeApp();
   const aliceId = await seedUser('alice', 'pw');

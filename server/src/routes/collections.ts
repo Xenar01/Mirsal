@@ -43,6 +43,7 @@ interface CollectionDetailDto {
   department_count: number; responded_count: number;
   departments: RosterDeptDto[];
   template: { node_id: number; name: string } | null;
+  folder_node_id: number;
   url: string;
 }
 
@@ -78,6 +79,7 @@ function buildDetailDto(db: Database.Database, c: Collection, base: string, nowM
     department_count: departments.length,
     responded_count: departments.filter((d) => d.responded).length,
     departments, template,
+    folder_node_id: c.folder_node_id,
     url: `${base}/c/${c.token}`,
   };
 }

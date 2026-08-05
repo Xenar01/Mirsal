@@ -36,7 +36,6 @@
     "departmentPlaceholder": "Choose your department",
     "departmentRequired": "Choose a department.",
     "filesLabel": "Response files",
-    "filesPick": "Choose files",
     "filesHint": "Up to {{max}} files, each no larger than 100 MB.",
     "filesRequired": "Attach at least one file.",
     "tooManyFiles": "At most {{max}} files.",
@@ -44,18 +43,19 @@
     "noteLabel": "Note (optional)",
     "submit": "Send response",
     "submitting": "Sending…",
+    "uploading": "Uploading… {{pct}}%",
     "success": "Your response was received. Thank you.",
     "successAgain": "You can submit again to replace your previous response.",
     "sendAnother": "Send another response",
     "quotaExceeded": "The recipient is out of space. Please contact them.",
     "submitError": "Couldn't send your response. Try again.",
+    "closedNow": "Sorry, this request just closed.",
+    "lockedNow": "Session expired — please re-enter the password.",
     "passwordGate": "This request is password-protected.",
     "passwordLabel": "Password",
     "unlock": "Unlock",
     "wrongPassword": "Incorrect password. {{count}} attempts left.",
     "wrongPasswordNoCount": "Incorrect password.",
-    "tooManyAttempts": "Too many attempts. Please wait and try again.",
-    "toEnglish": "English",
-    "toArabic": "العربية"
+    "tooManyAttempts": "Too many attempts. Please wait and try again."
   }
 }

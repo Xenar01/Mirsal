@@ -2,6 +2,7 @@ import { unlink } from 'node:fs/promises';
 import type { ReadStream } from 'node:fs';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type Database from 'better-sqlite3';
+import { ZipArchive } from 'archiver';
 import { z } from 'zod';
 import type { Clock } from '../clock.js';
 import type { Guards } from '../auth/guards.js';
@@ -23,6 +24,7 @@ import { permanentDelete, restoreNode, trashNode } from '../nodes/trash.js';
 import { reserve, commitActual, release } from '../storage/quota.js';
 import type { BlobStore } from '../storage/blobs.js';
 import { buildContentDisposition } from '../util/content-disposition.js';
+import { appendFilesToArchive, collectSubtreeFiles, zipFileName, ZIP_COMPRESSION_LEVEL } from '../util/zip.js';
 
 export interface NodesRouteDeps {
   db: Database.Database;
@@ -272,6 +274,21 @@ const autoDeleteBodySchema = z.object({
  */
 export default async function nodesRoutes(app: FastifyInstance, deps: NodesRouteDeps): Promise<void> {
   const { db, now, guards, blobStore } = deps;
+
+  // --- GET /api/nodes/:id/zip concurrency bound -----------------------------
+  // Same slot-discipline as public.ts's `/api/public/:token/zip`: a
+  // server-wide counter plus an idempotent, WeakSet-guarded release wired to
+  // the raw response's `'close'` event (fires on BOTH normal finish AND a
+  // mid-stream client abort — `onResponse` does not fire on abort under this
+  // fastify version), so a cancelled download can never strand a slot. This
+  // route is authenticated (unlike the public one), so it has no per-IP/
+  // per-token rate limit — auth is the gate; only concurrency is bounded.
+  const MAX_CONCURRENT_NODE_ZIPS = 4;
+  let activeNodeZipCount = 0;
+  const nodeZipSlots = new WeakSet<FastifyRequest>();
+  function releaseNodeZipSlot(req: FastifyRequest): void {
+    if (nodeZipSlots.delete(req)) activeNodeZipCount--;
+  }
 
   app.get('/api/nodes', { preHandler: guards.requireAuth }, async (req, reply) => {
     const uid = req.user!.id;
@@ -709,5 +726,74 @@ export default async function nodesRoutes(app: FastifyInstance, deps: NodesRoute
     // `reply.send()` inside an async handler when that call is also
     // `return`ed, confirmed empirically against this Fastify version.
     return reply.send(stream);
+  });
+
+  app.get('/api/nodes/:id/zip', { preHandler: guards.requireAuth }, async (req, reply) => {
+    const id = parseIdParam(req);
+    if (id === null) {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
+
+    const uid = req.user!.id;
+    const node = getOwnedNode(db, uid, id);
+    if (!node) {
+      reply.code(404).send({ error: 'not_found' });
+      return;
+    }
+    if (node.kind !== 'folder') {
+      reply.code(400).send({ error: 'not_a_folder' });
+      return;
+    }
+
+    if (activeNodeZipCount >= MAX_CONCURRENT_NODE_ZIPS) {
+      reply.code(429).send({ error: 'too_many_requests' });
+      return;
+    }
+
+    const files = collectSubtreeFiles(db, uid, node);
+
+    // Reverse-orphan pre-flight (Defect B): archiver never surfaces a lazy
+    // source stream's ENOENT as its own 'error', so appending a missing blob
+    // hangs the response forever AND strands a concurrency slot. Probe each
+    // blob first and fail cleanly like /download's ENOENT->404 BEFORE taking a
+    // slot or streaming. Post-Defect-A fix this is a rare safety net; the walk
+    // is already bounded by MAX_ZIP_ENTRIES/MAX_ZIP_WALK_NODES.
+    for (const f of files) {
+      if (!(await blobStore.blobExists(f.storagePath))) {
+        reply.code(404).send({ error: 'not_found' });
+        return;
+      }
+    }
+
+    // Slot taken from here on — see the `releaseNodeZipSlot` comment above for
+    // why the raw response's `'close'` event is the authoritative release.
+    activeNodeZipCount++;
+    nodeZipSlots.add(req);
+    reply.raw.once('close', () => releaseNodeZipSlot(req));
+
+    const archive = new ZipArchive({ zlib: { level: ZIP_COMPRESSION_LEVEL } });
+    // Post-headers stream failure can't change the status — tear the response
+    // down rather than leave a truncated body hanging or crash on an
+    // unhandled 'error'.
+    archive.on('error', (err) => {
+      req.log.error({ err }, 'node zip stream failed');
+      reply.raw.destroy(err);
+    });
+
+    appendFilesToArchive(archive, files, blobStore);
+
+    reply.header('Content-Type', 'application/zip');
+    reply.header('Content-Disposition', buildContentDisposition(zipFileName(node.name)));
+    reply.header('X-Content-Type-Options', 'nosniff');
+
+    writeAudit(db, { actorId: uid, action: 'zip', target: String(id) }, now);
+
+    // Hand the stream to the reply BEFORE finalize so a consumer exists and
+    // backpressure holds (archiver reads each source blob lazily — never
+    // buffering the whole subtree in memory).
+    const sent = reply.send(archive);
+    void archive.finalize();
+    return sent;
   });
 }

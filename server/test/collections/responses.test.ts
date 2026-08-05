@@ -99,11 +99,17 @@ test('latest-replaces: second submit removes the prior set, reclaims quota, keep
   const owner = seedOwner(null);
   const { collectionId, folderNodeId, deptId } = seedCollection(owner);
 
-  const first = commitResponse(database, owner, { id: collectionId, folder_node_id: folderNodeId }, { id: deptId, name: 'HR' }, [staged('old.txt', 200)], null, null, NOW);
+  commitResponse(database, owner, { id: collectionId, folder_node_id: folderNodeId }, { id: deptId, name: 'HR' }, [staged('old.txt', 200)], null, null, NOW);
   const second = commitResponse(database, owner, { id: collectionId, folder_node_id: folderNodeId }, { id: deptId, name: 'HR' }, [staged('new.txt', 30)], 'updated', null, NOW + 1);
 
-  // The prior file's storage_path is reported for the caller to unlink.
-  expect(second.removedStoragePaths).toEqual([`${owner}/${first.committed[0].nodeId}`]);
+  // removedStoragePaths must never include a storage_path that a committed new
+  // file now occupies. `nodes.id` has no AUTOINCREMENT, so SQLite can hand the
+  // replacement the just-freed rowid → the SAME storage_path; if that path were
+  // returned for unlink, the route would delete the blob it just wrote (Defect
+  // A). Here the single prior file's rowid is reused by new.txt, so there is
+  // nothing safe to unlink.
+  const committedNewPaths = new Set(second.committed.map((cf) => `${owner}/${cf.nodeId}`));
+  expect(second.removedStoragePaths.filter((p) => committedNewPaths.has(p))).toEqual([]);
   const rows = database.prepare('SELECT COUNT(*) n FROM collection_responses WHERE collection_id=? AND department_id=?').get(collectionId, deptId) as { n: number };
   expect(rows.n).toBe(1);
   const sub = (database.prepare('SELECT folder_node_id f FROM collection_responses WHERE collection_id=? AND department_id=?').get(collectionId, deptId) as { f: number }).f;

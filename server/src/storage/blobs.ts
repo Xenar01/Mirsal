@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream, mkdirSync, renameSync, unlinkSync } from 'node:fs';
 import type { ReadStream } from 'node:fs';
-import { mkdir, unlink } from 'node:fs/promises';
+import { mkdir, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { Transform } from 'node:stream';
@@ -18,6 +18,7 @@ export interface BlobStore {
   writeStreamToTemp(ownerId: string, stream: Readable, limitBytes: number): Promise<WriteResult>;
   commitTemp(tempPath: string, ownerId: string, nodeId: string): string;
   readBlob(storagePath: string): ReadStream;
+  blobExists(storagePath: string): Promise<boolean>;
   deleteBlob(storagePath: string): void;
 }
 
@@ -114,6 +115,23 @@ export function createBlobStore({ storageDir }: { storageDir: string }): BlobSto
     return createReadStream(abs);
   }
 
+  /**
+   * True if `storagePath`'s blob is present on disk. Cheap existence probe
+   * (`stat`, no fd held) used to pre-flight a `/zip` subtree so a missing blob
+   * (reverse-orphan) fails as a clean 404 instead of hanging the archiver on a
+   * source stream that errors after headers are sent.
+   */
+  async function blobExists(storagePath: string): Promise<boolean> {
+    const abs = assertUnderStorageDir(storagePath);
+    try {
+      await stat(abs);
+      return true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw err;
+    }
+  }
+
   function deleteBlob(storagePath: string): void {
     const abs = assertUnderStorageDir(storagePath);
     try {
@@ -124,7 +142,7 @@ export function createBlobStore({ storageDir }: { storageDir: string }): BlobSto
     }
   }
 
-  return { blobPathFor, writeStreamToTemp, commitTemp, readBlob, deleteBlob };
+  return { blobPathFor, writeStreamToTemp, commitTemp, readBlob, blobExists, deleteBlob };
 }
 
 let defaultStore: BlobStore | undefined;
@@ -158,6 +176,11 @@ export function commitTemp(tempPath: string, ownerId: string, nodeId: string): s
 /** Bare signature bound to a lazily-initialized default store (built from loadConfig() on first use). */
 export function readBlob(storagePath: string): ReadStream {
   return getDefaultStore().readBlob(storagePath);
+}
+
+/** Bare signature bound to a lazily-initialized default store (built from loadConfig() on first use). */
+export function blobExists(storagePath: string): Promise<boolean> {
+  return getDefaultStore().blobExists(storagePath);
 }
 
 /** Bare signature bound to a lazily-initialized default store (built from loadConfig() on first use). */

@@ -69,6 +69,11 @@ export function downloadUrl(id: number): string {
   return `/api/nodes/${id}/download`;
 }
 
+/** Same-origin URL for a folder's ZIP export — triggered via a plain anchor (owner-scoped subtree). */
+export function zipUrl(id: number): string {
+  return `/api/nodes/${id}/zip`;
+}
+
 /**
  * Machine-readable error code for a failed node call. The api client's
  * `ApiError.code` only mirrors a `{error:"..."}` body; several node endpoints
