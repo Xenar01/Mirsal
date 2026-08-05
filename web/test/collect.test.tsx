@@ -224,4 +224,51 @@ describe('CollectPage — public collect-intake page', () => {
     expect(await screen.findByText('100 MB max per file: huge.zip.')).toBeInTheDocument();
     expect(fetchMock.mock.calls.length).toBe(callsAfterLoad);
   });
+
+  test('submit with the department left at the placeholder → collect.departmentRequired renders and no POST fires', async () => {
+    setNavigatorLanguage('ar-SY');
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes('/submit')) return jsonResponse(200, { ok: true });
+      return jsonResponse(200, openMetaBody);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { container } = renderPage();
+    await screen.findByText('مسح الاحتياجات');
+
+    // A valid file is attached, but the department select is left at its
+    // empty placeholder — the JS guard (not native constraint validation)
+    // must be what stops the submit.
+    const fileInput = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File(['hello'], 'report.pdf', { type: 'application/pdf' });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    const callsBeforeSubmit = fetchMock.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'إرسال الرد' }));
+
+    expect(await screen.findByText('اختر القسم.')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.length).toBe(callsBeforeSubmit);
+  });
+
+  test('submit with zero files chosen → collect.filesRequired renders and no POST fires', async () => {
+    setNavigatorLanguage('ar-SY');
+    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
+      const u = String(url);
+      if (u.includes('/submit')) return jsonResponse(200, { ok: true });
+      return jsonResponse(200, openMetaBody);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderPage();
+    await screen.findByText('مسح الاحتياجات');
+
+    fireEvent.change(screen.getByLabelText('القسم'), { target: { value: '1' } });
+
+    const callsBeforeSubmit = fetchMock.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'إرسال الرد' }));
+
+    expect(await screen.findByText('أرفق ملفًا واحدًا على الأقل.')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.length).toBe(callsBeforeSubmit);
+  });
 });

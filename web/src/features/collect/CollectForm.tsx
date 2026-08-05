@@ -148,7 +148,6 @@ export default function CollectForm({ token, meta }: { token: string; meta: Coll
           id={departmentInputId}
           value={departmentId}
           onChange={(e) => setDepartmentId(e.target.value)}
-          required
           className="w-full rounded-lg border border-line bg-surface ps-3 pe-3 py-2 font-body text-sm text-ink"
         >
           <option value="">{t('collect.departmentPlaceholder')}</option>
