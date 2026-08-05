@@ -198,6 +198,17 @@ test('GET /s/<token> (dist present) -> 200 HTML shell with Referrer-Policy: no-r
   expect(res.body).toBe(SPA_MARKER);
 });
 
+test('GET /c/<token> (dist present) -> 200 HTML shell with Referrer-Policy: no-referrer', async () => {
+  const built = await makeApp({ webDist: makeDistDir() });
+
+  const res = await built.inject({ method: 'GET', url: '/c/anycollecttoken123' });
+
+  expect(res.statusCode).toBe(200);
+  expect(res.headers['content-type']).toMatch(/text\/html/);
+  expect(res.headers['referrer-policy']).toBe('no-referrer');
+  expect(res.body).toBe(SPA_MARKER);
+});
+
 test('GET /s/<token> (dist ABSENT) -> JSON 404 (unchanged fallback when the SPA is not built)', async () => {
   // Point at a non-existent dist dir so `distExists` is false — as it is on a
   // box where the frontend was never built.

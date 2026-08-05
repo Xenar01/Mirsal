@@ -4,6 +4,10 @@ import { z } from 'zod';
 export const MAX_FILE_BYTES = 104857600;
 /** Trash/auto-delete grace period (7 days), in milliseconds. */
 export const GRACE_MS = 604800000;
+/** Max files accepted in one collection response submission (spec §2.3). */
+export const COLLECTION_MAX_FILES_PER_RESPONSE = 10;
+/** Max length of the optional per-response note on a collection submission. */
+export const MAX_NOTE_LENGTH = 2000;
 
 const configSchema = z.object({
   DB_PATH: z.string().min(1, 'DB_PATH is required'),

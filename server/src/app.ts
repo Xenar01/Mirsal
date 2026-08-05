@@ -15,6 +15,8 @@ import authRoutes from './routes/auth.js';
 import adminRoutes from './routes/admin.js';
 import nodesRoutes from './routes/nodes.js';
 import sharesRoutes from './routes/shares.js';
+import collectionsRoutes from './routes/collections.js';
+import collectRoutes from './routes/collect.js';
 import publicRoutes from './routes/public.js';
 import { createPasswordService } from './auth/passwords.js';
 import { makeGuards } from './auth/guards.js';
@@ -118,11 +120,28 @@ async function registerRoutes(app: FastifyInstance, deps: AppDeps): Promise<void
   // H4: owner-scoped share management (requireAuth + CSRF via guard).
   await app.register(sharesRoutes, { db: deps.db, now: deps.now, guards, config: deps.config });
 
+  // Collections Phase 1: owner-scoped collection management (requireAuth +
+  // CSRF via guard). Shares the same `blobStore` instance as nodesRoutes
+  // above rather than constructing a second one.
+  await app.register(collectionsRoutes, { db: deps.db, now: deps.now, guards, config: deps.config, blobStore });
+
   // H4: the public access gate — NO auth, NO CSRF; every response under
   // `/api/public/*` gets `Referrer-Policy: no-referrer` (set inside the
   // plugin's own encapsulated onSend hook, so it never leaks onto the
   // authenticated routes above).
   await app.register(publicRoutes, {
+    db: deps.db,
+    now: deps.now,
+    passwordService,
+    blobStore,
+    config: deps.config,
+  });
+
+  // Collections Phase 2: the public intake gate — NO auth, NO CSRF; token-in-URL.
+  // Same shared passwordService + blobStore as the routes above. Its own
+  // encapsulated onSend hook stamps no-referrer + no-store (never leaks onto
+  // the authenticated routes).
+  await app.register(collectRoutes, {
     db: deps.db,
     now: deps.now,
     passwordService,
@@ -201,12 +220,14 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
   // Single catch-all: JSON 404 for unmatched /api/* (never let the SPA
   // fallback swallow API errors); index.html for other GETs so client-side
   // routing works; a plain JSON 404 otherwise (non-GET, or when the SPA hasn't
-  // been built yet). The public share page at /s/<token> (spec §3.5) is served
-  // from the SAME index.html shell, but its HTML document additionally carries
-  // `Referrer-Policy: no-referrer` so the secret token never leaks via a
-  // `Referer` header on outbound navigations. (The `/api/public/*` JSON
-  // endpoints set that header via the public plugin's own onSend hook; this is
-  // the header for the HTML document itself.)
+  // been built yet). The token-bearing public shells — the share page at
+  // /s/<token> (spec §3.5) and the collection intake page at /c/<token>
+  // (Collections Phase 2) — are served from the SAME index.html shell, but
+  // their HTML documents additionally carry `Referrer-Policy: no-referrer` so
+  // the secret token never leaks via a `Referer` header on outbound
+  // navigations. (The `/api/public/*` and `/api/collect/*` JSON endpoints set
+  // that header via their own onSend hooks; this is the header for the HTML
+  // document itself.)
   app.setNotFoundHandler((req, reply) => {
     const pathname = req.url.split('?')[0];
 
@@ -216,7 +237,7 @@ export async function buildApp(deps: AppDeps): Promise<FastifyInstance> {
     }
 
     if (distExists && req.method === 'GET') {
-      if (pathname.startsWith('/s/')) {
+      if (pathname.startsWith('/s/') || pathname.startsWith('/c/')) {
         reply.header('Referrer-Policy', 'no-referrer');
       }
       reply.sendFile('index.html');

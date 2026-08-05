@@ -21,6 +21,7 @@ import { useAuth } from '../auth/auth-context';
 const NAV_ITEMS: ReadonlyArray<{ to: string; end?: boolean; key: string }> = [
   { to: '/', end: true, key: 'dashboard.nav.myFiles' },
   { to: '/shared', key: 'dashboard.nav.shared' },
+  { to: '/collections', key: 'dashboard.nav.collections' },
   { to: '/trash', key: 'dashboard.nav.trash' },
 ];
 

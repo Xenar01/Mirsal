@@ -159,14 +159,14 @@ describe('migrate v2 download-limit columns', () => {
     db.prepare('INSERT INTO schema_version(version, applied_at) VALUES (1, 0)').run();
     migrate(db);
     expect(cols(db)).toEqual(expect.arrayContaining(['download_limit', 'download_count', 'on_exhaust']));
-    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
   });
 
   it('a fresh DB has the columns and lands at the latest version', () => {
     const db = new Database(':memory:');
     migrate(db);
     expect(cols(db)).toEqual(expect.arrayContaining(['download_limit', 'download_count', 'on_exhaust']));
-    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
   });
 
   it('fresh and upgraded shares schemas converge (identical table_info)', () => {
@@ -194,7 +194,7 @@ describe('migrate v2 download-limit columns', () => {
     db.exec(V1_USERS);
     migrate(db);
     expect(cols(db)).toEqual(expect.arrayContaining(['download_limit']));
-    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
   });
 });
 
@@ -223,7 +223,7 @@ describe('migrate v3 users.display_name column', () => {
     const db = new Database(':memory:');
     migrate(db);
     expect(userCols(db)).toContain('display_name');
-    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
   });
 
   it('adds display_name to a v2 DB and records version 3', () => {
@@ -233,7 +233,7 @@ describe('migrate v3 users.display_name column', () => {
     db.prepare('INSERT INTO schema_version(version, applied_at) VALUES (2, 0)').run();
     migrate(db);
     expect(userCols(db)).toContain('display_name');
-    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
   });
 
   it('fresh and upgraded users schemas converge (identical table_info)', () => {
@@ -251,6 +251,66 @@ describe('migrate v3 users.display_name column', () => {
   it('is idempotent across repeated boots at v3', () => {
     const db = new Database(':memory:'); migrate(db);
     expect(() => { migrate(db); migrate(db); }).not.toThrow();
-    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(3);
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
+  });
+});
+
+function tableNames(db: Database.Database): string[] {
+  return (db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[])
+    .map((r) => r.name);
+}
+
+describe('migrate v4 collections tables', () => {
+  it('a fresh DB has the three collections tables and lands at version 4', () => {
+    const db = new Database(':memory:');
+    migrate(db);
+    const names = tableNames(db);
+    expect(names).toEqual(
+      expect.arrayContaining(['collections', 'collection_departments', 'collection_responses'])
+    );
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
+  });
+
+  it('adds the three tables to a v3 DB and records version 4', () => {
+    const db = new Database(':memory:');
+    // v3 baseline: has users (+display_name) and shares, version row = 3.
+    db.exec(V1_SHARES);
+    db.exec(V2_USERS);
+    db.exec('ALTER TABLE users ADD COLUMN display_name TEXT');
+    db.exec('ALTER TABLE shares ADD COLUMN download_limit INTEGER');
+    db.exec('ALTER TABLE shares ADD COLUMN download_count INTEGER NOT NULL DEFAULT 0');
+    db.exec("ALTER TABLE shares ADD COLUMN on_exhaust TEXT NOT NULL DEFAULT 'delete'");
+    db.exec('CREATE TABLE schema_version(version INTEGER NOT NULL, applied_at INTEGER NOT NULL)');
+    db.prepare('INSERT INTO schema_version(version, applied_at) VALUES (3, 0)').run();
+    migrate(db);
+    expect(tableNames(db)).toEqual(
+      expect.arrayContaining(['collections', 'collection_departments', 'collection_responses'])
+    );
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
+  });
+
+  it('fresh and upgraded collections schemas converge (identical sqlite_master DDL)', () => {
+    const fresh = new Database(':memory:');
+    migrate(fresh);
+    const upgraded = new Database(':memory:');
+    upgraded.exec(V1_SHARES);
+    upgraded.exec(V1_USERS);
+    upgraded.exec('CREATE TABLE schema_version(version INTEGER NOT NULL, applied_at INTEGER NOT NULL)');
+    upgraded.prepare('INSERT INTO schema_version(version, applied_at) VALUES (1, 0)').run();
+    migrate(upgraded);
+    const ddl = (db: Database.Database) =>
+      (db
+        .prepare(
+          "SELECT sql FROM sqlite_master WHERE name IN ('collections','collection_departments','collection_responses') ORDER BY name"
+        )
+        .all() as { sql: string }[]).map((r) => r.sql);
+    expect(ddl(fresh)).toEqual(ddl(upgraded));
+  });
+
+  it('is idempotent at v4', () => {
+    const db = new Database(':memory:');
+    migrate(db);
+    expect(() => { migrate(db); migrate(db); }).not.toThrow();
+    expect((db.prepare('SELECT MAX(version) v FROM schema_version').get() as { v: number }).v).toBe(4);
   });
 });
