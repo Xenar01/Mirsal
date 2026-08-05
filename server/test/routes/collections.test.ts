@@ -140,6 +140,12 @@ test('POST /api/collections -> 201 detail with /c/<token> url, open status, depa
   expect(c.departments.map((d: any) => d.name)).toEqual(['HR', 'Finance', 'IT']);
   expect(c.departments.every((d: any) => d.responded === false)).toBe(true);
 
+  // The collection's own root folder node (whole-collection ZIP target) —
+  // must match the folder_node_id actually persisted on the collections row.
+  const row = db!.prepare('SELECT folder_node_id FROM collections WHERE id = ?').get(c.id) as { folder_node_id: number };
+  expect(typeof c.folder_node_id).toBe('number');
+  expect(c.folder_node_id).toBe(row.folder_node_id);
+
   const list = (await built.inject({ method: 'GET', url: '/api/collections', cookies: { mirsal_session: session } })).json();
   expect(list.some((x: any) => x.id === c.id && x.department_count === 3)).toBe(true);
 });
