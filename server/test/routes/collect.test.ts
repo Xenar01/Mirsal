@@ -460,6 +460,32 @@ test('submit latest-replaces with rowid reuse keeps every surviving file blob (D
   expect(current.map((f) => f.name).sort()).toEqual(['a.txt', 'c1.txt', 'c2.txt']);
 });
 
+test('end-to-end: collect submissions (incl. latest-replaces) are downloadable as a ZIP by the owner', async () => {
+  const built = await makeApp();
+  await seedUser('alice');
+  const { session, csrf } = await login(built, 'alice');
+  const c = await makeCollection(built, session, csrf, { title: 'T', departments: ['HR', 'Finance'] });
+  const [hr, fin] = deptIds(c.id);
+
+  await submit(built, c.token, [{ name: 'departmentId', value: String(hr.id) }, { name: 'files', filename: 'hr.txt', data: Buffer.from('HR-REPORT') }]);
+  await submit(built, c.token, [{ name: 'departmentId', value: String(fin.id) }, { name: 'files', filename: 'fin.txt', data: Buffer.from('FIN-REPORT') }]);
+  // Finance corrects its submission (latest-replaces — the reused-rowid path).
+  await submit(built, c.token, [{ name: 'departmentId', value: String(fin.id) }, { name: 'files', filename: 'fin-v2.txt', data: Buffer.from('FIN-REVISED') }]);
+
+  const folderId = (db!.prepare('SELECT folder_node_id f FROM collections WHERE id=?').get(c.id) as { f: number }).f;
+
+  // Owner zips the whole collection folder. This is the cross-task path Phase 4
+  // exists to serve; it also proves the fixes together — a Defect-A blob loss on
+  // the Finance replace would make /zip hang (Defect B), not stream a real zip.
+  const zip = await built.inject({ method: 'GET', url: `/api/nodes/${folderId}/zip`, cookies: { mirsal_session: session } });
+  expect(zip.statusCode).toBe(200);
+  expect(zip.headers['content-type']).toBe('application/zip');
+  const sig = Buffer.from([0x50, 0x4b, 0x03, 0x04]); // "PK\x03\x04" local-file-header
+  let entries = 0;
+  for (let i = 0; i + 4 <= zip.rawPayload.length; i++) if (zip.rawPayload.subarray(i, i + 4).equals(sig)) entries++;
+  expect(entries).toBeGreaterThanOrEqual(2); // hr.txt + fin-v2.txt, both intact on disk
+}, 10_000);
+
 test('submit rejects: wrong department -> 404; closed -> 404; non-multipart -> 415; password locked -> 401', async () => {
   const built = await makeApp();
   await seedUser('alice');
